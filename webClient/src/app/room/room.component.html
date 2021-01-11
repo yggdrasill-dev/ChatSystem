@@ -1,0 +1,26 @@
+<div class="history">
+  <ul>
+    <li *ngFor="let msg of history">{{msg}}</li>
+  </ul>
+</div>
+<div class="toolbar">
+  <ul id="status">
+    <li>
+      users:
+      <select name="users" id="usersList">
+        <option value="*">
+          all
+        </option>
+      </select>
+    </li>
+    <li>
+      name:
+      <span id="name">{{name | async}}</span>
+    </li>
+    <li>
+      room:
+      <span id="room">{{channelName | async}}</span>
+    </li>
+  </ul>
+  <input tabindex="1" type="text" class="entry" (keypress)="keypress($event)" [(ngModel)]="entryMessage" />
+</div>

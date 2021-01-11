@@ -1,4 +1,5 @@
 ﻿using ChatConnector.Protos;
+using Google.Protobuf;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using System;
@@ -40,13 +41,23 @@ namespace ChatConnector
 			return ValueTask.CompletedTask;
 		}
 
-		public ValueTask OnReceiveAsync(HttpContext httpContext, WebSocket socket, ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken)
+		public async ValueTask OnReceiveAsync(HttpContext httpContext, WebSocket socket, ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken)
 		{
 			var msg = ChatMessage.Parser.ParseFrom(new ReadOnlySequence<byte>(buffer));
 
 			m_Logger.LogInformation($"receive subject: {msg.Subject}, payload: {msg.Payload.ToStringUtf8()}");
 
-			return ValueTask.CompletedTask;
+			var replyMsg = new ChatMessage
+			{
+				Subject = "chat.reply",
+				Payload = ByteString.CopyFromUtf8("Hello")
+			};
+
+			await socket.SendAsync(
+				replyMsg.ToByteArray(),
+				WebSocketMessageType.Binary,
+				true,
+				cancellationToken).ConfigureAwait(false);
 		}
 	}
 }

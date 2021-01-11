@@ -1,0 +1,47 @@
+.login-view {
+  width: 100%;
+  font-size: 13pt;
+  overflow: hidden;
+
+  .login-title {
+    width: 100%;
+    margin-top: 150px;
+    font-size: 50pt;
+    text-align: center;
+  }
+
+  input[type="text"] {
+    height: 30px;
+    width: 270px;
+    font-size: inherit;
+    margin-left: 15px;
+  }
+
+  button {
+    height: 30px;
+    width: 90px;
+    font-size: inherit;
+  }
+
+  table {
+    width: 100%;
+    height: 100%;
+    margin-top: 10%;
+
+    tr {
+      text-align: center;
+      height: 50%;
+
+      td {
+        padding-top: 25px;
+      }
+
+      .login-error {
+        text-align: center;
+        font-size: 16pt;
+        color: #ff0000;
+        margin-top: 15px;
+      }
+    }
+  }
+}

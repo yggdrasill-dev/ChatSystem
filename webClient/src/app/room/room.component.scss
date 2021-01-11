@@ -1,0 +1,49 @@
+@import '../../styles/common.scss';
+
+.history {
+  padding-bottom: 5.1em;
+
+  ul {
+    list-style: none;
+  }
+}
+
+.toolbar {
+  .entry {
+    @include theme-color;
+  }
+
+  position: fixed;
+  width: 100%;
+  bottom: 0;
+  background: #007077;
+
+  ul {
+    margin: 0;
+    padding: 5px 0 0 6px;
+    height: 35px;
+    list-style: none;
+  }
+
+  li {
+    display: block;
+    float: left;
+    margin: 0 2em 0 0;
+  }
+
+  select {
+    width: 100px;
+    height: 30px;
+    font-size: inherit;
+  }
+
+  .entry {
+    width: 100%;
+    font-size: inherit;
+    padding: 1em;
+    margin: 0;
+    border-width: 0;
+    outline-width: 0;
+    clear: both;
+  }
+}

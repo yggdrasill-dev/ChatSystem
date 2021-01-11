@@ -1,0 +1,9 @@
+syntax = "proto3";
+
+option csharp_namespace = "SessionServer.Protos";
+package session;
+
+message PlayerRegistration {
+	string sessionId = 1;
+	string name = 2;
+}
