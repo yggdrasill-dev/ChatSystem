@@ -2,6 +2,7 @@ import { Router } from '@angular/router';
 import { Observable, Subscription } from 'rxjs';
 import { ChatClientService } from './../services/chat-client.service';
 import { Component, OnDestroy, OnInit } from '@angular/core';
+import { chat } from 'src/protos';
 
 @Component({
 	selector: 'app-room',
@@ -42,8 +43,14 @@ export class RoomComponent implements OnInit, OnDestroy {
 
 		let message = this.entryMessage;
 
-		if (message?.length > 0)
-			this.m_ChatClient.send("chat.test", message);
+		if (message?.length > 0) {
+			let packet = chat.ChatContent.create({
+				scope: chat.Scope.ROOM,
+				message
+			});
+
+			this.m_ChatClient.send("chat.send", chat.ChatContent.encode(packet).finish());
+		}
 
 		this.entryMessage = "";
 	}

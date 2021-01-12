@@ -25,6 +25,279 @@
          */
         var chat = {};
     
+        /**
+         * Scope enum.
+         * @name chat.Scope
+         * @enum {number}
+         * @property {number} NONE=0 NONE value
+         * @property {number} PERSON=1 PERSON value
+         * @property {number} ROOM=2 ROOM value
+         * @property {number} SYSTEM=3 SYSTEM value
+         */
+        chat.Scope = (function() {
+            var valuesById = {}, values = Object.create(valuesById);
+            values[valuesById[0] = "NONE"] = 0;
+            values[valuesById[1] = "PERSON"] = 1;
+            values[valuesById[2] = "ROOM"] = 2;
+            values[valuesById[3] = "SYSTEM"] = 3;
+            return values;
+        })();
+    
+        chat.ChatContent = (function() {
+    
+            /**
+             * Properties of a ChatContent.
+             * @memberof chat
+             * @interface IChatContent
+             * @property {chat.Scope|null} [scope] ChatContent scope
+             * @property {string|null} [message] ChatContent message
+             * @property {string|null} [target] ChatContent target
+             */
+    
+            /**
+             * Constructs a new ChatContent.
+             * @memberof chat
+             * @classdesc Represents a ChatContent.
+             * @implements IChatContent
+             * @constructor
+             * @param {chat.IChatContent=} [properties] Properties to set
+             */
+            function ChatContent(properties) {
+                if (properties)
+                    for (var keys = Object.keys(properties), i = 0; i < keys.length; ++i)
+                        if (properties[keys[i]] != null)
+                            this[keys[i]] = properties[keys[i]];
+            }
+    
+            /**
+             * ChatContent scope.
+             * @member {chat.Scope} scope
+             * @memberof chat.ChatContent
+             * @instance
+             */
+            ChatContent.prototype.scope = 0;
+    
+            /**
+             * ChatContent message.
+             * @member {string} message
+             * @memberof chat.ChatContent
+             * @instance
+             */
+            ChatContent.prototype.message = "";
+    
+            /**
+             * ChatContent target.
+             * @member {string} target
+             * @memberof chat.ChatContent
+             * @instance
+             */
+            ChatContent.prototype.target = "";
+    
+            /**
+             * Creates a new ChatContent instance using the specified properties.
+             * @function create
+             * @memberof chat.ChatContent
+             * @static
+             * @param {chat.IChatContent=} [properties] Properties to set
+             * @returns {chat.ChatContent} ChatContent instance
+             */
+            ChatContent.create = function create(properties) {
+                return new ChatContent(properties);
+            };
+    
+            /**
+             * Encodes the specified ChatContent message. Does not implicitly {@link chat.ChatContent.verify|verify} messages.
+             * @function encode
+             * @memberof chat.ChatContent
+             * @static
+             * @param {chat.IChatContent} message ChatContent message or plain object to encode
+             * @param {$protobuf.Writer} [writer] Writer to encode to
+             * @returns {$protobuf.Writer} Writer
+             */
+            ChatContent.encode = function encode(message, writer) {
+                if (!writer)
+                    writer = $Writer.create();
+                if (message.scope != null && Object.hasOwnProperty.call(message, "scope"))
+                    writer.uint32(/* id 1, wireType 0 =*/8).int32(message.scope);
+                if (message.message != null && Object.hasOwnProperty.call(message, "message"))
+                    writer.uint32(/* id 2, wireType 2 =*/18).string(message.message);
+                if (message.target != null && Object.hasOwnProperty.call(message, "target"))
+                    writer.uint32(/* id 3, wireType 2 =*/26).string(message.target);
+                return writer;
+            };
+    
+            /**
+             * Encodes the specified ChatContent message, length delimited. Does not implicitly {@link chat.ChatContent.verify|verify} messages.
+             * @function encodeDelimited
+             * @memberof chat.ChatContent
+             * @static
+             * @param {chat.IChatContent} message ChatContent message or plain object to encode
+             * @param {$protobuf.Writer} [writer] Writer to encode to
+             * @returns {$protobuf.Writer} Writer
+             */
+            ChatContent.encodeDelimited = function encodeDelimited(message, writer) {
+                return this.encode(message, writer).ldelim();
+            };
+    
+            /**
+             * Decodes a ChatContent message from the specified reader or buffer.
+             * @function decode
+             * @memberof chat.ChatContent
+             * @static
+             * @param {$protobuf.Reader|Uint8Array} reader Reader or buffer to decode from
+             * @param {number} [length] Message length if known beforehand
+             * @returns {chat.ChatContent} ChatContent
+             * @throws {Error} If the payload is not a reader or valid buffer
+             * @throws {$protobuf.util.ProtocolError} If required fields are missing
+             */
+            ChatContent.decode = function decode(reader, length) {
+                if (!(reader instanceof $Reader))
+                    reader = $Reader.create(reader);
+                var end = length === undefined ? reader.len : reader.pos + length, message = new $root.chat.ChatContent();
+                while (reader.pos < end) {
+                    var tag = reader.uint32();
+                    switch (tag >>> 3) {
+                    case 1:
+                        message.scope = reader.int32();
+                        break;
+                    case 2:
+                        message.message = reader.string();
+                        break;
+                    case 3:
+                        message.target = reader.string();
+                        break;
+                    default:
+                        reader.skipType(tag & 7);
+                        break;
+                    }
+                }
+                return message;
+            };
+    
+            /**
+             * Decodes a ChatContent message from the specified reader or buffer, length delimited.
+             * @function decodeDelimited
+             * @memberof chat.ChatContent
+             * @static
+             * @param {$protobuf.Reader|Uint8Array} reader Reader or buffer to decode from
+             * @returns {chat.ChatContent} ChatContent
+             * @throws {Error} If the payload is not a reader or valid buffer
+             * @throws {$protobuf.util.ProtocolError} If required fields are missing
+             */
+            ChatContent.decodeDelimited = function decodeDelimited(reader) {
+                if (!(reader instanceof $Reader))
+                    reader = new $Reader(reader);
+                return this.decode(reader, reader.uint32());
+            };
+    
+            /**
+             * Verifies a ChatContent message.
+             * @function verify
+             * @memberof chat.ChatContent
+             * @static
+             * @param {Object.<string,*>} message Plain object to verify
+             * @returns {string|null} `null` if valid, otherwise the reason why it is not
+             */
+            ChatContent.verify = function verify(message) {
+                if (typeof message !== "object" || message === null)
+                    return "object expected";
+                if (message.scope != null && message.hasOwnProperty("scope"))
+                    switch (message.scope) {
+                    default:
+                        return "scope: enum value expected";
+                    case 0:
+                    case 1:
+                    case 2:
+                    case 3:
+                        break;
+                    }
+                if (message.message != null && message.hasOwnProperty("message"))
+                    if (!$util.isString(message.message))
+                        return "message: string expected";
+                if (message.target != null && message.hasOwnProperty("target"))
+                    if (!$util.isString(message.target))
+                        return "target: string expected";
+                return null;
+            };
+    
+            /**
+             * Creates a ChatContent message from a plain object. Also converts values to their respective internal types.
+             * @function fromObject
+             * @memberof chat.ChatContent
+             * @static
+             * @param {Object.<string,*>} object Plain object
+             * @returns {chat.ChatContent} ChatContent
+             */
+            ChatContent.fromObject = function fromObject(object) {
+                if (object instanceof $root.chat.ChatContent)
+                    return object;
+                var message = new $root.chat.ChatContent();
+                switch (object.scope) {
+                case "NONE":
+                case 0:
+                    message.scope = 0;
+                    break;
+                case "PERSON":
+                case 1:
+                    message.scope = 1;
+                    break;
+                case "ROOM":
+                case 2:
+                    message.scope = 2;
+                    break;
+                case "SYSTEM":
+                case 3:
+                    message.scope = 3;
+                    break;
+                }
+                if (object.message != null)
+                    message.message = String(object.message);
+                if (object.target != null)
+                    message.target = String(object.target);
+                return message;
+            };
+    
+            /**
+             * Creates a plain object from a ChatContent message. Also converts values to other types if specified.
+             * @function toObject
+             * @memberof chat.ChatContent
+             * @static
+             * @param {chat.ChatContent} message ChatContent
+             * @param {$protobuf.IConversionOptions} [options] Conversion options
+             * @returns {Object.<string,*>} Plain object
+             */
+            ChatContent.toObject = function toObject(message, options) {
+                if (!options)
+                    options = {};
+                var object = {};
+                if (options.defaults) {
+                    object.scope = options.enums === String ? "NONE" : 0;
+                    object.message = "";
+                    object.target = "";
+                }
+                if (message.scope != null && message.hasOwnProperty("scope"))
+                    object.scope = options.enums === String ? $root.chat.Scope[message.scope] : message.scope;
+                if (message.message != null && message.hasOwnProperty("message"))
+                    object.message = message.message;
+                if (message.target != null && message.hasOwnProperty("target"))
+                    object.target = message.target;
+                return object;
+            };
+    
+            /**
+             * Converts this ChatContent to JSON.
+             * @function toJSON
+             * @memberof chat.ChatContent
+             * @instance
+             * @returns {Object.<string,*>} JSON object
+             */
+            ChatContent.prototype.toJSON = function toJSON() {
+                return this.constructor.toObject(this, $protobuf.util.toJSONOptions);
+            };
+    
+            return ChatContent;
+        })();
+    
         chat.ChatMessage = (function() {
     
             /**

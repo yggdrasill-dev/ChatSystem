@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+option csharp_namespace = "Chat.Protos";
+package chat;
+
+enum Scope {
+    NONE = 0;
+    PERSON = 1;
+    ROOM = 2;
+    SYSTEM = 3;
+}
+
+message ChatContent {
+    Scope scope = 1;
+    string message = 2;
+    string target = 3;
+}

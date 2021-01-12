@@ -1,7 +1,7 @@
 import { ChatClientService } from './../services/chat-client.service';
-import { Component, Input, OnInit, Output } from '@angular/core';
-import { chat } from '../../protos/bundle';
-import { ActivatedRoute, Router } from '@angular/router';
+import { Component, OnInit } from '@angular/core';
+import { chat } from '../../protos';
+import { Router } from '@angular/router';
 
 @Component({
 	selector: 'app-login',

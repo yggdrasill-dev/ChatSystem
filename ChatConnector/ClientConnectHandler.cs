@@ -1,13 +1,13 @@
-﻿using ChatConnector.Protos;
-using Google.Protobuf;
-using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.Logging;
-using NATS.Client;
-using System;
+﻿using System;
 using System.Buffers;
 using System.Net.WebSockets;
 using System.Threading;
 using System.Threading.Tasks;
+using Chat.Protos;
+using Google.Protobuf;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging;
+using NATS.Client;
 using Valhalla.WebSockets;
 
 namespace ChatConnector
@@ -54,7 +54,7 @@ namespace ChatConnector
 			{
 				var loginInfo = LoginRegistration.Parser.ParseFrom(msg.Payload);
 
-				var registration = new SessionServer.Protos.PlayerRegistration
+				var registration = new PlayerRegistration
 				{
 					SessionId = httpContext.TraceIdentifier,
 					Name = loginInfo.Name
@@ -62,7 +62,15 @@ namespace ChatConnector
 				await m_Connection.RequestAsync("session.register", registration.ToByteArray()).ConfigureAwait(false);
 			}
 			else
-				m_Connection.Publish(msg.Subject, msg.Payload.ToByteArray());
+			{
+				var packet = new QueuePacket
+				{
+					SessionId = httpContext.TraceIdentifier,
+					Payload = msg.Payload
+				};
+
+				m_Connection.Publish(msg.Subject, packet.ToByteArray());
+			}
 
 			//var replyMsg = new ChatMessage
 			//{
