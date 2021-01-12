@@ -1,6 +1,7 @@
 ﻿using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.DependencyInjection;
 using STAN.Client;
+using NATS.Client;
 
 namespace SessionServer
 {
@@ -16,7 +17,7 @@ namespace SessionServer
 				.ConfigureServices(services =>
 				{
 					services
-						.AddSingleton<StanConnectionFactory>()
+						.AddSingleton<ConnectionFactory>()
 						.AddHostedService<MessageBackground>();
 				});
 	}

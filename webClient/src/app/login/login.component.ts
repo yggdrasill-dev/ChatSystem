@@ -1,6 +1,6 @@
 import { ChatClientService } from './../services/chat-client.service';
 import { Component, Input, OnInit, Output } from '@angular/core';
-import { chat } from '../../protos/chat';
+import { chat } from '../../protos/bundle';
 import { ActivatedRoute, Router } from '@angular/router';
 
 @Component({
@@ -24,6 +24,12 @@ export class LoginComponent implements OnInit {
 
 		await this.m_ChatClient.open(this.name, this.channelName);
 		// this.m_ChatClient.send("chat.test", "hello test");
+
+		var loginMsg = new chat.LoginRegistration({
+			name: this.name,
+			channel: this.channelName
+		});
+		this.m_ChatClient.send("connect.register", chat.LoginRegistration.encode(loginMsg).finish());
 
 		this.m_Router.navigate(['/room']);
 	}

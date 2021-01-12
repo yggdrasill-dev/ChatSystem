@@ -1,6 +1,6 @@
 import { Injectable } from '@angular/core';
 import { BehaviorSubject, Observable, ReplaySubject, Subject } from 'rxjs';
-import { chat } from '../../protos/chat';
+import { chat } from '../../protos/bundle';
 
 @Injectable({
 	providedIn: 'root'
@@ -56,13 +56,23 @@ export class ChatClientService {
 				};
 			});
 	}
+	send(subject: string, message: string | Uint8Array): void {
+		if (typeof message === "string") {
+			const msg = chat.ChatMessage.create({
+				subject,
+				payload: this.m_Encoder.encode(message)
+			});
 
-	send(subject: string, message: string): void {
-		const msg = chat.ChatMessage.create({
-			subject,
-			payload: this.m_Encoder.encode(message)
-		});
+			this.m_Socket.send(chat.ChatMessage.encode(msg).finish());
+		}
 
-		this.m_Socket.send(chat.ChatMessage.encode(msg).finish());
+		if (message instanceof Uint8Array) {
+			const msg = chat.ChatMessage.create({
+				subject,
+				payload: message
+			});
+
+			this.m_Socket.send(chat.ChatMessage.encode(msg).finish());
+		}
 	}
 }

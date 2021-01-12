@@ -1,9 +1,11 @@
 ﻿using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using NATS.Client;
 using SessionServer.Protos;
 using STAN.Client;
 using System;
 using System.Collections.Concurrent;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -11,19 +13,18 @@ namespace SessionServer
 {
 	class MessageBackground : BackgroundService
 	{
-		private readonly IStanConnection m_StanConnection;
+		private readonly IConnection m_Connection;
 		private readonly ConcurrentDictionary<string, string> m_Sessions = new ConcurrentDictionary<string, string>();
 		private readonly ILogger<MessageBackground> m_Logger;
 
-		public MessageBackground(StanConnectionFactory connectionFactory, ILogger<MessageBackground> logger)
+		public MessageBackground(ConnectionFactory connectionFactory, ILogger<MessageBackground> logger)
 		{
-			var opts = StanOptions.GetDefaultOptions();
-			m_StanConnection = connectionFactory.CreateConnection("test-cluster", Guid.NewGuid().ToString(), opts);
+			m_Connection = connectionFactory.CreateConnection();
 			m_Logger = logger;
 		}
 		protected override Task ExecuteAsync(CancellationToken stoppingToken)
 		{
-			m_StanConnection.Subscribe("session.register", "registration", (sender, args) =>
+			m_Connection.SubscribeAsync("session.register", "registration", (sender, args) =>
 			{
 				var registration = PlayerRegistration.Parser.ParseFrom(args.Message.Data);
 
@@ -31,6 +32,8 @@ namespace SessionServer
 					registration.SessionId,
 					registration.Name,
 					(added, existing) => added);
+
+				m_Connection.Publish(args.Message.Reply, Encoding.UTF8.GetBytes("registered"));
 
 				m_Logger.LogInformation($"({registration.SessionId}, {registration.Name}) registered.");
 			});

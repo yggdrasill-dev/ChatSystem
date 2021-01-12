@@ -5,20 +5,22 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <None Remove="Protos\chatMessage.proto" />
-  </ItemGroup>
-
-  <ItemGroup>
     <PackageReference Include="Google.Protobuf" Version="3.14.0" />
     <PackageReference Include="Grpc.Tools" Version="2.34.0">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
+    <PackageReference Include="NATS.Client" Version="0.11.0" />
     <PackageReference Include="ValhallaWebSockets" Version="0.0.6" />
   </ItemGroup>
 
   <ItemGroup>
-    <Protobuf Include="Protos\chatMessage.proto" GrpcServices="None" Access="Internal" />
+    <Protobuf Include="..\protos\chatMessage.proto" GrpcServices="None" Access="Internal">
+      <Link>Protos\chatMessage.proto</Link>
+    </Protobuf>
+    <Protobuf Include="..\protos\session.proto" GrpcServices="None" Access="Internal">
+      <Link>Protos\session.proto</Link>
+    </Protobuf>
   </ItemGroup>
 
 </Project>

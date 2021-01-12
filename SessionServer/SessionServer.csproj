@@ -21,7 +21,13 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Protobuf Include="Protos\session.proto" GrpcServices="None" Access="Internal" />
+    <Folder Include="Protos\" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Protobuf Include="..\protos\session.proto" Access="Internal" GrpcServices="None">
+      <Link>Protos\session.proto</Link>
+    </Protobuf>
   </ItemGroup>
 
 </Project>

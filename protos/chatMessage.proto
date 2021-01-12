@@ -1,9 +1,14 @@
 syntax = "proto3";
 
-package chat;
 option csharp_namespace = "ChatConnector.Protos";
+package chat;
 
 message ChatMessage {
 	string subject = 1;
 	bytes payload = 2;
+}
+
+message LoginRegistration {
+	string name = 1;
+	string channel = 2;
 }

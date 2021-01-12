@@ -2,6 +2,7 @@
 using Google.Protobuf;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
+using NATS.Client;
 using System;
 using System.Buffers;
 using System.Net.WebSockets;
@@ -13,10 +14,12 @@ namespace ChatConnector
 {
 	public class ClientConnectHandler : IWebSocketConnectionHandler
 	{
+		private readonly IConnection m_Connection;
 		private readonly ILogger<ClientConnectHandler> m_Logger;
 
-		public ClientConnectHandler(ILogger<ClientConnectHandler> logger)
+		public ClientConnectHandler(ConnectionFactory connectionFactory, ILogger<ClientConnectHandler> logger)
 		{
+			m_Connection = connectionFactory.CreateConnection();
 			m_Logger = logger ?? throw new ArgumentNullException(nameof(logger));
 		}
 
@@ -45,19 +48,33 @@ namespace ChatConnector
 		{
 			var msg = ChatMessage.Parser.ParseFrom(new ReadOnlySequence<byte>(buffer));
 
-			m_Logger.LogInformation($"receive subject: {msg.Subject}, payload: {msg.Payload.ToStringUtf8()}");
+			m_Logger.LogInformation($"receive subject: {msg.Subject}");
 
-			var replyMsg = new ChatMessage
+			if (msg.Subject == "connect.register")
 			{
-				Subject = "chat.reply",
-				Payload = ByteString.CopyFromUtf8("Hello")
-			};
+				var loginInfo = LoginRegistration.Parser.ParseFrom(msg.Payload);
 
-			await socket.SendAsync(
-				replyMsg.ToByteArray(),
-				WebSocketMessageType.Binary,
-				true,
-				cancellationToken).ConfigureAwait(false);
+				var registration = new SessionServer.Protos.PlayerRegistration
+				{
+					SessionId = httpContext.TraceIdentifier,
+					Name = loginInfo.Name
+				};
+				await m_Connection.RequestAsync("session.register", registration.ToByteArray()).ConfigureAwait(false);
+			}
+			else
+				m_Connection.Publish(msg.Subject, msg.Payload.ToByteArray());
+
+			//var replyMsg = new ChatMessage
+			//{
+			//	Subject = "chat.reply",
+			//	Payload = ByteString.CopyFromUtf8("Hello")
+			//};
+
+			//await socket.SendAsync(
+			//	replyMsg.ToByteArray(),
+			//	WebSocketMessageType.Binary,
+			//	true,
+			//	cancellationToken).ConfigureAwait(false);
 		}
 	}
 }
