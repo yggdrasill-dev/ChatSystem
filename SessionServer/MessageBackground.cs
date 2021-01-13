@@ -1,7 +1,7 @@
-﻿using Microsoft.Extensions.Hosting;
+﻿using Chat.Protos;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using NATS.Client;
-using SessionServer.Protos;
 using STAN.Client;
 using System;
 using System.Collections.Concurrent;
