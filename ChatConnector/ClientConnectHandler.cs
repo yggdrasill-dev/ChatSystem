@@ -32,7 +32,7 @@ namespace ChatConnector
 
 		public ValueTask OnConnectedAsync(HttpContext httpContext, WebSocket socket, CancellationToken cancellationToken)
 		{
-			m_Logger.LogInformation($"{httpContext.TraceIdentifier} connected!");
+			m_Logger.LogInformation($"{httpContext.TraceIdentifier} - {httpContext.User.Identity.Name } connected!");
 
 			return ValueTask.CompletedTask;
 		}

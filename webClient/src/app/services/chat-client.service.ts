@@ -34,7 +34,7 @@ export class ChatClientService {
 	open(name: string, channelName: string): Promise<void> {
 		return new Promise<void>(
 			(resolve, reject) => {
-				this.m_Socket = new WebSocket('wss://localhost:5001/ws');
+				this.m_Socket = new WebSocket('wss://localhost:5002/ws');
 				this.m_Name.next(name);
 				this.m_ChannelName.next(channelName);
 
