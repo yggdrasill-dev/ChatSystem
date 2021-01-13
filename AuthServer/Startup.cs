@@ -1,39 +1,79 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
 using AuthServer.Data;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
-using Microsoft.AspNetCore.HttpsPolicy;
 using Microsoft.AspNetCore.Identity;
-using Microsoft.AspNetCore.Identity.UI;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using static OpenIddict.Abstractions.OpenIddictConstants;
+using static OpenIddict.Server.OpenIddictServerEvents;
 
 namespace AuthServer
 {
 	public class Startup
 	{
-		public Startup(IConfiguration configuration)
-		{
-			Configuration = configuration;
-		}
-
-		public IConfiguration Configuration { get; }
-
 		// This method gets called by the runtime. Use this method to add services to the container.
 		public void ConfigureServices(IServiceCollection services)
 		{
-			services.AddDbContext<ApplicationDbContext>(options =>
-				options.UseSqlServer(
-					Configuration.GetConnectionString("DefaultConnection")));
+			services.AddDbContext<ApplicationDbContext>((sp, options) =>
+			{
+				var configuration = sp.GetRequiredService<IConfiguration>();
+
+				options
+					.UseSqlServer(configuration.GetConnectionString("DefaultConnection"))
+					.UseOpenIddict();
+			});
 			services.AddDatabaseDeveloperPageExceptionFilter();
 			services.AddDefaultIdentity<IdentityUser>(options => options.SignIn.RequireConfirmedAccount = false)
-				.AddEntityFrameworkStores<ApplicationDbContext>();
-			services.AddRazorPages();
+				.AddEntityFrameworkStores<ApplicationDbContext>()
+				.AddDefaultTokenProviders();
+
+			services.AddControllersWithViews();
+
+			services.Configure<IdentityOptions>(options =>
+			{
+				options.ClaimsIdentity.UserNameClaimType = Claims.Name;
+				options.ClaimsIdentity.UserIdClaimType = Claims.Subject;
+				options.ClaimsIdentity.RoleClaimType = Claims.Role;
+			});
+
+			services.AddOpenIddict()
+				.AddCore(builder =>
+				{
+					builder.UseEntityFrameworkCore()
+						.UseDbContext<ApplicationDbContext>();
+				})
+				.AddServer(builder =>
+				{
+					builder
+						.SetAuthorizationEndpointUris("/connect/authorize")
+						//.SetDeviceEndpointUris("/connect/device")
+						.SetLogoutEndpointUris("/connect/logout")
+						.SetTokenEndpointUris("/connect/token");
+					//.SetUserinfoEndpointUris("/connect/userinfo")
+					//.SetVerificationEndpointUris("/connect/verify");
+
+					builder
+						.AllowAuthorizationCodeFlow()
+						//.AllowDeviceCodeFlow()
+						//.AllowPasswordFlow()
+						.AllowRefreshTokenFlow();
+
+					builder.RegisterScopes(Scopes.Email, Scopes.Profile, Scopes.Roles, "demo_api");
+
+					builder
+						.AddDevelopmentEncryptionCertificate()
+						.AddDevelopmentSigningCertificate();
+
+					builder
+						.RequireProofKeyForCodeExchange();
+
+					builder.UseAspNetCore()
+						.EnableAuthorizationEndpointPassthrough();
+				});
+
+			services.AddHostedService<Worker>();
 		}
 
 		// This method gets called by the runtime. Use this method to configure the HTTP request pipeline.
@@ -62,6 +102,7 @@ namespace AuthServer
 			app.UseEndpoints(endpoints =>
 			{
 				endpoints.MapRazorPages();
+				endpoints.MapControllers();
 			});
 		}
 	}
