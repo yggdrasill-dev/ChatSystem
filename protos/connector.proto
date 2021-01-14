@@ -8,6 +8,16 @@ message ChatMessage {
 	bytes payload = 2;
 }
 
+enum LoginStatus {
+	REJECT = 0;
+	ACCPET = 1;
+}
+
+message LoginReply {
+	LoginStatus status = 1;
+	string name = 2;
+}
+
 message LoginRegistration {
 	string name = 1;
 	string channel = 2;

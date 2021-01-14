@@ -1,5 +1,6 @@
 import { Router } from '@angular/router';
-import { Observable, Subscription } from 'rxjs';
+import { Subscription } from 'rxjs';
+import { filter, map } from 'rxjs/operators';
 import { ChatClientService } from './../services/chat-client.service';
 import { Component, OnDestroy, OnInit } from '@angular/core';
 import { chat } from 'src/protos';
@@ -10,31 +11,61 @@ import { chat } from 'src/protos';
 	styleUrls: ['./room.component.scss']
 })
 export class RoomComponent implements OnInit, OnDestroy {
-	name: Observable<string>;
-	channelName: Observable<string>;
+	name: string;
+	channelName: string;
 	entryMessage: string;
 	history: string[] = [];
 
-	private m_MessageSubscription: Subscription;
+	private m_Encoder = new TextEncoder();
+	private m_Decoder = new TextDecoder();
+	private m_MessageSubscriptions: Subscription[] = [];
 
 	constructor(
 		private m_ChatClient: ChatClientService,
 		private m_Router: Router) { }
 
-	ngOnInit(): void {
-		if (!this.m_ChatClient.isConnected) {
-			this.m_Router.navigate(['/']);
-		}
+	async ngOnInit(): Promise<void> {
+		// this.name = this.m_ChatClient.name;
+		// this.channelName = this.m_ChatClient.channelName;
 
-		this.name = this.m_ChatClient.name;
-		this.channelName = this.m_ChatClient.channelName;
+		this.m_MessageSubscriptions.push(
+			this.m_ChatClient.receiver
+				.pipe(
+					filter(msg => msg.subject == 'connect.login.reply'),
+					map(msg => {
+						const reply = chat.LoginReply.decode(msg.payload);
 
-		this.m_MessageSubscription = this.m_ChatClient.receiver.subscribe(this.onReceive.bind(this));
+						return {
+							name: reply.name
+						};
+					})
+				)
+				.subscribe(msg => {
+					this.name = msg.name;
+				})
+		);
+
+		this.m_MessageSubscriptions.push(
+			this.m_ChatClient.receiver
+				.pipe(
+					filter(msg => msg.subject == 'connect.receive'),
+					map(msg => {
+						const content = chat.ChatContent.decode(msg.payload);
+
+						return JSON.stringify(content);
+					})
+				)
+				.subscribe(this.onReceive.bind(this))
+		);
+
+		await this.m_ChatClient.open();
 	}
 
 	ngOnDestroy(): void {
-		this.m_MessageSubscription.unsubscribe();
-		this.m_MessageSubscription = null;
+		for (let sub of this.m_MessageSubscriptions)
+			sub.unsubscribe();
+
+		delete this.m_MessageSubscriptions;
 	}
 
 	keypress(event: KeyboardEvent): void {

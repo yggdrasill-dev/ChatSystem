@@ -10,7 +10,6 @@ namespace ChatConnector.Pages
 {
 	public class IndexModel : PageModel
 	{
-		[Authorize]
 		public void OnGet()
 		{
 		}

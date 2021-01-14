@@ -9,43 +9,30 @@ export class ChatClientService {
 	private m_Socket: WebSocket;
 	private m_Encoder = new TextEncoder();
 	private m_Decoder = new TextDecoder();
-	private m_Name: BehaviorSubject<string> = new BehaviorSubject<string>("");
-	private m_ChannelName: BehaviorSubject<string> = new BehaviorSubject<string>("");
-	private m_ReceiveMessages: Subject<string> = new Subject<string>();
+	private m_ReceiveMessages: Subject<chat.IChatMessage> = new Subject<chat.IChatMessage>();
 
 	constructor() { }
-
-	get name(): Observable<string> {
-		return this.m_Name;
-	}
-
-	get channelName(): Observable<string> {
-		return this.m_ChannelName;
-	}
 
 	get isConnected(): boolean {
 		return this.m_Socket?.readyState == WebSocket.OPEN;
 	}
 
-	get receiver(): Observable<string> {
+	get receiver(): Observable<chat.IChatMessage> {
 		return this.m_ReceiveMessages;
 	}
 
-	open(name: string, channelName: string): Promise<void> {
+	open(): Promise<void> {
 		return new Promise<void>(
 			(resolve, reject) => {
 				this.m_Socket = new WebSocket('wss://localhost:5002/ws');
-				this.m_Name.next(name);
-				this.m_ChannelName.next(channelName);
 
 				this.m_Socket.onmessage = async (ev: MessageEvent<Blob>) => {
 					try {
 						const buffer = await ev.data.arrayBuffer();
 
 						const msg = chat.ChatMessage.decode(new Uint8Array(buffer));
-						const text = this.m_Decoder.decode(msg.payload);
 
-						this.m_ReceiveMessages.next(text);
+						this.m_ReceiveMessages.next(msg);
 					}
 					catch (ex) {
 						console.error(ex);
@@ -56,6 +43,7 @@ export class ChatClientService {
 				};
 			});
 	}
+
 	send(subject: string, message: string | Uint8Array): void {
 		if (typeof message === "string") {
 			const msg = chat.ChatMessage.create({

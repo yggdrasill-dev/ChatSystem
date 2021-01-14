@@ -1,11 +1,9 @@
 import { RoomComponent } from './room/room.component';
 import { NgModule } from '@angular/core';
 import { Routes, RouterModule } from '@angular/router';
-import { LoginComponent } from './login/login.component';
 
 const routes: Routes = [
-	{ path: '', component: LoginComponent },
-	{ path: 'login', component: LoginComponent },
+	{ path: '', component: RoomComponent },
 	{ path: 'room', component: RoomComponent }
 ];
 

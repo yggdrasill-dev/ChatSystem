@@ -15,11 +15,11 @@
     </li>
     <li>
       name:
-      <span id="name">{{name | async}}</span>
+      <span id="name">{{name}}</span>
     </li>
     <li>
       room:
-      <span id="room">{{channelName | async}}</span>
+      <span id="room">{{channelName}}</span>
     </li>
   </ul>
   <input tabindex="1" type="text" class="entry" (keypress)="keypress($event)" [(ngModel)]="entryMessage" />

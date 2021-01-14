@@ -4,6 +4,11 @@ option csharp_namespace = "Chat.Protos";
 package chat;
 
 message QueuePacket {
-    string session_id = 1;
-    bytes payload = 2;
+	string session_id = 1;
+	bytes payload = 2;
+}
+
+message SendPacket {
+	repeated string session_ids = 2;
+	bytes payload = 3;
 }

@@ -4,22 +4,26 @@ using System.Net.WebSockets;
 using System.Threading;
 using System.Threading.Tasks;
 using Chat.Protos;
+using ChatConnector.Models;
 using Google.Protobuf;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using NATS.Client;
 using Valhalla.WebSockets;
 
 namespace ChatConnector
 {
 	public class ClientConnectHandler : IWebSocketConnectionHandler
 	{
-		private readonly IConnection m_Connection;
+		private readonly WebSocketRepository m_WebSocketRepository;
 		private readonly ILogger<ClientConnectHandler> m_Logger;
+		private readonly Guid m_ConnectorId = Guid.NewGuid();
 
-		public ClientConnectHandler(ConnectionFactory connectionFactory, ILogger<ClientConnectHandler> logger)
+		public ClientConnectHandler(
+			WebSocketRepository webSocketRepository,
+			ILogger<ClientConnectHandler> logger)
 		{
-			m_Connection = connectionFactory.CreateConnection();
+			m_WebSocketRepository = webSocketRepository ?? throw new ArgumentNullException(nameof(webSocketRepository));
 			m_Logger = logger ?? throw new ArgumentNullException(nameof(logger));
 		}
 
@@ -30,11 +34,72 @@ namespace ChatConnector
 			return ValueTask.CompletedTask;
 		}
 
-		public ValueTask OnConnectedAsync(HttpContext httpContext, WebSocket socket, CancellationToken cancellationToken)
+		public async ValueTask OnConnectedAsync(HttpContext httpContext, WebSocket socket, CancellationToken cancellationToken)
 		{
-			m_Logger.LogInformation($"{httpContext.TraceIdentifier} - {httpContext.User.Identity.Name } connected!");
+			m_Logger.LogInformation($"{httpContext.TraceIdentifier} connected!");
+			using var scope = httpContext.RequestServices.CreateScope();
 
-			return ValueTask.CompletedTask;
+			if (!httpContext.User.Identity.IsAuthenticated)
+			{
+				var rejectMsg = new LoginReply()
+				{
+					Status = LoginStatus.Reject
+				};
+
+				var reply = new ChatMessage
+				{
+					Subject = "connect.login.reply",
+					Payload = rejectMsg.ToByteString()
+				};
+
+				await socket.SendAsync(
+					reply.ToByteArray(),
+					WebSocketMessageType.Binary,
+					true,
+					cancellationToken).ConfigureAwait(false);
+
+				await socket.CloseOutputAsync(
+					WebSocketCloseStatus.PolicyViolation,
+					null,
+					cancellationToken).ConfigureAwait(false);
+			}
+			else
+			{
+				var registerCommand = new RegisterSessionCommand
+				{
+					SessionId = httpContext.TraceIdentifier,
+					ConnectorId = m_ConnectorId.ToString("N"),
+					Name = httpContext.User.Identity.Name
+				};
+				var regCommandService = scope.ServiceProvider.GetRequiredService<ICommandService<RegisterSessionCommand>>();
+				await regCommandService.ExecuteAsync(registerCommand);
+
+				var addSocketCommand = new AddSocketCommand
+				{
+					SessionId = httpContext.TraceIdentifier,
+					Socket = socket
+				};
+				var addSocketCommandService = scope.ServiceProvider.GetRequiredService<ICommandService<AddSocketCommand>>();
+				await addSocketCommandService.ExecuteAsync(addSocketCommand);
+
+				var accpetMsg = new LoginReply
+				{
+					Status = LoginStatus.Accpet,
+					Name = httpContext.User.Identity.Name
+				};
+
+				var reply = new ChatMessage
+				{
+					Subject = "connect.login.reply",
+					Payload = accpetMsg.ToByteString()
+				};
+
+				await socket.SendAsync(
+					reply.ToByteArray(),
+					WebSocketMessageType.Binary,
+					true,
+					cancellationToken).ConfigureAwait(false);
+			}
 		}
 
 		public ValueTask OnDisconnectedAsync(HttpContext httpContext, WebSocket socket, CancellationToken cancellationToken)
@@ -44,45 +109,23 @@ namespace ChatConnector
 			return ValueTask.CompletedTask;
 		}
 
-		public async ValueTask OnReceiveAsync(HttpContext httpContext, WebSocket socket, ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken)
+		public ValueTask OnReceiveAsync(HttpContext httpContext, WebSocket socket, ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken)
 		{
+			var scope = httpContext.RequestServices.CreateScope();
+
 			var msg = ChatMessage.Parser.ParseFrom(new ReadOnlySequence<byte>(buffer));
 
 			m_Logger.LogInformation($"receive subject: {msg.Subject}");
 
-			if (msg.Subject == "connect.register")
+			var sendCommand = new SendQueueCommand
 			{
-				var loginInfo = LoginRegistration.Parser.ParseFrom(msg.Payload);
+				Subject = msg.Subject,
+				SessionId = httpContext.TraceIdentifier,
+				Payload = msg.Payload
+			};
+			var sendCommandService = scope.ServiceProvider.GetRequiredService<ICommandService<SendQueueCommand>>();
 
-				var registration = new PlayerRegistration
-				{
-					SessionId = httpContext.TraceIdentifier,
-					Name = loginInfo.Name
-				};
-				await m_Connection.RequestAsync("session.register", registration.ToByteArray()).ConfigureAwait(false);
-			}
-			else
-			{
-				var packet = new QueuePacket
-				{
-					SessionId = httpContext.TraceIdentifier,
-					Payload = msg.Payload
-				};
-
-				m_Connection.Publish(msg.Subject, packet.ToByteArray());
-			}
-
-			//var replyMsg = new ChatMessage
-			//{
-			//	Subject = "chat.reply",
-			//	Payload = ByteString.CopyFromUtf8("Hello")
-			//};
-
-			//await socket.SendAsync(
-			//	replyMsg.ToByteArray(),
-			//	WebSocketMessageType.Binary,
-			//	true,
-			//	cancellationToken).ConfigureAwait(false);
+			return sendCommandService.ExecuteAsync(sendCommand);
 		}
 	}
 }

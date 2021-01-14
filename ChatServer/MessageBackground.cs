@@ -1,4 +1,6 @@
 ﻿using Chat.Protos;
+using Google.Protobuf;
+using Google.Protobuf.Collections;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using NATS.Client;
@@ -31,6 +33,21 @@ namespace ChatServer
 
 				var msg = ChatContent.Parser.ParseFrom(packet.Payload);
 				m_Logger.LogInformation($"Scope: {msg.Scope}, Target: {msg.Target}, Message: {msg.Message}");
+
+				var sendContent = new ChatContent
+				{
+					Scope = Scope.Person,
+					Target = msg.Target,
+					From = msg.Target,
+					Message = $"reply => {msg.Message}"
+				};
+				var sendMsg = new SendPacket
+				{
+					Payload = sendContent.ToByteString()
+				};
+				sendMsg.SessionIds.Add(packet.SessionId);
+
+				m_Connection.Publish("connect.send", sendMsg.ToByteArray());
 			});
 
 			return Task.CompletedTask;

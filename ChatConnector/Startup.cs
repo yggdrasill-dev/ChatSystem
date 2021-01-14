@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.IdentityModel.Tokens.Jwt;
+using ChatConnector.Models;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.AspNetCore.Builder;
@@ -73,6 +74,14 @@ namespace ChatConnector
 				options.Conventions.AuthorizeFolder("/");
 			});
 			services.AddControllersWithViews();
+
+			services
+				.AddTransient<ICommandService<RegisterSessionCommand>, RegisterSessionCommandService>()
+				.AddTransient<ICommandService<AddSocketCommand>, AddSocketCommandService>()
+				.AddTransient<ICommandService<SendQueueCommand>, SendQueueCommandService>()
+				.AddSingleton<WebSocketRepository>()
+				.AddSingleton<MessageQueueService>()
+				.AddHostedService(sp => sp.GetRequiredService<MessageQueueService>());
 		}
 
 		// This method gets called by the runtime. Use this method to configure the HTTP request pipeline.
