@@ -23,5 +23,13 @@ namespace SessionServer.Models
 
 			return ValueTask.CompletedTask;
 		}
+
+		public ValueTask<Registration?> GetRegistrationAsync(string sessionId)
+		{
+			if (m_Sessions.TryGetValue(sessionId, out var result))
+				return new ValueTask<Registration?>(result);
+			else
+				return new ValueTask<Registration?>(default(Registration));
+		}
 	}
 }

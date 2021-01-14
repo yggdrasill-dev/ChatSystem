@@ -8,3 +8,7 @@ message PlayerRegistration {
 	string connector_id = 2;
 	string name = 3;
 }
+
+message PlayerQuery {
+	string session_id = 1;
+}

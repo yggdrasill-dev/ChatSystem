@@ -25,225 +25,6 @@
          */
         var chat = {};
     
-        chat.QueuePacket = (function() {
-    
-            /**
-             * Properties of a QueuePacket.
-             * @memberof chat
-             * @interface IQueuePacket
-             * @property {string|null} [sessionId] QueuePacket sessionId
-             * @property {Uint8Array|null} [payload] QueuePacket payload
-             */
-    
-            /**
-             * Constructs a new QueuePacket.
-             * @memberof chat
-             * @classdesc Represents a QueuePacket.
-             * @implements IQueuePacket
-             * @constructor
-             * @param {chat.IQueuePacket=} [properties] Properties to set
-             */
-            function QueuePacket(properties) {
-                if (properties)
-                    for (var keys = Object.keys(properties), i = 0; i < keys.length; ++i)
-                        if (properties[keys[i]] != null)
-                            this[keys[i]] = properties[keys[i]];
-            }
-    
-            /**
-             * QueuePacket sessionId.
-             * @member {string} sessionId
-             * @memberof chat.QueuePacket
-             * @instance
-             */
-            QueuePacket.prototype.sessionId = "";
-    
-            /**
-             * QueuePacket payload.
-             * @member {Uint8Array} payload
-             * @memberof chat.QueuePacket
-             * @instance
-             */
-            QueuePacket.prototype.payload = $util.newBuffer([]);
-    
-            /**
-             * Creates a new QueuePacket instance using the specified properties.
-             * @function create
-             * @memberof chat.QueuePacket
-             * @static
-             * @param {chat.IQueuePacket=} [properties] Properties to set
-             * @returns {chat.QueuePacket} QueuePacket instance
-             */
-            QueuePacket.create = function create(properties) {
-                return new QueuePacket(properties);
-            };
-    
-            /**
-             * Encodes the specified QueuePacket message. Does not implicitly {@link chat.QueuePacket.verify|verify} messages.
-             * @function encode
-             * @memberof chat.QueuePacket
-             * @static
-             * @param {chat.IQueuePacket} message QueuePacket message or plain object to encode
-             * @param {$protobuf.Writer} [writer] Writer to encode to
-             * @returns {$protobuf.Writer} Writer
-             */
-            QueuePacket.encode = function encode(message, writer) {
-                if (!writer)
-                    writer = $Writer.create();
-                if (message.sessionId != null && Object.hasOwnProperty.call(message, "sessionId"))
-                    writer.uint32(/* id 1, wireType 2 =*/10).string(message.sessionId);
-                if (message.payload != null && Object.hasOwnProperty.call(message, "payload"))
-                    writer.uint32(/* id 2, wireType 2 =*/18).bytes(message.payload);
-                return writer;
-            };
-    
-            /**
-             * Encodes the specified QueuePacket message, length delimited. Does not implicitly {@link chat.QueuePacket.verify|verify} messages.
-             * @function encodeDelimited
-             * @memberof chat.QueuePacket
-             * @static
-             * @param {chat.IQueuePacket} message QueuePacket message or plain object to encode
-             * @param {$protobuf.Writer} [writer] Writer to encode to
-             * @returns {$protobuf.Writer} Writer
-             */
-            QueuePacket.encodeDelimited = function encodeDelimited(message, writer) {
-                return this.encode(message, writer).ldelim();
-            };
-    
-            /**
-             * Decodes a QueuePacket message from the specified reader or buffer.
-             * @function decode
-             * @memberof chat.QueuePacket
-             * @static
-             * @param {$protobuf.Reader|Uint8Array} reader Reader or buffer to decode from
-             * @param {number} [length] Message length if known beforehand
-             * @returns {chat.QueuePacket} QueuePacket
-             * @throws {Error} If the payload is not a reader or valid buffer
-             * @throws {$protobuf.util.ProtocolError} If required fields are missing
-             */
-            QueuePacket.decode = function decode(reader, length) {
-                if (!(reader instanceof $Reader))
-                    reader = $Reader.create(reader);
-                var end = length === undefined ? reader.len : reader.pos + length, message = new $root.chat.QueuePacket();
-                while (reader.pos < end) {
-                    var tag = reader.uint32();
-                    switch (tag >>> 3) {
-                    case 1:
-                        message.sessionId = reader.string();
-                        break;
-                    case 2:
-                        message.payload = reader.bytes();
-                        break;
-                    default:
-                        reader.skipType(tag & 7);
-                        break;
-                    }
-                }
-                return message;
-            };
-    
-            /**
-             * Decodes a QueuePacket message from the specified reader or buffer, length delimited.
-             * @function decodeDelimited
-             * @memberof chat.QueuePacket
-             * @static
-             * @param {$protobuf.Reader|Uint8Array} reader Reader or buffer to decode from
-             * @returns {chat.QueuePacket} QueuePacket
-             * @throws {Error} If the payload is not a reader or valid buffer
-             * @throws {$protobuf.util.ProtocolError} If required fields are missing
-             */
-            QueuePacket.decodeDelimited = function decodeDelimited(reader) {
-                if (!(reader instanceof $Reader))
-                    reader = new $Reader(reader);
-                return this.decode(reader, reader.uint32());
-            };
-    
-            /**
-             * Verifies a QueuePacket message.
-             * @function verify
-             * @memberof chat.QueuePacket
-             * @static
-             * @param {Object.<string,*>} message Plain object to verify
-             * @returns {string|null} `null` if valid, otherwise the reason why it is not
-             */
-            QueuePacket.verify = function verify(message) {
-                if (typeof message !== "object" || message === null)
-                    return "object expected";
-                if (message.sessionId != null && message.hasOwnProperty("sessionId"))
-                    if (!$util.isString(message.sessionId))
-                        return "sessionId: string expected";
-                if (message.payload != null && message.hasOwnProperty("payload"))
-                    if (!(message.payload && typeof message.payload.length === "number" || $util.isString(message.payload)))
-                        return "payload: buffer expected";
-                return null;
-            };
-    
-            /**
-             * Creates a QueuePacket message from a plain object. Also converts values to their respective internal types.
-             * @function fromObject
-             * @memberof chat.QueuePacket
-             * @static
-             * @param {Object.<string,*>} object Plain object
-             * @returns {chat.QueuePacket} QueuePacket
-             */
-            QueuePacket.fromObject = function fromObject(object) {
-                if (object instanceof $root.chat.QueuePacket)
-                    return object;
-                var message = new $root.chat.QueuePacket();
-                if (object.sessionId != null)
-                    message.sessionId = String(object.sessionId);
-                if (object.payload != null)
-                    if (typeof object.payload === "string")
-                        $util.base64.decode(object.payload, message.payload = $util.newBuffer($util.base64.length(object.payload)), 0);
-                    else if (object.payload.length)
-                        message.payload = object.payload;
-                return message;
-            };
-    
-            /**
-             * Creates a plain object from a QueuePacket message. Also converts values to other types if specified.
-             * @function toObject
-             * @memberof chat.QueuePacket
-             * @static
-             * @param {chat.QueuePacket} message QueuePacket
-             * @param {$protobuf.IConversionOptions} [options] Conversion options
-             * @returns {Object.<string,*>} Plain object
-             */
-            QueuePacket.toObject = function toObject(message, options) {
-                if (!options)
-                    options = {};
-                var object = {};
-                if (options.defaults) {
-                    object.sessionId = "";
-                    if (options.bytes === String)
-                        object.payload = "";
-                    else {
-                        object.payload = [];
-                        if (options.bytes !== Array)
-                            object.payload = $util.newBuffer(object.payload);
-                    }
-                }
-                if (message.sessionId != null && message.hasOwnProperty("sessionId"))
-                    object.sessionId = message.sessionId;
-                if (message.payload != null && message.hasOwnProperty("payload"))
-                    object.payload = options.bytes === String ? $util.base64.encode(message.payload, 0, message.payload.length) : options.bytes === Array ? Array.prototype.slice.call(message.payload) : message.payload;
-                return object;
-            };
-    
-            /**
-             * Converts this QueuePacket to JSON.
-             * @function toJSON
-             * @memberof chat.QueuePacket
-             * @instance
-             * @returns {Object.<string,*>} JSON object
-             */
-            QueuePacket.prototype.toJSON = function toJSON() {
-                return this.constructor.toObject(this, $protobuf.util.toJSONOptions);
-            };
-    
-            return QueuePacket;
-        })();
-    
         chat.ChatMessage = (function() {
     
             /**
@@ -485,6 +266,7 @@
              * @interface ILoginReply
              * @property {chat.LoginStatus|null} [status] LoginReply status
              * @property {string|null} [name] LoginReply name
+             * @property {string|null} [room] LoginReply room
              */
     
             /**
@@ -519,6 +301,14 @@
             LoginReply.prototype.name = "";
     
             /**
+             * LoginReply room.
+             * @member {string} room
+             * @memberof chat.LoginReply
+             * @instance
+             */
+            LoginReply.prototype.room = "";
+    
+            /**
              * Creates a new LoginReply instance using the specified properties.
              * @function create
              * @memberof chat.LoginReply
@@ -546,6 +336,8 @@
                     writer.uint32(/* id 1, wireType 0 =*/8).int32(message.status);
                 if (message.name != null && Object.hasOwnProperty.call(message, "name"))
                     writer.uint32(/* id 2, wireType 2 =*/18).string(message.name);
+                if (message.room != null && Object.hasOwnProperty.call(message, "room"))
+                    writer.uint32(/* id 3, wireType 2 =*/26).string(message.room);
                 return writer;
             };
     
@@ -585,6 +377,9 @@
                         break;
                     case 2:
                         message.name = reader.string();
+                        break;
+                    case 3:
+                        message.room = reader.string();
                         break;
                     default:
                         reader.skipType(tag & 7);
@@ -632,6 +427,9 @@
                 if (message.name != null && message.hasOwnProperty("name"))
                     if (!$util.isString(message.name))
                         return "name: string expected";
+                if (message.room != null && message.hasOwnProperty("room"))
+                    if (!$util.isString(message.room))
+                        return "room: string expected";
                 return null;
             };
     
@@ -659,6 +457,8 @@
                 }
                 if (object.name != null)
                     message.name = String(object.name);
+                if (object.room != null)
+                    message.room = String(object.room);
                 return message;
             };
     
@@ -678,11 +478,14 @@
                 if (options.defaults) {
                     object.status = options.enums === String ? "REJECT" : 0;
                     object.name = "";
+                    object.room = "";
                 }
                 if (message.status != null && message.hasOwnProperty("status"))
                     object.status = options.enums === String ? $root.chat.LoginStatus[message.status] : message.status;
                 if (message.name != null && message.hasOwnProperty("name"))
                     object.name = message.name;
+                if (message.room != null && message.hasOwnProperty("room"))
+                    object.room = message.room;
                 return object;
             };
     
@@ -937,6 +740,7 @@
              * @property {chat.Scope|null} [scope] ChatContent scope
              * @property {string|null} [message] ChatContent message
              * @property {string|null} [target] ChatContent target
+             * @property {string|null} [from] ChatContent from
              */
     
             /**
@@ -979,6 +783,14 @@
             ChatContent.prototype.target = "";
     
             /**
+             * ChatContent from.
+             * @member {string} from
+             * @memberof chat.ChatContent
+             * @instance
+             */
+            ChatContent.prototype.from = "";
+    
+            /**
              * Creates a new ChatContent instance using the specified properties.
              * @function create
              * @memberof chat.ChatContent
@@ -1008,6 +820,8 @@
                     writer.uint32(/* id 2, wireType 2 =*/18).string(message.message);
                 if (message.target != null && Object.hasOwnProperty.call(message, "target"))
                     writer.uint32(/* id 3, wireType 2 =*/26).string(message.target);
+                if (message.from != null && Object.hasOwnProperty.call(message, "from"))
+                    writer.uint32(/* id 4, wireType 2 =*/34).string(message.from);
                 return writer;
             };
     
@@ -1050,6 +864,9 @@
                         break;
                     case 3:
                         message.target = reader.string();
+                        break;
+                    case 4:
+                        message.from = reader.string();
                         break;
                     default:
                         reader.skipType(tag & 7);
@@ -1102,6 +919,9 @@
                 if (message.target != null && message.hasOwnProperty("target"))
                     if (!$util.isString(message.target))
                         return "target: string expected";
+                if (message.from != null && message.hasOwnProperty("from"))
+                    if (!$util.isString(message.from))
+                        return "from: string expected";
                 return null;
             };
     
@@ -1139,6 +959,8 @@
                     message.message = String(object.message);
                 if (object.target != null)
                     message.target = String(object.target);
+                if (object.from != null)
+                    message.from = String(object.from);
                 return message;
             };
     
@@ -1159,6 +981,7 @@
                     object.scope = options.enums === String ? "NONE" : 0;
                     object.message = "";
                     object.target = "";
+                    object.from = "";
                 }
                 if (message.scope != null && message.hasOwnProperty("scope"))
                     object.scope = options.enums === String ? $root.chat.Scope[message.scope] : message.scope;
@@ -1166,6 +989,8 @@
                     object.message = message.message;
                 if (message.target != null && message.hasOwnProperty("target"))
                     object.target = message.target;
+                if (message.from != null && message.hasOwnProperty("from"))
+                    object.from = message.from;
                 return object;
             };
     

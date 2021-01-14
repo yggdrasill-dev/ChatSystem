@@ -16,6 +16,7 @@ enum LoginStatus {
 message LoginReply {
 	LoginStatus status = 1;
 	string name = 2;
+	string room = 3;
 }
 
 message LoginRegistration {

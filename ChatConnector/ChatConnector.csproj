@@ -5,6 +5,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <None Remove="Protos\room.proto" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Google.Protobuf" Version="3.14.0" />
     <PackageReference Include="Grpc.Tools" Version="2.34.0">
       <PrivateAssets>all</PrivateAssets>
@@ -26,6 +30,7 @@
     <Protobuf Include="..\protos\session.proto" GrpcServices="None" Access="Internal">
       <Link>Protos\session.proto</Link>
     </Protobuf>
+    <Protobuf Include="Protos\room.proto" GrpcServices="None" Access="Internal" />
   </ItemGroup>
 
   <ItemGroup>

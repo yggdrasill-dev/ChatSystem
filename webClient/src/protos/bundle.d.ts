@@ -2,102 +2,6 @@ import * as $protobuf from "protobufjs";
 /** Namespace chat. */
 export namespace chat {
 
-    /** Properties of a QueuePacket. */
-    interface IQueuePacket {
-
-        /** QueuePacket sessionId */
-        sessionId?: (string|null);
-
-        /** QueuePacket payload */
-        payload?: (Uint8Array|null);
-    }
-
-    /** Represents a QueuePacket. */
-    class QueuePacket implements IQueuePacket {
-
-        /**
-         * Constructs a new QueuePacket.
-         * @param [properties] Properties to set
-         */
-        constructor(properties?: chat.IQueuePacket);
-
-        /** QueuePacket sessionId. */
-        public sessionId: string;
-
-        /** QueuePacket payload. */
-        public payload: Uint8Array;
-
-        /**
-         * Creates a new QueuePacket instance using the specified properties.
-         * @param [properties] Properties to set
-         * @returns QueuePacket instance
-         */
-        public static create(properties?: chat.IQueuePacket): chat.QueuePacket;
-
-        /**
-         * Encodes the specified QueuePacket message. Does not implicitly {@link chat.QueuePacket.verify|verify} messages.
-         * @param message QueuePacket message or plain object to encode
-         * @param [writer] Writer to encode to
-         * @returns Writer
-         */
-        public static encode(message: chat.IQueuePacket, writer?: $protobuf.Writer): $protobuf.Writer;
-
-        /**
-         * Encodes the specified QueuePacket message, length delimited. Does not implicitly {@link chat.QueuePacket.verify|verify} messages.
-         * @param message QueuePacket message or plain object to encode
-         * @param [writer] Writer to encode to
-         * @returns Writer
-         */
-        public static encodeDelimited(message: chat.IQueuePacket, writer?: $protobuf.Writer): $protobuf.Writer;
-
-        /**
-         * Decodes a QueuePacket message from the specified reader or buffer.
-         * @param reader Reader or buffer to decode from
-         * @param [length] Message length if known beforehand
-         * @returns QueuePacket
-         * @throws {Error} If the payload is not a reader or valid buffer
-         * @throws {$protobuf.util.ProtocolError} If required fields are missing
-         */
-        public static decode(reader: ($protobuf.Reader|Uint8Array), length?: number): chat.QueuePacket;
-
-        /**
-         * Decodes a QueuePacket message from the specified reader or buffer, length delimited.
-         * @param reader Reader or buffer to decode from
-         * @returns QueuePacket
-         * @throws {Error} If the payload is not a reader or valid buffer
-         * @throws {$protobuf.util.ProtocolError} If required fields are missing
-         */
-        public static decodeDelimited(reader: ($protobuf.Reader|Uint8Array)): chat.QueuePacket;
-
-        /**
-         * Verifies a QueuePacket message.
-         * @param message Plain object to verify
-         * @returns `null` if valid, otherwise the reason why it is not
-         */
-        public static verify(message: { [k: string]: any }): (string|null);
-
-        /**
-         * Creates a QueuePacket message from a plain object. Also converts values to their respective internal types.
-         * @param object Plain object
-         * @returns QueuePacket
-         */
-        public static fromObject(object: { [k: string]: any }): chat.QueuePacket;
-
-        /**
-         * Creates a plain object from a QueuePacket message. Also converts values to other types if specified.
-         * @param message QueuePacket
-         * @param [options] Conversion options
-         * @returns Plain object
-         */
-        public static toObject(message: chat.QueuePacket, options?: $protobuf.IConversionOptions): { [k: string]: any };
-
-        /**
-         * Converts this QueuePacket to JSON.
-         * @returns JSON object
-         */
-        public toJSON(): { [k: string]: any };
-    }
-
     /** Properties of a ChatMessage. */
     interface IChatMessage {
 
@@ -208,6 +112,9 @@ export namespace chat {
 
         /** LoginReply name */
         name?: (string|null);
+
+        /** LoginReply room */
+        room?: (string|null);
     }
 
     /** Represents a LoginReply. */
@@ -224,6 +131,9 @@ export namespace chat {
 
         /** LoginReply name. */
         public name: string;
+
+        /** LoginReply room. */
+        public room: string;
 
         /**
          * Creates a new LoginReply instance using the specified properties.
@@ -411,6 +321,9 @@ export namespace chat {
 
         /** ChatContent target */
         target?: (string|null);
+
+        /** ChatContent from */
+        from?: (string|null);
     }
 
     /** Represents a ChatContent. */
@@ -430,6 +343,9 @@ export namespace chat {
 
         /** ChatContent target. */
         public target: string;
+
+        /** ChatContent from. */
+        public from: string;
 
         /**
          * Creates a new ChatContent instance using the specified properties.

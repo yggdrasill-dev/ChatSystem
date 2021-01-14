@@ -25,7 +25,7 @@ namespace ChatServer
 
 		protected override Task ExecuteAsync(CancellationToken stoppingToken)
 		{
-			m_Connection.SubscribeAsync("chat.send", "chat", (sender, args) =>
+			m_Connection.SubscribeAsync("chat.send", "chat", async (sender, args) =>
 			{
 				var packet = QueuePacket.Parser.ParseFrom(args.Message.Data);
 
@@ -34,12 +34,26 @@ namespace ChatServer
 				var msg = ChatContent.Parser.ParseFrom(packet.Payload);
 				m_Logger.LogInformation($"Scope: {msg.Scope}, Target: {msg.Target}, Message: {msg.Message}");
 
+				var getPlayerQuery = new PlayerQuery
+				{
+					SessionId = packet.SessionId
+				};
+
+				var queryReply = await m_Connection
+					.RequestAsync("session.get", getPlayerQuery.ToByteArray())
+					.ConfigureAwait(false);
+
+				var playerInfo = PlayerRegistration.Parser.ParseFrom(queryReply.Data);
+
+				if (playerInfo.SessionId != packet.SessionId)
+					return;
+
 				var sendContent = new ChatContent
 				{
-					Scope = Scope.Person,
+					Scope = msg.Scope,
 					Target = msg.Target,
-					From = msg.Target,
-					Message = $"reply => {msg.Message}"
+					From = playerInfo.Name,
+					Message = msg.Message
 				};
 				var sendMsg = new SendPacket
 				{

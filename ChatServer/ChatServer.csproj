@@ -22,6 +22,9 @@
     <Protobuf Include="..\protos\common.proto" Access="Internal" GrpcServices="None">
       <Link>Protos\common.proto</Link>
     </Protobuf>
+    <Protobuf Include="..\protos\session.proto" GrpcServices="None" Access="Internal">
+      <Link>Protos\session.proto</Link>
+    </Protobuf>
   </ItemGroup>
 
 </Project>

@@ -1,9 +1,9 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using NATS.Client;
-using SessionServer.Models;
+using RoomServer.Models;
 
-namespace SessionServer
+namespace RoomServer
 {
 	internal class Program
 	{
@@ -13,9 +13,8 @@ namespace SessionServer
 				{
 					services
 						.AddSingleton<ConnectionFactory>()
-						.AddSingleton<SessionRepository>()
-						.AddTransient<ICommandService<RegisterCommand>, RegisterSessionService>()
-						.AddTransient<IGetService<GetPlayerBySessionIdQuery, Registration?>, GetPlayerBySessionIdService>()
+						.AddSingleton<RoomRepository>()
+						.AddTransient<ICommandService<JoinRoomCommand>, JoinRoomCommandService>()
 						.AddHostedService<MessageBackground>();
 				});
 

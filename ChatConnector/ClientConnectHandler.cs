@@ -15,15 +15,12 @@ namespace ChatConnector
 {
 	public class ClientConnectHandler : IWebSocketConnectionHandler
 	{
-		private readonly WebSocketRepository m_WebSocketRepository;
 		private readonly ILogger<ClientConnectHandler> m_Logger;
 		private readonly Guid m_ConnectorId = Guid.NewGuid();
 
 		public ClientConnectHandler(
-			WebSocketRepository webSocketRepository,
 			ILogger<ClientConnectHandler> logger)
 		{
-			m_WebSocketRepository = webSocketRepository ?? throw new ArgumentNullException(nameof(webSocketRepository));
 			m_Logger = logger ?? throw new ArgumentNullException(nameof(logger));
 		}
 
@@ -65,27 +62,34 @@ namespace ChatConnector
 			}
 			else
 			{
-				var registerCommand = new RegisterSessionCommand
+				var regCommandService = scope.ServiceProvider.GetRequiredService<ICommandService<RegisterSessionCommand>>();
+				var addSocketCommandService = scope.ServiceProvider.GetRequiredService<ICommandService<AddSocketCommand>>();
+				var joinRoomCommandService = scope.ServiceProvider.GetRequiredService<ICommandService<JoinRoomCommand>>();
+
+				await regCommandService.ExecuteAsync(new RegisterSessionCommand
 				{
 					SessionId = httpContext.TraceIdentifier,
 					ConnectorId = m_ConnectorId.ToString("N"),
 					Name = httpContext.User.Identity.Name
-				};
-				var regCommandService = scope.ServiceProvider.GetRequiredService<ICommandService<RegisterSessionCommand>>();
-				await regCommandService.ExecuteAsync(registerCommand);
+				});
 
-				var addSocketCommand = new AddSocketCommand
+				await joinRoomCommandService.ExecuteAsync(new JoinRoomCommand
+				{
+					SessionId = httpContext.TraceIdentifier,
+					Room = "test"
+				});
+
+				await addSocketCommandService.ExecuteAsync(new AddSocketCommand
 				{
 					SessionId = httpContext.TraceIdentifier,
 					Socket = socket
-				};
-				var addSocketCommandService = scope.ServiceProvider.GetRequiredService<ICommandService<AddSocketCommand>>();
-				await addSocketCommandService.ExecuteAsync(addSocketCommand);
+				});
 
 				var accpetMsg = new LoginReply
 				{
 					Status = LoginStatus.Accpet,
-					Name = httpContext.User.Identity.Name
+					Name = httpContext.User.Identity.Name,
+					Room = "test"
 				};
 
 				var reply = new ChatMessage

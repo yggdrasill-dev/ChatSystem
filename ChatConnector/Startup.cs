@@ -79,6 +79,7 @@ namespace ChatConnector
 				.AddTransient<ICommandService<RegisterSessionCommand>, RegisterSessionCommandService>()
 				.AddTransient<ICommandService<AddSocketCommand>, AddSocketCommandService>()
 				.AddTransient<ICommandService<SendQueueCommand>, SendQueueCommandService>()
+				.AddTransient<ICommandService<JoinRoomCommand>, JoinRoomCommandService>()
 				.AddSingleton<WebSocketRepository>()
 				.AddSingleton<MessageQueueService>()
 				.AddHostedService(sp => sp.GetRequiredService<MessageQueueService>());

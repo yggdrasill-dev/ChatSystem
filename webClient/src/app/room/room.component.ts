@@ -36,12 +36,14 @@ export class RoomComponent implements OnInit, OnDestroy {
 						const reply = chat.LoginReply.decode(msg.payload);
 
 						return {
-							name: reply.name
+							name: reply.name,
+							room: reply.room
 						};
 					})
 				)
 				.subscribe(msg => {
 					this.name = msg.name;
+					this.channelName = msg.room;
 				})
 		);
 
