@@ -15,6 +15,7 @@ namespace RoomServer
 						.AddSingleton<ConnectionFactory>()
 						.AddSingleton<RoomRepository>()
 						.AddTransient<ICommandService<JoinRoomCommand>, JoinRoomCommandService>()
+						.AddTransient<IQueryService<RoomSessionsQuery, string>, RoomSessionsQueryService>()
 						.AddHostedService<MessageBackground>();
 				});
 

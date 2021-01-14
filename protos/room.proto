@@ -7,3 +7,11 @@ message JoinRoomRequest {
     string session_id = 1;
     string room = 2;
 }
+
+message RoomSessionsRequest {
+    string room = 1;
+}
+
+message RoomSessionsResponse {
+    repeated string session_ids = 1;
+}

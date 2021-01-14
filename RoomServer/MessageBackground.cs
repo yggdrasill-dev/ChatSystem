@@ -8,6 +8,8 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using NATS.Client;
 using RoomServer.Models;
+using System.Linq;
+using Google.Protobuf;
 
 namespace RoomServer
 {
@@ -45,6 +47,25 @@ namespace RoomServer
 				m_Connection.Publish(args.Message.Reply, Encoding.UTF8.GetBytes("joined"));
 
 				m_Logger.LogInformation($"({request.SessionId}, {request.Room}) joined.");
+			});
+
+			m_Connection.SubscribeAsync("room.query", "query", async (sender, args) =>
+			{
+				using var scope = m_ServiceProvider.CreateScope();
+
+				var request = RoomSessionsRequest.Parser.ParseFrom(args.Message.Data);
+				var queryService = scope.ServiceProvider.GetRequiredService<IQueryService<RoomSessionsQuery, string>>();
+
+				var sessionIds = await queryService.QueryAsync(new RoomSessionsQuery
+				{
+					Room = request.Room
+				}).ToArrayAsync();
+
+				var response = new RoomSessionsResponse();
+
+				response.SessionIds.AddRange(sessionIds);
+
+				m_Connection.Publish(args.Message.Reply, response.ToByteArray());
 			});
 
 			return Task.CompletedTask;

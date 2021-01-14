@@ -1,14 +1,10 @@
-﻿using Chat.Protos;
+﻿using System.Threading;
+using System.Threading.Tasks;
+using Chat.Protos;
 using Google.Protobuf;
-using Google.Protobuf.Collections;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using NATS.Client;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
 
 namespace ChatServer
 {
@@ -55,11 +51,30 @@ namespace ChatServer
 					From = playerInfo.Name,
 					Message = msg.Message
 				};
+
 				var sendMsg = new SendPacket
 				{
 					Payload = sendContent.ToByteString()
 				};
-				sendMsg.SessionIds.Add(packet.SessionId);
+
+				switch (msg.Scope)
+				{
+					case Scope.Room:
+						var roomQuery = new RoomSessionsRequest
+						{
+							Room = "test"
+						};
+
+						var result = await m_Connection.RequestAsync("room.query", roomQuery.ToByteArray());
+						var queryResponse = RoomSessionsResponse.Parser.ParseFrom(result.Data);
+
+						sendMsg.SessionIds.AddRange(queryResponse.SessionIds);
+						break;
+
+					case Scope.Person:
+						sendMsg.SessionIds.Add(packet.SessionId);
+						break;
+				}
 
 				m_Connection.Publish("connect.send", sendMsg.ToByteArray());
 			});

@@ -1,4 +1,7 @@
-﻿using System.Collections.Concurrent;
+﻿using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 
 namespace RoomServer.Models
@@ -15,6 +18,14 @@ namespace RoomServer.Models
 			roomList.Add(sessionId);
 
 			return ValueTask.CompletedTask;
+		}
+
+		public IAsyncEnumerable<string> QuerySessionsByRoomAsync(string room)
+		{
+			if (m_Rooms.TryGetValue(room, out var list))
+				return list.ToArray().ToAsyncEnumerable();
+
+			return Array.Empty<string>().ToAsyncEnumerable();
 		}
 	}
 }
