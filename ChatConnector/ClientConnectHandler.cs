@@ -107,11 +107,31 @@ namespace ChatConnector
 			}
 		}
 
-		public ValueTask OnDisconnectedAsync(HttpContext httpContext, WebSocket socket, CancellationToken cancellationToken)
+		public async ValueTask OnDisconnectedAsync(HttpContext httpContext, WebSocket socket, CancellationToken cancellationToken)
 		{
+			using var scope = httpContext.RequestServices.CreateScope();
+
 			m_Logger.LogInformation($"{httpContext.TraceIdentifier} disconnected!");
 
-			return ValueTask.CompletedTask;
+			var removeSocketService = scope.ServiceProvider.GetRequiredService<ICommandService<RemoveSocketCommand>>();
+			var leaveRoomService = scope.ServiceProvider.GetRequiredService<ICommandService<LeaveRoomCommand>>();
+			var unregisterService = scope.ServiceProvider.GetRequiredService<ICommandService<UnregisterSessionCommand>>();
+
+			await leaveRoomService.ExecuteAsync(new LeaveRoomCommand
+			{
+				SessionId = httpContext.TraceIdentifier,
+				Room = "test"
+			}).ConfigureAwait(false);
+
+			await unregisterService.ExecuteAsync(new UnregisterSessionCommand
+			{
+				SessionId = httpContext.TraceIdentifier
+			}).ConfigureAwait(false);
+
+			await removeSocketService.ExecuteAsync(new RemoveSocketCommand
+			{
+				SessionId = httpContext.TraceIdentifier
+			}).ConfigureAwait(false);
 		}
 
 		public ValueTask OnReceiveAsync(HttpContext httpContext, WebSocket socket, ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken)

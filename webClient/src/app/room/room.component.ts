@@ -15,6 +15,7 @@ export class RoomComponent implements OnInit, OnDestroy {
 	channelName: string;
 	entryMessage: string;
 	history: string[] = [];
+	players: string[] = [];
 
 	private m_Encoder = new TextEncoder();
 	private m_Decoder = new TextDecoder();
@@ -50,7 +51,7 @@ export class RoomComponent implements OnInit, OnDestroy {
 		this.m_MessageSubscriptions.push(
 			this.m_ChatClient.receiver
 				.pipe(
-					filter(msg => msg.subject == 'connect.receive'),
+					filter(msg => msg.subject == 'chat.receive'),
 					map(msg => {
 						const content = chat.ChatContent.decode(msg.payload);
 
@@ -60,7 +61,24 @@ export class RoomComponent implements OnInit, OnDestroy {
 				.subscribe(this.onReceive.bind(this))
 		);
 
+		this.m_MessageSubscriptions.push(
+			this.m_ChatClient.receiver
+				.pipe(
+					filter(msg => msg.subject == 'chat.room.list'),
+					map(msg => {
+						const reply = chat.PlayerList.decode(msg.payload);
+
+						return reply.players;
+					})
+				)
+				.subscribe(players => {
+					this.players = players;
+				})
+		);
+
 		await this.m_ChatClient.open();
+
+		await this.m_ChatClient.send("chat.player.list", '');
 	}
 
 	ngOnDestroy(): void {

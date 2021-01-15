@@ -8,6 +8,11 @@ message JoinRoomRequest {
     string room = 2;
 }
 
+message LeaveRoomRequest {
+    string session_id = 1;
+    string room = 2;
+}
+
 message RoomSessionsRequest {
     string room = 1;
 }

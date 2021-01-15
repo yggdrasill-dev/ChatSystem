@@ -53,6 +53,23 @@ namespace SessionServer
 				m_Logger.LogInformation($"({registration.SessionId}, {registration.Name}) registered.");
 			}));
 
+			subscriptions.Add(await m_MessageQueueService.SubscribeAsync("session.unregister", "unregister", async (sender, args) =>
+			{
+				using var scope = m_ServiceProvider.CreateScope();
+
+				var registration = PlayerRegistration.Parser.ParseFrom(args.Message.Data);
+				var command = scope.ServiceProvider.GetRequiredService<ICommandService<UnregisterSessionCommand>>();
+
+				await command.ExecuteAsync(new UnregisterSessionCommand
+				{
+					SessionId = registration.SessionId
+				});
+
+				await m_MessageQueueService.PublishAsync(args.Message.Reply, Encoding.UTF8.GetBytes("registered"));
+
+				m_Logger.LogInformation($"({registration.SessionId}, {registration.Name}) registered.");
+			}));
+
 			subscriptions.Add(await m_MessageQueueService.SubscribeAsync("session.get", "get", async (sender, args) =>
 			{
 				using var scope = m_ServiceProvider.CreateScope();

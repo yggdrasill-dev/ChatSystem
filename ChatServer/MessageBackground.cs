@@ -59,6 +59,7 @@ namespace ChatServer
 
 				var sendMsg = new SendPacket
 				{
+					Subject = "chat.receive",
 					Payload = sendContent.ToByteString()
 				};
 
@@ -84,46 +85,49 @@ namespace ChatServer
 				await m_MessageQueueService.PublishAsync("connect.send", sendMsg.ToByteArray());
 			}));
 
-			//subscriptions.Add(await m_MessageQueueService.SubscribeAsync("chat.player.list", "player.list", async (sender, args) =>
-			//{
-			//	var packet = QueuePacket.Parser.ParseFrom(args.Message.Data);
+			subscriptions.Add(await m_MessageQueueService.SubscribeAsync("chat.player.list", "player.list", async (sender, args) =>
+			{
+				var packet = QueuePacket.Parser.ParseFrom(args.Message.Data);
 
-			//	m_Logger.LogInformation($"Receive packet from {packet.SessionId}");
+				m_Logger.LogInformation($"chat.player.list => Receive packet from {packet.SessionId}");
 
-			//	var roomQuery = new RoomSessionsRequest
-			//	{
-			//		Room = "test"
-			//	};
+				var roomQuery = new RoomSessionsRequest
+				{
+					Room = "test"
+				};
 
-			//	var result = await m_MessageQueueService.RequestAsync("room.query", roomQuery.ToByteArray());
-			//	var playerQueryResponse = RoomSessionsResponse.Parser.ParseFrom(result.Data);
+				var result = await m_MessageQueueService.RequestAsync("room.query", roomQuery.ToByteArray());
+				var playerQueryResponse = RoomSessionsResponse.Parser.ParseFrom(result.Data);
+				var playersContent = new PlayerList();
 
-			//	var playersContent = new PlayerList();
+				m_Logger.LogInformation(string.Join(", ", playerQueryResponse.SessionIds));
+				foreach (var sessionId in playerQueryResponse.SessionIds)
+				{
+					var getPlayerQuery = new PlayerQuery
+					{
+						SessionId = sessionId
+					};
 
-			//	playersContent.Players.AddRange(playerQueryResponse.)
+					var queryReply = await m_MessageQueueService
+						.RequestAsync("session.get", getPlayerQuery.ToByteArray())
+						.ConfigureAwait(false);
 
-			//	var sendMsg = new SendPacket
-			//	{
-			//		Payload = sendContent.ToByteString()
-			//	};
+					var playerInfo = PlayerRegistration.Parser.ParseFrom(queryReply.Data);
 
-			//	switch (msg.Scope)
-			//	{
-			//		case Scope.Room:
+					playersContent.Players.Add(playerInfo.Name);
+					m_Logger.LogInformation($"query player ({playerInfo.SessionId}, {playerInfo.Name})");
+				}
 
+				var sendMsg = new SendPacket
+				{
+					Subject = "chat.room.list",
+					Payload = playersContent.ToByteString()
+				};
 
+				sendMsg.SessionIds.Add(packet.SessionId);
 
-
-			//			sendMsg.SessionIds.AddRange(queryResponse.SessionIds);
-			//			break;
-
-			//		case Scope.Person:
-			//			sendMsg.SessionIds.Add(packet.SessionId);
-			//			break;
-			//	}
-
-			//	m_Connection.Publish("connect.send", sendMsg.ToByteArray());
-			//}));
+				await m_MessageQueueService.PublishAsync("connect.send", sendMsg.ToByteArray());
+			}));
 
 			stoppingToken.Register(() =>
 			{

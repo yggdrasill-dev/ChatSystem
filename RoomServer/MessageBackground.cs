@@ -53,6 +53,24 @@ namespace RoomServer
 				m_Logger.LogInformation($"({request.SessionId}, {request.Room}) joined.");
 			}));
 
+			subscriptions.Add(await m_MessageQueueService.SubscribeAsync("room.leave", "leave", async (sender, args) =>
+			{
+				using var scope = m_ServiceProvider.CreateScope();
+
+				var request = LeaveRoomRequest.Parser.ParseFrom(args.Message.Data);
+				var command = scope.ServiceProvider.GetRequiredService<ICommandService<LeaveRoomCommand>>();
+
+				await command.ExecuteAsync(new LeaveRoomCommand
+				{
+					SessionId = request.SessionId,
+					Room = request.Room
+				});
+
+				await m_MessageQueueService.PublishAsync(args.Message.Reply, Encoding.UTF8.GetBytes("leaved"));
+
+				m_Logger.LogInformation($"({request.SessionId}, {request.Room}) leaved.");
+			}));
+
 			subscriptions.Add(await m_MessageQueueService.SubscribeAsync("room.query", "query", async (sender, args) =>
 			{
 				using var scope = m_ServiceProvider.CreateScope();

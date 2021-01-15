@@ -1,9 +1,0 @@
-syntax = "proto3";
-
-option csharp_namespace = "Chat.Protos";
-package chat;
-
-message JoinRoomRequest {
-    string session_id = 1;
-    string room = 2;
-}

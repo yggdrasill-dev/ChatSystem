@@ -79,9 +79,12 @@ namespace ChatConnector
 				.AddTransient<ICommandService<AddSocketCommand>, AddSocketCommandService>()
 				.AddTransient<ICommandService<SendQueueCommand>, SendQueueCommandService>()
 				.AddTransient<ICommandService<JoinRoomCommand>, JoinRoomCommandService>()
+				.AddTransient<ICommandService<UnregisterSessionCommand>, UnregisterSessionCommandService>()
+				.AddTransient<ICommandService<LeaveRoomCommand>, LeaveRoomCommandService>()
+				.AddTransient<ICommandService<RemoveSocketCommand>, RemoveSocketCommandService>()
 				.AddSingleton<WebSocketRepository>()
 				.AddMessageQueue()
-				.AddHostedService(sp => sp.GetRequiredService<MessageQueueBackground>());
+				.AddHostedService<MessageQueueBackground>();
 		}
 
 		// This method gets called by the runtime. Use this method to configure the HTTP request pipeline.

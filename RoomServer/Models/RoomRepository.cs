@@ -8,14 +8,25 @@ namespace RoomServer.Models
 {
 	public class RoomRepository
 	{
-		private readonly ConcurrentDictionary<string, ConcurrentBag<string>> m_Rooms =
-			new ConcurrentDictionary<string, ConcurrentBag<string>>();
+		private readonly ConcurrentDictionary<string, HashSet<string>> m_Rooms =
+			new ConcurrentDictionary<string, HashSet<string>>();
 
 		public ValueTask JoinRoomAsync(string sessionId, string room)
 		{
-			var roomList = m_Rooms.GetOrAdd(room, roomKey => new ConcurrentBag<string>());
+			var roomList = m_Rooms.GetOrAdd(room, roomKey => new HashSet<string>(StringComparer.InvariantCulture));
 
-			roomList.Add(sessionId);
+			lock (roomList)
+				roomList.Add(sessionId);
+
+			return ValueTask.CompletedTask;
+		}
+
+		public ValueTask LeaveRoomAsync(string sessionId, string room)
+		{
+			var roomList = m_Rooms.GetOrAdd(room, roomKey => new HashSet<string>(StringComparer.InvariantCulture));
+
+			lock (roomList)
+				roomList.Remove(sessionId);
 
 			return ValueTask.CompletedTask;
 		}
@@ -23,7 +34,10 @@ namespace RoomServer.Models
 		public IAsyncEnumerable<string> QuerySessionsByRoomAsync(string room)
 		{
 			if (m_Rooms.TryGetValue(room, out var list))
-				return list.ToArray().ToAsyncEnumerable();
+			{
+				lock (list)
+					return list.ToArray().ToAsyncEnumerable();
+			}
 
 			return Array.Empty<string>().ToAsyncEnumerable();
 		}

@@ -1008,6 +1008,209 @@
             return ChatContent;
         })();
     
+        chat.PlayerList = (function() {
+    
+            /**
+             * Properties of a PlayerList.
+             * @memberof chat
+             * @interface IPlayerList
+             * @property {Array.<string>|null} [players] PlayerList players
+             */
+    
+            /**
+             * Constructs a new PlayerList.
+             * @memberof chat
+             * @classdesc Represents a PlayerList.
+             * @implements IPlayerList
+             * @constructor
+             * @param {chat.IPlayerList=} [properties] Properties to set
+             */
+            function PlayerList(properties) {
+                this.players = [];
+                if (properties)
+                    for (var keys = Object.keys(properties), i = 0; i < keys.length; ++i)
+                        if (properties[keys[i]] != null)
+                            this[keys[i]] = properties[keys[i]];
+            }
+    
+            /**
+             * PlayerList players.
+             * @member {Array.<string>} players
+             * @memberof chat.PlayerList
+             * @instance
+             */
+            PlayerList.prototype.players = $util.emptyArray;
+    
+            /**
+             * Creates a new PlayerList instance using the specified properties.
+             * @function create
+             * @memberof chat.PlayerList
+             * @static
+             * @param {chat.IPlayerList=} [properties] Properties to set
+             * @returns {chat.PlayerList} PlayerList instance
+             */
+            PlayerList.create = function create(properties) {
+                return new PlayerList(properties);
+            };
+    
+            /**
+             * Encodes the specified PlayerList message. Does not implicitly {@link chat.PlayerList.verify|verify} messages.
+             * @function encode
+             * @memberof chat.PlayerList
+             * @static
+             * @param {chat.IPlayerList} message PlayerList message or plain object to encode
+             * @param {$protobuf.Writer} [writer] Writer to encode to
+             * @returns {$protobuf.Writer} Writer
+             */
+            PlayerList.encode = function encode(message, writer) {
+                if (!writer)
+                    writer = $Writer.create();
+                if (message.players != null && message.players.length)
+                    for (var i = 0; i < message.players.length; ++i)
+                        writer.uint32(/* id 1, wireType 2 =*/10).string(message.players[i]);
+                return writer;
+            };
+    
+            /**
+             * Encodes the specified PlayerList message, length delimited. Does not implicitly {@link chat.PlayerList.verify|verify} messages.
+             * @function encodeDelimited
+             * @memberof chat.PlayerList
+             * @static
+             * @param {chat.IPlayerList} message PlayerList message or plain object to encode
+             * @param {$protobuf.Writer} [writer] Writer to encode to
+             * @returns {$protobuf.Writer} Writer
+             */
+            PlayerList.encodeDelimited = function encodeDelimited(message, writer) {
+                return this.encode(message, writer).ldelim();
+            };
+    
+            /**
+             * Decodes a PlayerList message from the specified reader or buffer.
+             * @function decode
+             * @memberof chat.PlayerList
+             * @static
+             * @param {$protobuf.Reader|Uint8Array} reader Reader or buffer to decode from
+             * @param {number} [length] Message length if known beforehand
+             * @returns {chat.PlayerList} PlayerList
+             * @throws {Error} If the payload is not a reader or valid buffer
+             * @throws {$protobuf.util.ProtocolError} If required fields are missing
+             */
+            PlayerList.decode = function decode(reader, length) {
+                if (!(reader instanceof $Reader))
+                    reader = $Reader.create(reader);
+                var end = length === undefined ? reader.len : reader.pos + length, message = new $root.chat.PlayerList();
+                while (reader.pos < end) {
+                    var tag = reader.uint32();
+                    switch (tag >>> 3) {
+                    case 1:
+                        if (!(message.players && message.players.length))
+                            message.players = [];
+                        message.players.push(reader.string());
+                        break;
+                    default:
+                        reader.skipType(tag & 7);
+                        break;
+                    }
+                }
+                return message;
+            };
+    
+            /**
+             * Decodes a PlayerList message from the specified reader or buffer, length delimited.
+             * @function decodeDelimited
+             * @memberof chat.PlayerList
+             * @static
+             * @param {$protobuf.Reader|Uint8Array} reader Reader or buffer to decode from
+             * @returns {chat.PlayerList} PlayerList
+             * @throws {Error} If the payload is not a reader or valid buffer
+             * @throws {$protobuf.util.ProtocolError} If required fields are missing
+             */
+            PlayerList.decodeDelimited = function decodeDelimited(reader) {
+                if (!(reader instanceof $Reader))
+                    reader = new $Reader(reader);
+                return this.decode(reader, reader.uint32());
+            };
+    
+            /**
+             * Verifies a PlayerList message.
+             * @function verify
+             * @memberof chat.PlayerList
+             * @static
+             * @param {Object.<string,*>} message Plain object to verify
+             * @returns {string|null} `null` if valid, otherwise the reason why it is not
+             */
+            PlayerList.verify = function verify(message) {
+                if (typeof message !== "object" || message === null)
+                    return "object expected";
+                if (message.players != null && message.hasOwnProperty("players")) {
+                    if (!Array.isArray(message.players))
+                        return "players: array expected";
+                    for (var i = 0; i < message.players.length; ++i)
+                        if (!$util.isString(message.players[i]))
+                            return "players: string[] expected";
+                }
+                return null;
+            };
+    
+            /**
+             * Creates a PlayerList message from a plain object. Also converts values to their respective internal types.
+             * @function fromObject
+             * @memberof chat.PlayerList
+             * @static
+             * @param {Object.<string,*>} object Plain object
+             * @returns {chat.PlayerList} PlayerList
+             */
+            PlayerList.fromObject = function fromObject(object) {
+                if (object instanceof $root.chat.PlayerList)
+                    return object;
+                var message = new $root.chat.PlayerList();
+                if (object.players) {
+                    if (!Array.isArray(object.players))
+                        throw TypeError(".chat.PlayerList.players: array expected");
+                    message.players = [];
+                    for (var i = 0; i < object.players.length; ++i)
+                        message.players[i] = String(object.players[i]);
+                }
+                return message;
+            };
+    
+            /**
+             * Creates a plain object from a PlayerList message. Also converts values to other types if specified.
+             * @function toObject
+             * @memberof chat.PlayerList
+             * @static
+             * @param {chat.PlayerList} message PlayerList
+             * @param {$protobuf.IConversionOptions} [options] Conversion options
+             * @returns {Object.<string,*>} Plain object
+             */
+            PlayerList.toObject = function toObject(message, options) {
+                if (!options)
+                    options = {};
+                var object = {};
+                if (options.arrays || options.defaults)
+                    object.players = [];
+                if (message.players && message.players.length) {
+                    object.players = [];
+                    for (var j = 0; j < message.players.length; ++j)
+                        object.players[j] = message.players[j];
+                }
+                return object;
+            };
+    
+            /**
+             * Converts this PlayerList to JSON.
+             * @function toJSON
+             * @memberof chat.PlayerList
+             * @instance
+             * @returns {Object.<string,*>} JSON object
+             */
+            PlayerList.prototype.toJSON = function toJSON() {
+                return this.constructor.toObject(this, $protobuf.util.toJSONOptions);
+            };
+    
+            return PlayerList;
+        })();
+    
         return chat;
     })();
 

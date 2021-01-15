@@ -11,6 +11,7 @@
         <option value="*">
           all
         </option>
+        <option *ngFor="let name of players" value="{{name}}">{{name}}</option>
       </select>
     </li>
     <li>

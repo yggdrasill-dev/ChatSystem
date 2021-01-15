@@ -15,6 +15,7 @@ namespace SessionServer
 						.AddMessageQueue()
 						.AddSingleton<SessionRepository>()
 						.AddTransient<ICommandService<RegisterCommand>, RegisterSessionService>()
+						.AddTransient<ICommandService<UnregisterSessionCommand>, UnregisterSessionCommandService>()
 						.AddTransient<IGetService<GetPlayerBySessionIdQuery, Registration?>, GetPlayerBySessionIdService>()
 						.AddHostedService<MessageBackground>();
 				});

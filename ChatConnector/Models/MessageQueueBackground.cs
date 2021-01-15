@@ -30,7 +30,7 @@ namespace ChatConnector.Models
 				var content = SendPacket.Parser.ParseFrom(args.Message.Data);
 				var msg = new ChatMessage
 				{
-					Subject = "connect.receive",
+					Subject = content.Subject,
 					Payload = content.Payload
 				};
 				var data = msg.ToByteArray();

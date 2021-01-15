@@ -9,6 +9,7 @@ message QueuePacket {
 }
 
 message SendPacket {
+	string subject = 1;
 	repeated string session_ids = 2;
 	bytes payload = 3;
 }
