@@ -1,6 +1,6 @@
 ﻿using System.Threading.Tasks;
 
-namespace ChatConnector.Models
+namespace Common
 {
 	public interface ICommandService<TCommand>
 	{

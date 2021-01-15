@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Chat.Protos;
 using ChatConnector.Models;
+using Common;
 using Google.Protobuf;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;

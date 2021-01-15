@@ -1,6 +1,6 @@
-﻿using Microsoft.Extensions.DependencyInjection;
+﻿using Common;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using NATS.Client;
 using RoomServer.Models;
 
 namespace RoomServer
@@ -12,7 +12,7 @@ namespace RoomServer
 				.ConfigureServices(services =>
 				{
 					services
-						.AddSingleton<ConnectionFactory>()
+						.AddMessageQueue()
 						.AddSingleton<RoomRepository>()
 						.AddTransient<ICommandService<JoinRoomCommand>, JoinRoomCommandService>()
 						.AddTransient<IQueryService<RoomSessionsQuery, string>, RoomSessionsQueryService>()

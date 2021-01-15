@@ -1,6 +1,6 @@
 ﻿using System.Collections.Generic;
 
-namespace RoomServer.Models
+namespace Common
 {
 	public interface IQueryService<TQuery, TResult>
 	{

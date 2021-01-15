@@ -1,8 +1,10 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Chat.Protos;
+using Common;
 using Google.Protobuf;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -14,23 +16,25 @@ namespace SessionServer
 {
 	internal class MessageBackground : BackgroundService
 	{
-		private readonly IConnection m_Connection;
 		private readonly IServiceProvider m_ServiceProvider;
+		private readonly IMessageQueueService m_MessageQueueService;
 		private readonly ILogger<MessageBackground> m_Logger;
 
 		public MessageBackground(
-			ConnectionFactory connectionFactory,
 			IServiceProvider serviceProvider,
+			IMessageQueueService messageQueueService,
 			ILogger<MessageBackground> logger)
 		{
-			m_Connection = connectionFactory.CreateConnection();
 			m_ServiceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
+			m_MessageQueueService = messageQueueService ?? throw new ArgumentNullException(nameof(messageQueueService));
 			m_Logger = logger;
 		}
 
-		protected override Task ExecuteAsync(CancellationToken stoppingToken)
+		protected override async Task ExecuteAsync(CancellationToken stoppingToken)
 		{
-			m_Connection.SubscribeAsync("session.register", "registration", async (sender, args) =>
+			var subscriptions = new List<IDisposable>();
+
+			subscriptions.Add(await m_MessageQueueService.SubscribeAsync("session.register", "registration", async (sender, args) =>
 			{
 				using var scope = m_ServiceProvider.CreateScope();
 
@@ -44,12 +48,12 @@ namespace SessionServer
 					Name = registration.Name
 				});
 
-				m_Connection.Publish(args.Message.Reply, Encoding.UTF8.GetBytes("registered"));
+				await m_MessageQueueService.PublishAsync(args.Message.Reply, Encoding.UTF8.GetBytes("registered"));
 
 				m_Logger.LogInformation($"({registration.SessionId}, {registration.Name}) registered.");
-			});
+			}));
 
-			m_Connection.SubscribeAsync("session.get", "get", async (sender, args) =>
+			subscriptions.Add(await m_MessageQueueService.SubscribeAsync("session.get", "get", async (sender, args) =>
 			{
 				using var scope = m_ServiceProvider.CreateScope();
 
@@ -70,10 +74,14 @@ namespace SessionServer
 					reply.Name = playerReg.Name;
 				}
 
-				m_Connection.Publish(args.Message.Reply, reply.ToByteArray());
-			});
+				await m_MessageQueueService.PublishAsync(args.Message.Reply, reply.ToByteArray());
+			}));
 
-			return Task.CompletedTask;
+			stoppingToken.Register(() =>
+			{
+				foreach (var sub in subscriptions)
+					sub.Dispose();
+			});
 		}
 	}
 }

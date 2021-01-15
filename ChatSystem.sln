@@ -13,7 +13,9 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "ChatServer", "ChatServer\Ch
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "AuthServer", "AuthServer\AuthServer.csproj", "{8B4311D8-27B4-4E64-8285-0FC474F2A4AF}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RoomServer", "RoomServer\RoomServer.csproj", "{B534F608-16A6-4A61-8C72-14B223F07F6F}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "RoomServer", "RoomServer\RoomServer.csproj", "{B534F608-16A6-4A61-8C72-14B223F07F6F}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Common", "Common\Common.csproj", "{A060F1E9-BC83-4672-8BD9-A7BE61C7EA1A}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -45,6 +47,10 @@ Global
 		{B534F608-16A6-4A61-8C72-14B223F07F6F}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{B534F608-16A6-4A61-8C72-14B223F07F6F}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{B534F608-16A6-4A61-8C72-14B223F07F6F}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A060F1E9-BC83-4672-8BD9-A7BE61C7EA1A}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A060F1E9-BC83-4672-8BD9-A7BE61C7EA1A}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A060F1E9-BC83-4672-8BD9-A7BE61C7EA1A}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A060F1E9-BC83-4672-8BD9-A7BE61C7EA1A}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

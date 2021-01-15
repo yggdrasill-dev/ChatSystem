@@ -1,42 +1,31 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Net.WebSockets;
 using System.Threading;
 using System.Threading.Tasks;
 using Chat.Protos;
+using Common;
 using Google.Protobuf;
 using Microsoft.Extensions.Hosting;
-using NATS.Client;
 
 namespace ChatConnector.Models
 {
-	public class MessageQueueService : BackgroundService
+	public class MessageQueueBackground : BackgroundService
 	{
-		private readonly IConnection m_Connection;
+		private readonly IMessageQueueService m_MessageQueueService;
 		private readonly WebSocketRepository m_WebSocketRepository;
 
-		public MessageQueueService(ConnectionFactory connectionFactory, WebSocketRepository webSocketRepository)
+		public MessageQueueBackground(IMessageQueueService messageQueueService, WebSocketRepository webSocketRepository)
 		{
-			m_Connection = connectionFactory.CreateConnection();
+			m_MessageQueueService = messageQueueService ?? throw new ArgumentNullException(nameof(messageQueueService));
 			m_WebSocketRepository = webSocketRepository ?? throw new ArgumentNullException(nameof(webSocketRepository));
 		}
 
-		public ValueTask PublishAsync(string subject, byte[] data)
+		protected override async Task ExecuteAsync(CancellationToken stoppingToken)
 		{
-			m_Connection.Publish(subject, data);
+			var subscriptions = new List<IDisposable>();
 
-			return ValueTask.CompletedTask;
-		}
-
-		public async ValueTask<Msg> RequestAsync(string subject, byte[] data)
-		{
-			return await m_Connection.RequestAsync(subject, data).ConfigureAwait(false);
-		}
-
-		protected override Task ExecuteAsync(CancellationToken stoppingToken)
-		{
-			m_Connection.SubscribeAsync("connect.send", async (sender, args) =>
+			subscriptions.Add(await m_MessageQueueService.SubscribeAsync("connect.send", async (sender, args) =>
 			{
 				var content = SendPacket.Parser.ParseFrom(args.Message.Data);
 				var msg = new ChatMessage
@@ -55,9 +44,13 @@ namespace ChatConnector.Models
 							true,
 							CancellationToken.None).ConfigureAwait(false);
 				}
-			});
+			}));
 
-			return Task.CompletedTask;
+			stoppingToken.Register(() =>
+			{
+				foreach (var sub in subscriptions)
+					sub.Dispose();
+			});
 		}
 	}
 }

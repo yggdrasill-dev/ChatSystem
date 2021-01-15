@@ -16,3 +16,7 @@ message ChatContent {
     string target = 3;
     string from = 4;
 }
+
+message PlayerList {
+    repeated string players = 1;
+}

@@ -1,6 +1,6 @@
-﻿using Microsoft.Extensions.DependencyInjection;
+﻿using Common;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using NATS.Client;
 using SessionServer.Models;
 
 namespace SessionServer
@@ -12,7 +12,7 @@ namespace SessionServer
 				.ConfigureServices(services =>
 				{
 					services
-						.AddSingleton<ConnectionFactory>()
+						.AddMessageQueue()
 						.AddSingleton<SessionRepository>()
 						.AddTransient<ICommandService<RegisterCommand>, RegisterSessionService>()
 						.AddTransient<IGetService<GetPlayerBySessionIdQuery, Registration?>, GetPlayerBySessionIdService>()

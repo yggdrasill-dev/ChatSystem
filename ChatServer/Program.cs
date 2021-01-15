@@ -17,7 +17,7 @@ namespace ChatServer
 				.ConfigureServices(services =>
 				{
 					services
-						.AddSingleton<ConnectionFactory>()
+						.AddMessageQueue()
 						.AddHostedService<MessageBackground>();
 				});
 	}

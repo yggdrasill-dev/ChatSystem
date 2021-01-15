@@ -1,6 +1,6 @@
 ﻿using System.Threading.Tasks;
 
-namespace RoomServer.Models
+namespace Common
 {
 	public interface IGetService<TQuery, TResult>
 	{

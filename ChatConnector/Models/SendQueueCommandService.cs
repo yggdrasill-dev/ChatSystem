@@ -1,15 +1,16 @@
 ﻿using System;
 using System.Threading.Tasks;
 using Chat.Protos;
+using Common;
 using Google.Protobuf;
 
 namespace ChatConnector.Models
 {
 	public class SendQueueCommandService : ICommandService<SendQueueCommand>
 	{
-		private readonly MessageQueueService m_MessageQueueService;
+		private readonly IMessageQueueService m_MessageQueueService;
 
-		public SendQueueCommandService(MessageQueueService messageQueueService)
+		public SendQueueCommandService(IMessageQueueService messageQueueService)
 		{
 			m_MessageQueueService = messageQueueService ?? throw new ArgumentNullException(nameof(messageQueueService));
 		}

@@ -10,28 +10,32 @@ using NATS.Client;
 using RoomServer.Models;
 using System.Linq;
 using Google.Protobuf;
+using Common;
+using System.Collections.Generic;
 
 namespace RoomServer
 {
 	public class MessageBackground : BackgroundService
 	{
-		private readonly IConnection m_Connection;
 		private readonly IServiceProvider m_ServiceProvider;
+		private readonly IMessageQueueService m_MessageQueueService;
 		private readonly ILogger<MessageBackground> m_Logger;
 
 		public MessageBackground(
-			ConnectionFactory connectionFactory,
 			IServiceProvider serviceProvider,
+			IMessageQueueService messageQueueService,
 			ILogger<MessageBackground> logger)
 		{
-			m_Connection = connectionFactory.CreateConnection();
 			m_ServiceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
+			m_MessageQueueService = messageQueueService ?? throw new ArgumentNullException(nameof(messageQueueService));
 			m_Logger = logger ?? throw new ArgumentNullException(nameof(logger));
 		}
 
-		protected override Task ExecuteAsync(CancellationToken stoppingToken)
+		protected override async Task ExecuteAsync(CancellationToken stoppingToken)
 		{
-			m_Connection.SubscribeAsync("room.join", "join", async (sender, args) =>
+			var subscriptions = new List<IDisposable>();
+
+			subscriptions.Add(await m_MessageQueueService.SubscribeAsync("room.join", "join", async (sender, args) =>
 			{
 				using var scope = m_ServiceProvider.CreateScope();
 
@@ -44,12 +48,12 @@ namespace RoomServer
 					Room = request.Room
 				});
 
-				m_Connection.Publish(args.Message.Reply, Encoding.UTF8.GetBytes("joined"));
+				await m_MessageQueueService.PublishAsync(args.Message.Reply, Encoding.UTF8.GetBytes("joined"));
 
 				m_Logger.LogInformation($"({request.SessionId}, {request.Room}) joined.");
-			});
+			}));
 
-			m_Connection.SubscribeAsync("room.query", "query", async (sender, args) =>
+			subscriptions.Add(await m_MessageQueueService.SubscribeAsync("room.query", "query", async (sender, args) =>
 			{
 				using var scope = m_ServiceProvider.CreateScope();
 
@@ -65,10 +69,14 @@ namespace RoomServer
 
 				response.SessionIds.AddRange(sessionIds);
 
-				m_Connection.Publish(args.Message.Reply, response.ToByteArray());
-			});
+				await m_MessageQueueService.PublishAsync(args.Message.Reply, response.ToByteArray());
+			}));
 
-			return Task.CompletedTask;
+			stoppingToken.Register(() =>
+			{
+				foreach (var sub in subscriptions)
+					sub.Dispose();
+			});
 		}
 	}
 }

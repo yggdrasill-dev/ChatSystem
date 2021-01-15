@@ -1,15 +1,16 @@
 ﻿using System;
 using System.Threading.Tasks;
 using Chat.Protos;
+using Common;
 using Google.Protobuf;
 
 namespace ChatConnector.Models
 {
 	public class RegisterSessionCommandService : ICommandService<RegisterSessionCommand>
 	{
-		private readonly MessageQueueService m_MessageQueueService;
+		private readonly IMessageQueueService m_MessageQueueService;
 
-		public RegisterSessionCommandService(MessageQueueService messageQueueService)
+		public RegisterSessionCommandService(IMessageQueueService messageQueueService)
 		{
 			m_MessageQueueService = messageQueueService ?? throw new ArgumentNullException(nameof(messageQueueService));
 		}
