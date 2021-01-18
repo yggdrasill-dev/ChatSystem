@@ -1,4 +1,6 @@
-﻿using Microsoft.Extensions.DependencyInjection;
+﻿using ChatServer.Models;
+using Common;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using NATS.Client;
 using System;
@@ -18,6 +20,8 @@ namespace ChatServer
 				{
 					services
 						.AddMessageQueue()
+						.AddTransient<IQueryService<GetPlayerQuery, PlayerInfo>, GetPlayerInfoService>()
+						.AddTransient<IQueryService<RoomListQuery, string>, RoomListQueryService>()
 						.AddHostedService<MessageBackground>();
 				});
 	}

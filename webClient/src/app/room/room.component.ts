@@ -16,6 +16,7 @@ export class RoomComponent implements OnInit, OnDestroy {
 	entryMessage: string;
 	history: string[] = [];
 	players: string[] = [];
+	sendTarget: string = "*";
 
 	private m_Encoder = new TextEncoder();
 	private m_Decoder = new TextDecoder();
@@ -92,15 +93,26 @@ export class RoomComponent implements OnInit, OnDestroy {
 		if (event.key != "Enter" /* Return */)
 			return;
 
+		let sendTarget = this.sendTarget;
 		let message = this.entryMessage;
 
 		if (message?.length > 0) {
-			let packet = chat.ChatContent.create({
-				scope: chat.Scope.ROOM,
-				message
-			});
+			if (sendTarget != '*') {
+				let packet = chat.ChatContent.create({
+					scope: chat.Scope.PERSON,
+					target: sendTarget,
+					message
+				});
 
-			this.m_ChatClient.send("chat.send", chat.ChatContent.encode(packet).finish());
+				this.m_ChatClient.send("chat.send", chat.ChatContent.encode(packet).finish());
+			} else {
+				let packet = chat.ChatContent.create({
+					scope: chat.Scope.ROOM,
+					message
+				});
+
+				this.m_ChatClient.send("chat.send", chat.ChatContent.encode(packet).finish());
+			}
 		}
 
 		this.entryMessage = "";

@@ -1,24 +1,28 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Chat.Protos;
+using ChatServer.Models;
 using Common;
 using Google.Protobuf;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using NATS.Client;
 
 namespace ChatServer
 {
 	public class MessageBackground : BackgroundService
 	{
 		private readonly IMessageQueueService m_MessageQueueService;
+		private readonly IServiceProvider m_ServiceProvider;
 		private readonly ILogger<MessageBackground> m_Logger;
 
-		public MessageBackground(IMessageQueueService messageQueueService, ILogger<MessageBackground> logger)
+		public MessageBackground(IMessageQueueService messageQueueService, IServiceProvider serviceProvider, ILogger<MessageBackground> logger)
 		{
 			m_MessageQueueService = messageQueueService ?? throw new System.ArgumentNullException(nameof(messageQueueService));
+			m_ServiceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
 			m_Logger = logger;
 		}
 
@@ -28,6 +32,8 @@ namespace ChatServer
 
 			subscriptions.Add(await m_MessageQueueService.SubscribeAsync("chat.send", "chat", async (sender, args) =>
 			{
+				using var scope = m_ServiceProvider.CreateScope();
+
 				var packet = QueuePacket.Parser.ParseFrom(args.Message.Data);
 
 				m_Logger.LogInformation($"Receive packet from {packet.SessionId}");
@@ -35,88 +41,95 @@ namespace ChatServer
 				var msg = ChatContent.Parser.ParseFrom(packet.Payload);
 				m_Logger.LogInformation($"Scope: {msg.Scope}, Target: {msg.Target}, Message: {msg.Message}");
 
-				var getPlayerQuery = new PlayerQuery
+				var getPlayerService = scope.ServiceProvider.GetRequiredService<IQueryService<GetPlayerQuery, PlayerInfo>>();
+				var roomListService = scope.ServiceProvider.GetRequiredService<IQueryService<RoomListQuery, string>>();
+
+				var playerInfo = await getPlayerService.QueryAsync(new GetPlayerQuery
 				{
-					SessionId = packet.SessionId
-				};
+					SessionIds = new[] { packet.SessionId }
+				}).FirstOrDefaultAsync().ConfigureAwait(false);
 
-				var queryReply = await m_MessageQueueService
-					.RequestAsync("session.get", getPlayerQuery.ToByteArray())
-					.ConfigureAwait(false);
-
-				var playerInfo = PlayerRegistration.Parser.ParseFrom(queryReply.Data);
-
-				if (playerInfo.SessionId != packet.SessionId)
+				if (playerInfo?.SessionId != packet.SessionId)
 					return;
 
 				var sendContent = new ChatContent
 				{
 					Scope = msg.Scope,
-					Target = msg.Target,
 					From = playerInfo.Name,
 					Message = msg.Message
 				};
 
 				var sendMsg = new SendPacket
 				{
-					Subject = "chat.receive",
-					Payload = sendContent.ToByteString()
+					Subject = "chat.receive"
 				};
+
+				var responseSessionIds = await roomListService.QueryAsync(new RoomListQuery
+				{
+					Room = "test"
+				}).ToArrayAsync().ConfigureAwait(false);
 
 				switch (msg.Scope)
 				{
 					case Scope.Room:
-						var roomQuery = new RoomSessionsRequest
-						{
-							Room = "test"
-						};
 
-						var result = await m_MessageQueueService.RequestAsync("room.query", roomQuery.ToByteArray());
-						var queryResponse = RoomSessionsResponse.Parser.ParseFrom(result.Data);
-
-						sendMsg.SessionIds.AddRange(queryResponse.SessionIds);
+						sendMsg.SessionIds.AddRange(responseSessionIds);
 						break;
 
 					case Scope.Person:
-						sendMsg.SessionIds.Add(packet.SessionId);
+
+						var targetName = msg.Target;
+
+						var roomPlayers = getPlayerService.QueryAsync(new GetPlayerQuery
+						{
+							SessionIds = responseSessionIds
+						});
+
+						var matchedPlayer = await roomPlayers
+							.Where(player => player.Name.Equals(targetName, StringComparison.OrdinalIgnoreCase))
+							.FirstOrDefaultAsync()
+							.ConfigureAwait(false);
+
+						if (matchedPlayer != null)
+						{
+							sendMsg.SessionIds.Add(matchedPlayer.SessionId);
+							sendMsg.SessionIds.Add(packet.SessionId);
+
+							sendContent.Target = matchedPlayer.Name;
+						}
+
 						break;
 				}
+
+				sendMsg.Payload = sendContent.ToByteString();
 
 				await m_MessageQueueService.PublishAsync("connect.send", sendMsg.ToByteArray());
 			}));
 
 			subscriptions.Add(await m_MessageQueueService.SubscribeAsync("chat.player.list", "player.list", async (sender, args) =>
 			{
+				using var scope = m_ServiceProvider.CreateScope();
+
 				var packet = QueuePacket.Parser.ParseFrom(args.Message.Data);
 
 				m_Logger.LogInformation($"chat.player.list => Receive packet from {packet.SessionId}");
 
-				var roomQuery = new RoomSessionsRequest
+				var getPlayersService = scope.ServiceProvider.GetRequiredService<IQueryService<GetPlayerQuery, PlayerInfo>>();
+				var roomListService = scope.ServiceProvider.GetRequiredService<IQueryService<RoomListQuery, string>>();
+
+				var responseSessionIds = roomListService.QueryAsync(new RoomListQuery
 				{
 					Room = "test"
-				};
+				});
 
-				var result = await m_MessageQueueService.RequestAsync("room.query", roomQuery.ToByteArray());
-				var playerQueryResponse = RoomSessionsResponse.Parser.ParseFrom(result.Data);
 				var playersContent = new PlayerList();
 
-				m_Logger.LogInformation(string.Join(", ", playerQueryResponse.SessionIds));
-				foreach (var sessionId in playerQueryResponse.SessionIds)
+				var allPlayers = getPlayersService.QueryAsync(new GetPlayerQuery
 				{
-					var getPlayerQuery = new PlayerQuery
-					{
-						SessionId = sessionId
-					};
+					SessionIds = await responseSessionIds.ToArrayAsync().ConfigureAwait(false)
+				});
 
-					var queryReply = await m_MessageQueueService
-						.RequestAsync("session.get", getPlayerQuery.ToByteArray())
-						.ConfigureAwait(false);
-
-					var playerInfo = PlayerRegistration.Parser.ParseFrom(queryReply.Data);
-
-					playersContent.Players.Add(playerInfo.Name);
-					m_Logger.LogInformation($"query player ({playerInfo.SessionId}, {playerInfo.Name})");
-				}
+				playersContent.Players.AddRange(allPlayers.Select(player => player.Name).ToEnumerable());
 
 				var sendMsg = new SendPacket
 				{
