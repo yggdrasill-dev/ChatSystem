@@ -6,9 +6,9 @@ namespace SessionServer.Models
 {
 	public class RegisterSessionService : ICommandService<RegisterCommand>
 	{
-		private readonly SessionRepository m_Repository;
+		private readonly ISessionRepository m_Repository;
 
-		public RegisterSessionService(SessionRepository repository)
+		public RegisterSessionService(ISessionRepository repository)
 		{
 			m_Repository = repository ?? throw new ArgumentNullException(nameof(repository));
 		}

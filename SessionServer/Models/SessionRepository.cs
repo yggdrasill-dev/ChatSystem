@@ -1,12 +1,9 @@
-﻿using System;
-using System.Collections.Concurrent;
-using System.Collections.Generic;
-using System.Linq;
+﻿using System.Collections.Concurrent;
 using System.Threading.Tasks;
 
 namespace SessionServer.Models
 {
-	public class SessionRepository
+	internal class SessionRepository : ISessionRepository
 	{
 		private readonly ConcurrentDictionary<string, Registration> m_Sessions = new ConcurrentDictionary<string, Registration>();
 

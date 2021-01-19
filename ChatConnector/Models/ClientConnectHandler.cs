@@ -4,7 +4,6 @@ using System.Net.WebSockets;
 using System.Threading;
 using System.Threading.Tasks;
 using Chat.Protos;
-using ChatConnector.Models;
 using Common;
 using Google.Protobuf;
 using Microsoft.AspNetCore.Http;
@@ -12,7 +11,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Valhalla.WebSockets;
 
-namespace ChatConnector
+namespace ChatConnector.Models
 {
 	public class ClientConnectHandler : IWebSocketConnectionHandler
 	{

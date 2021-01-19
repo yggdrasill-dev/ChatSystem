@@ -6,9 +6,9 @@ namespace SessionServer.Models
 {
 	public class GetPlayerBySessionIdService : IGetService<GetPlayerBySessionIdQuery, Registration?>
 	{
-		private readonly SessionRepository m_SessionRepository;
+		private readonly ISessionRepository m_SessionRepository;
 
-		public GetPlayerBySessionIdService(SessionRepository sessionRepository)
+		public GetPlayerBySessionIdService(ISessionRepository sessionRepository)
 		{
 			m_SessionRepository = sessionRepository ?? throw new ArgumentNullException(nameof(sessionRepository));
 		}

@@ -19,7 +19,7 @@ namespace SessionServer
 								.AddHandler<UnregisterSessionHandler>("session.unregister", "session.unregister")
 								.AddHandler<GetSessionHandler>("session.get", "session.get");
 						})
-						.AddSingleton<SessionRepository>()
+						.AddSingleton<ISessionRepository, SessionRepository>()
 						.AddTransient<ICommandService<RegisterCommand>, RegisterSessionService>()
 						.AddTransient<ICommandService<UnregisterSessionCommand>, UnregisterSessionCommandService>()
 						.AddTransient<IGetService<GetPlayerBySessionIdQuery, Registration?>, GetPlayerBySessionIdService>();
