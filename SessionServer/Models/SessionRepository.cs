@@ -1,32 +1,40 @@
-﻿using System.Collections.Concurrent;
+﻿using System.Text.Json;
 using System.Threading.Tasks;
+using StackExchange.Redis;
 
 namespace SessionServer.Models
 {
 	internal class SessionRepository : ISessionRepository
 	{
-		private readonly ConcurrentDictionary<string, Registration> m_Sessions = new ConcurrentDictionary<string, Registration>();
+		private readonly IDatabase m_Database;
 
-		public ValueTask RegisterSessionAsync(Registration reg)
+		public SessionRepository(IDatabase database)
 		{
-			m_Sessions.TryAdd(reg.SessionId, reg);
-
-			return ValueTask.CompletedTask;
+			m_Database = database ?? throw new System.ArgumentNullException(nameof(database));
 		}
 
-		public ValueTask UnregisterSessionBySessionIdAsync(string sessionId)
+		public async ValueTask RegisterSessionAsync(Registration reg)
 		{
-			m_Sessions.TryRemove(sessionId, out var _);
-
-			return ValueTask.CompletedTask;
+			await m_Database.StringSetAsync(
+				$"Sessions:{reg.SessionId}",
+				JsonSerializer.Serialize(reg)).ConfigureAwait(false);
 		}
 
-		public ValueTask<Registration?> GetRegistrationAsync(string sessionId)
+		public async ValueTask UnregisterSessionBySessionIdAsync(string sessionId)
 		{
-			if (m_Sessions.TryGetValue(sessionId, out var result))
-				return new ValueTask<Registration?>(result);
+			await m_Database.KeyDeleteAsync($"Sessions:{sessionId}").ConfigureAwait(false);
+		}
+
+		public async ValueTask<Registration?> GetRegistrationAsync(string sessionId)
+		{
+			var result = await m_Database
+				.StringGetAsync($"Sessions:{sessionId}")
+				.ConfigureAwait(false);
+
+			if (result.IsNullOrEmpty)
+				return null;
 			else
-				return new ValueTask<Registration?>(default(Registration));
+				return JsonSerializer.Deserialize<Registration>(result);
 		}
 	}
 }

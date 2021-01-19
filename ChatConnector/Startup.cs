@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.IdentityModel.Tokens.Jwt;
 using ChatConnector.Models;
@@ -15,6 +16,8 @@ namespace ChatConnector
 {
 	public class Startup
 	{
+		private readonly Guid m_ConnectorId = Guid.NewGuid();
+
 		// This method gets called by the runtime. Use this method to add services to the container.
 		// For more information on how to configure your application, visit https://go.microsoft.com/fwlink/?LinkID=398940
 		public void ConfigureServices(IServiceCollection services)
@@ -85,7 +88,9 @@ namespace ChatConnector
 				.AddSingleton<WebSocketRepository>()
 				.AddMessageQueue(config =>
 				{
-					config.AddHandler<ConnectSendHandler>("connect.send");
+					config
+						.AddHandler<ConnectSendHandler>("connect.send")
+						.AddHandler<ConnectSendHandler>($"connect.send.{m_ConnectorId:N}");
 				});
 		}
 
@@ -104,7 +109,7 @@ namespace ChatConnector
 			app.UseAuthorization();
 			app.UseEndpoints(endpoints =>
 			{
-				endpoints.MapWebSocketManager<ClientConnectHandler>("/ws");
+				endpoints.MapWebSocketManager<ClientConnectHandler>("/ws", m_ConnectorId.ToString("N"));
 				endpoints.MapControllers();
 				endpoints.MapRazorPages();
 			});

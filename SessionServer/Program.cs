@@ -2,6 +2,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using SessionServer.Models;
+using StackExchange.Redis;
 
 namespace SessionServer
 {
@@ -19,6 +20,8 @@ namespace SessionServer
 								.AddHandler<UnregisterSessionHandler>("session.unregister", "session.unregister")
 								.AddHandler<GetSessionHandler>("session.get", "session.get");
 						})
+						.AddSingleton(sp => ConnectionMultiplexer.Connect("localhost:6379"))
+						.AddSingleton(sp => sp.GetRequiredService<ConnectionMultiplexer>().GetDatabase())
 						.AddSingleton<ISessionRepository, SessionRepository>()
 						.AddTransient<ICommandService<RegisterCommand>, RegisterSessionService>()
 						.AddTransient<ICommandService<UnregisterSessionCommand>, UnregisterSessionCommandService>()

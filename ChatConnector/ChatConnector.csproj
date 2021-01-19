@@ -13,7 +13,7 @@
     </PackageReference>
     <PackageReference Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" Version="5.0.2" />
     <PackageReference Include="Microsoft.VisualStudio.Web.CodeGeneration.Design" Version="5.0.1" />
-    <PackageReference Include="ValhallaWebSockets" Version="0.0.6" />
+    <PackageReference Include="ValhallaWebSockets" Version="0.0.7" />
   </ItemGroup>
 
   <ItemGroup>

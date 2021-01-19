@@ -16,15 +16,22 @@ namespace ChatConnector.Models
 	public class ClientConnectHandler : IWebSocketConnectionHandler
 	{
 		private readonly ILogger<ClientConnectHandler> m_Logger;
-		private readonly Guid m_ConnectorId = Guid.NewGuid();
+		private readonly string m_ConnectorId;
 
 		public ClientConnectHandler(
+			string connectorId,
 			ILogger<ClientConnectHandler> logger)
 		{
+			m_ConnectorId = connectorId;
 			m_Logger = logger ?? throw new ArgumentNullException(nameof(logger));
 		}
 
-		public ValueTask OnCloseAsync(HttpContext httpContext, WebSocket socket, WebSocketCloseStatus? closeStatus, string closeDescription, CancellationToken cancellationToken)
+		public ValueTask OnCloseAsync(
+			HttpContext httpContext,
+			WebSocket socket,
+			WebSocketCloseStatus? closeStatus,
+			string closeDescription,
+			CancellationToken cancellationToken)
 		{
 			m_Logger.LogInformation($"{httpContext.TraceIdentifier} closed!");
 
@@ -69,7 +76,7 @@ namespace ChatConnector.Models
 				await regCommandService.ExecuteAsync(new RegisterSessionCommand
 				{
 					SessionId = httpContext.TraceIdentifier,
-					ConnectorId = m_ConnectorId.ToString("N"),
+					ConnectorId = m_ConnectorId,
 					Name = httpContext.User.Identity.Name
 				});
 

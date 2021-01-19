@@ -53,31 +53,40 @@ namespace ChatServer.Models
 				Message = content.Message
 			};
 
-			var sendMsg = new SendPacket
-			{
-				Subject = "chat.receive"
-			};
-
 			var responseSessionIds = await m_RoomListService.QueryAsync(new RoomListQuery
 			{
 				Room = "test"
 			}).ToArrayAsync().ConfigureAwait(false);
 
+			var roomPlayers = m_QueryPlayerService.QueryAsync(new GetPlayerQuery
+			{
+				SessionIds = responseSessionIds
+			});
+
 			switch (content.Scope)
 			{
 				case Scope.Room:
+					var contentByteString = sendContent.ToByteString();
 
-					sendMsg.SessionIds.AddRange(responseSessionIds);
+					await foreach (var g in roomPlayers.GroupBy(player => player.ConnectorId))
+					{
+						var sendMsg = new SendPacket
+						{
+							Subject = "chat.receive"
+						};
+
+						sendMsg.SessionIds.AddRange(responseSessionIds);
+
+						sendMsg.Payload = contentByteString;
+
+						await m_MessageQueueService.PublishAsync(
+							$"connect.send.{g.Key}", sendMsg.ToByteArray()).ConfigureAwait(false);
+					}
 					break;
 
 				case Scope.Person:
 
 					var targetName = content.Target;
-
-					var roomPlayers = m_QueryPlayerService.QueryAsync(new GetPlayerQuery
-					{
-						SessionIds = responseSessionIds
-					});
 
 					var matchedPlayer = await roomPlayers
 						.Where(player => player.Name.Equals(targetName, StringComparison.OrdinalIgnoreCase))
@@ -86,18 +95,22 @@ namespace ChatServer.Models
 
 					if (matchedPlayer != null)
 					{
+						var sendMsg = new SendPacket
+						{
+							Subject = "chat.receive"
+						};
+
 						sendMsg.SessionIds.Add(matchedPlayer.SessionId);
 						sendMsg.SessionIds.Add(packet.SessionId);
 
 						sendContent.Target = matchedPlayer.Name;
-					}
+						sendMsg.Payload = sendContent.ToByteString();
 
+						await m_MessageQueueService.PublishAsync(
+							$"connect.send.{matchedPlayer.ConnectorId}", sendMsg.ToByteArray()).ConfigureAwait(false);
+					}
 					break;
 			}
-
-			sendMsg.Payload = sendContent.ToByteString();
-
-			await m_MessageQueueService.PublishAsync("connect.send", sendMsg.ToByteArray());
 		}
 	}
 }
