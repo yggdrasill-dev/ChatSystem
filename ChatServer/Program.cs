@@ -26,7 +26,8 @@ namespace ChatServer
 								.AddHandler<PlayerListHandler>("chat.player.list", "chat.player.list");
 						})
 						.AddTransient<IQueryService<GetPlayerQuery, PlayerInfo>, PlayerInfoQueryService>()
-						.AddTransient<IQueryService<RoomListQuery, string>, RoomListQueryService>();
+						.AddTransient<IQueryService<RoomListQuery, string>, RoomListQueryService>()
+						.AddTransient<ICommandService<LeaveRoomCommand>, LeaveRoomCommandService>();
 				});
 	}
 }

@@ -1,4 +1,5 @@
-﻿using System.Text.Json;
+﻿using System;
+using System.Text.Json;
 using System.Threading.Tasks;
 using StackExchange.Redis;
 
@@ -17,7 +18,8 @@ namespace SessionServer.Models
 		{
 			await m_Database.StringSetAsync(
 				$"Sessions:{reg.SessionId}",
-				JsonSerializer.Serialize(reg)).ConfigureAwait(false);
+				JsonSerializer.Serialize(reg),
+				expiry: TimeSpan.FromSeconds(30)).ConfigureAwait(false);
 		}
 
 		public async ValueTask UnregisterSessionBySessionIdAsync(string sessionId)
@@ -35,6 +37,13 @@ namespace SessionServer.Models
 				return null;
 			else
 				return JsonSerializer.Deserialize<Registration>(result);
+		}
+
+		public async ValueTask ActiveSessionAsync(string sessionId)
+		{
+			await m_Database.KeyExpireAsync(
+				$"Sessions:{sessionId}",
+				TimeSpan.FromSeconds(30)).ConfigureAwait(false);
 		}
 	}
 }

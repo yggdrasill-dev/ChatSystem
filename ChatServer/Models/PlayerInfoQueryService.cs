@@ -9,10 +9,14 @@ namespace ChatServer.Models
 	public class PlayerInfoQueryService : IQueryService<GetPlayerQuery, PlayerInfo>
 	{
 		private readonly IMessageQueueService m_MessageQueueService;
+		private readonly ICommandService<LeaveRoomCommand> m_LeaveRoomService;
 
-		public PlayerInfoQueryService(IMessageQueueService messageQueueService)
+		public PlayerInfoQueryService(
+			IMessageQueueService messageQueueService,
+			ICommandService<LeaveRoomCommand> leaveRoomService)
 		{
 			m_MessageQueueService = messageQueueService ?? throw new ArgumentNullException(nameof(messageQueueService));
+			m_LeaveRoomService = leaveRoomService ?? throw new ArgumentNullException(nameof(leaveRoomService));
 		}
 
 		public async IAsyncEnumerable<PlayerInfo> QueryAsync(GetPlayerQuery query)
@@ -30,7 +34,14 @@ namespace ChatServer.Models
 
 				var data = PlayerRegistration.Parser.ParseFrom(queryReply.Data);
 
-				yield return new PlayerInfo(data.SessionId, data.ConnectorId, data.Name);
+				if (sessionId != data.SessionId)
+					await m_LeaveRoomService.ExecuteAsync(new LeaveRoomCommand
+					{
+						SessionId = sessionId,
+						Room = "test"
+					}).ConfigureAwait(false);
+				else
+					yield return new PlayerInfo(data.SessionId, data.ConnectorId, data.Name);
 			}
 		}
 	}

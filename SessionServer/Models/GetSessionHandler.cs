@@ -30,16 +30,20 @@ namespace SessionServer.Models
 				SessionId = query.SessionId
 			}).ConfigureAwait(false);
 
-			var reply = new PlayerRegistration();
+
 
 			if (playerReg != null)
 			{
+				var reply = new PlayerRegistration();
+
 				reply.SessionId = playerReg.SessionId;
 				reply.ConnectorId = playerReg.ConnectorId;
 				reply.Name = playerReg.Name;
-			}
 
-			await m_MessageQueueService.PublishAsync(msg.Reply, reply.ToByteArray());
+				await m_MessageQueueService.PublishAsync(msg.Reply, reply.ToByteArray()).ConfigureAwait(false);
+			}
+			else
+				await m_MessageQueueService.PublishAsync(msg.Reply, null).ConfigureAwait(false);
 		}
 	}
 }

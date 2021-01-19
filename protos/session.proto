@@ -12,3 +12,7 @@ message PlayerRegistration {
 message PlayerQuery {
 	string session_id = 1;
 }
+
+message ActiveSessions {
+	repeated string session_ids = 1;
+}

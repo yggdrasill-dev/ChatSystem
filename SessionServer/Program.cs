@@ -18,7 +18,8 @@ namespace SessionServer
 							config
 								.AddHandler<RegisterSessionHandler>("session.register", "session.register")
 								.AddHandler<UnregisterSessionHandler>("session.unregister", "session.unregister")
-								.AddHandler<GetSessionHandler>("session.get", "session.get");
+								.AddHandler<GetSessionHandler>("session.get", "session.get")
+								.AddHandler<ActiveSessionHandler>("session.active", "session.active");
 						})
 						.AddSingleton(sp => ConnectionMultiplexer.Connect("localhost:6379"))
 						.AddSingleton(sp => sp.GetRequiredService<ConnectionMultiplexer>().GetDatabase())

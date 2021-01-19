@@ -11,6 +11,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.IdentityModel.Protocols.OpenIdConnect;
 using NATS.Client;
+using Quartz;
 
 namespace ChatConnector
 {
@@ -91,6 +92,18 @@ namespace ChatConnector
 					config
 						.AddHandler<ConnectSendHandler>("connect.send")
 						.AddHandler<ConnectSendHandler>($"connect.send.{m_ConnectorId:N}");
+				})
+				.AddQuartz(config =>
+				{
+					config.UseMicrosoftDependencyInjectionScopedJobFactory();
+					config.ScheduleJob<ActiveSessionsJob>(trigger => trigger
+						.WithIdentity("ActiveSessions")
+						.StartAt(DateTimeOffset.UtcNow.AddSeconds(10D))
+						.WithDailyTimeIntervalSchedule(x => x.WithIntervalInSeconds(10)));
+				})
+				.AddQuartzServer(options =>
+				{
+					options.WaitForJobsToComplete = false;
 				});
 		}
 
