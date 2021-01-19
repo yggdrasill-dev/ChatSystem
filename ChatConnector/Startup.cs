@@ -83,8 +83,10 @@ namespace ChatConnector
 				.AddTransient<ICommandService<LeaveRoomCommand>, LeaveRoomCommandService>()
 				.AddTransient<ICommandService<RemoveSocketCommand>, RemoveSocketCommandService>()
 				.AddSingleton<WebSocketRepository>()
-				.AddMessageQueue()
-				.AddHostedService<MessageQueueBackground>();
+				.AddMessageQueue(config =>
+				{
+					config.AddHandler<ConnectSendHandler>("connect.send");
+				});
 		}
 
 		// This method gets called by the runtime. Use this method to configure the HTTP request pipeline.

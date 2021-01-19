@@ -19,10 +19,14 @@ namespace ChatServer
 				.ConfigureServices(services =>
 				{
 					services
-						.AddMessageQueue()
+						.AddMessageQueue(config =>
+						{
+							config
+								.AddHandler<ChatSendHandler>("chat.send", "chat.send")
+								.AddHandler<PlayerListHandler>("chat.player.list", "chat.player.list");
+						})
 						.AddTransient<IQueryService<GetPlayerQuery, PlayerInfo>, GetPlayerInfoService>()
-						.AddTransient<IQueryService<RoomListQuery, string>, RoomListQueryService>()
-						.AddHostedService<MessageBackground>();
+						.AddTransient<IQueryService<RoomListQuery, string>, RoomListQueryService>();
 				});
 	}
 }

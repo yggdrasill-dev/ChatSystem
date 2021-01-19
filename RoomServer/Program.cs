@@ -12,12 +12,17 @@ namespace RoomServer
 				.ConfigureServices(services =>
 				{
 					services
-						.AddMessageQueue()
+						.AddMessageQueue(config =>
+						{
+							config
+								.AddHandler<JoinRoomHandler>("room.join", "room.join")
+								.AddHandler<LeaveRoomHandler>("room.leave", "room.leave")
+								.AddHandler<QueryRoomHandler>("room.query", "room.query");
+						})
 						.AddSingleton<RoomRepository>()
 						.AddTransient<ICommandService<JoinRoomCommand>, JoinRoomCommandService>()
 						.AddTransient<ICommandService<LeaveRoomCommand>, LeaveRoomCommandService>()
-						.AddTransient<IQueryService<RoomSessionsQuery, string>, RoomSessionsQueryService>()
-						.AddHostedService<MessageBackground>();
+						.AddTransient<IQueryService<RoomSessionsQuery, string>, RoomSessionsQueryService>();
 				});
 
 		private static void Main(string[] args)

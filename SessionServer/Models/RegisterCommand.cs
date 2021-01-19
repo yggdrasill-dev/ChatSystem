@@ -1,6 +1,11 @@
 ﻿namespace SessionServer.Models
 {
-	public class RegisterCommand : Registration
+	public struct RegisterCommand
 	{
+		public string SessionId { get; set; }
+
+		public string ConnectorId { get; set; }
+
+		public string Name { get; set; }
 	}
 }

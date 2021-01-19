@@ -15,7 +15,8 @@ namespace SessionServer.Models
 
 		public ValueTask ExecuteAsync(RegisterCommand command)
 		{
-			return m_Repository.RegisterSessionAsync(command);
+			return m_Repository.RegisterSessionAsync(
+				new Registration(command.SessionId, command.ConnectorId, command.Name));
 		}
 	}
 }

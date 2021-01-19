@@ -12,12 +12,17 @@ namespace SessionServer
 				.ConfigureServices(services =>
 				{
 					services
-						.AddMessageQueue()
+						.AddMessageQueue(config =>
+						{
+							config
+								.AddHandler<RegisterSessionHandler>("session.register", "session.register")
+								.AddHandler<UnregisterSessionHandler>("session.unregister", "session.unregister")
+								.AddHandler<GetSessionHandler>("session.get", "session.get");
+						})
 						.AddSingleton<SessionRepository>()
 						.AddTransient<ICommandService<RegisterCommand>, RegisterSessionService>()
 						.AddTransient<ICommandService<UnregisterSessionCommand>, UnregisterSessionCommandService>()
-						.AddTransient<IGetService<GetPlayerBySessionIdQuery, Registration?>, GetPlayerBySessionIdService>()
-						.AddHostedService<MessageBackground>();
+						.AddTransient<IGetService<GetPlayerBySessionIdQuery, Registration?>, GetPlayerBySessionIdService>();
 				});
 
 		private static void Main(string[] args)
