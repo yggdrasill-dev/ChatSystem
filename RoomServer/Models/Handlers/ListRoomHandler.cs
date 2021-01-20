@@ -6,7 +6,7 @@ using Chat.Protos;
 using Common;
 using NATS.Client;
 
-namespace RoomServer.Models
+namespace RoomServer.Models.Handlers
 {
 	public class ListRoomHandler : IMessageHandler
 	{

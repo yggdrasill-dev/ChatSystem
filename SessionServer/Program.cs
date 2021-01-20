@@ -2,6 +2,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using SessionServer.Models;
+using SessionServer.Models.Handlers;
 using StackExchange.Redis;
 
 namespace SessionServer

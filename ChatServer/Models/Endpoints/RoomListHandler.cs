@@ -7,7 +7,7 @@ using Common;
 using Google.Protobuf;
 using NATS.Client;
 
-namespace ChatServer.Models
+namespace ChatServer.Models.Endpoints
 {
 	public class RoomListHandler : IMessageHandler
 	{

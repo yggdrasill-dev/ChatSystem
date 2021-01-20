@@ -7,7 +7,7 @@ using Common;
 using Google.Protobuf;
 using NATS.Client;
 
-namespace ChatConnector.Models
+namespace ChatConnector.Models.Handlers
 {
 	public class ConnectSendHandler : IMessageHandler
 	{

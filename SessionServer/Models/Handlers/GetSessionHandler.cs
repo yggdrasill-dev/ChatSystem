@@ -6,7 +6,7 @@ using Common;
 using Google.Protobuf;
 using NATS.Client;
 
-namespace SessionServer.Models
+namespace SessionServer.Models.Handlers
 {
 	public class GetSessionHandler : IMessageHandler
 	{

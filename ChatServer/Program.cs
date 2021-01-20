@@ -1,4 +1,5 @@
 ﻿using ChatServer.Models;
+using ChatServer.Models.Endpoints;
 using Common;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;

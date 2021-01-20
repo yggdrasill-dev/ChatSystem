@@ -7,7 +7,7 @@ using Common;
 using Google.Protobuf;
 using NATS.Client;
 
-namespace RoomServer.Models
+namespace RoomServer.Models.Handlers
 {
 	public class QueryRoomHandler : IMessageHandler
 	{

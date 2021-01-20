@@ -2,6 +2,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using RoomServer.Models;
+using RoomServer.Models.Handlers;
 
 namespace RoomServer
 {

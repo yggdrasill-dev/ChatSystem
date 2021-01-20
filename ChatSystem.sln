@@ -5,8 +5,6 @@ VisualStudioVersion = 16.0.30804.86
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "ChatConnector", "ChatConnector\ChatConnector.csproj", "{799FB644-0B11-4AFC-8863-1F93A4B89DAA}"
 EndProject
-Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "WebSocketTest", "WebSocketTest\WebSocketTest.csproj", "{FC91D3E3-5D1C-435A-9862-5251EED3FAC6}"
-EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "SessionServer", "SessionServer\SessionServer.csproj", "{3AD5A45B-4543-4CA1-A6B0-F0A76AC35323}"
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "ChatServer", "ChatServer\ChatServer.csproj", "{225642F4-A062-449D-B5FC-98FFDF539CEE}"
@@ -15,7 +13,7 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "AuthServer", "AuthServer\Au
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "RoomServer", "RoomServer\RoomServer.csproj", "{B534F608-16A6-4A61-8C72-14B223F07F6F}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Common", "Common\Common.csproj", "{A060F1E9-BC83-4672-8BD9-A7BE61C7EA1A}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Common", "Common\Common.csproj", "{A060F1E9-BC83-4672-8BD9-A7BE61C7EA1A}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -27,10 +25,6 @@ Global
 		{799FB644-0B11-4AFC-8863-1F93A4B89DAA}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{799FB644-0B11-4AFC-8863-1F93A4B89DAA}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{799FB644-0B11-4AFC-8863-1F93A4B89DAA}.Release|Any CPU.Build.0 = Release|Any CPU
-		{FC91D3E3-5D1C-435A-9862-5251EED3FAC6}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{FC91D3E3-5D1C-435A-9862-5251EED3FAC6}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{FC91D3E3-5D1C-435A-9862-5251EED3FAC6}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{FC91D3E3-5D1C-435A-9862-5251EED3FAC6}.Release|Any CPU.Build.0 = Release|Any CPU
 		{3AD5A45B-4543-4CA1-A6B0-F0A76AC35323}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{3AD5A45B-4543-4CA1-A6B0-F0A76AC35323}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{3AD5A45B-4543-4CA1-A6B0-F0A76AC35323}.Release|Any CPU.ActiveCfg = Release|Any CPU

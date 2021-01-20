@@ -8,7 +8,7 @@ using Google.Protobuf;
 using Microsoft.Extensions.Logging;
 using NATS.Client;
 
-namespace ChatServer.Models
+namespace ChatServer.Models.Endpoints
 {
 	public class PlayerListHandler : IMessageHandler
 	{

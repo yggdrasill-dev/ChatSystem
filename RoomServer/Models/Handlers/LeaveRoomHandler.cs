@@ -6,29 +6,29 @@ using Common;
 using Microsoft.Extensions.Logging;
 using NATS.Client;
 
-namespace RoomServer.Models
+namespace RoomServer.Models.Handlers
 {
-	public class JoinRoomHandler : IMessageHandler
+	public class LeaveRoomHandler : IMessageHandler
 	{
 		private readonly IMessageQueueService m_MessageQueueService;
-		private readonly ICommandService<JoinRoomCommand> m_JoinRoomService;
-		private readonly ILogger<JoinRoomHandler> m_Logger;
+		private readonly ICommandService<LeaveRoomCommand> m_LeaveRoomService;
+		private readonly ILogger<LeaveRoomHandler> m_Logger;
 
-		public JoinRoomHandler(
+		public LeaveRoomHandler(
 			IMessageQueueService messageQueueService,
-			ICommandService<JoinRoomCommand> joinRoomService,
-			ILogger<JoinRoomHandler> logger)
+			ICommandService<LeaveRoomCommand> leaveRoomService,
+			ILogger<LeaveRoomHandler> logger)
 		{
 			m_MessageQueueService = messageQueueService ?? throw new ArgumentNullException(nameof(messageQueueService));
-			m_JoinRoomService = joinRoomService ?? throw new ArgumentNullException(nameof(joinRoomService));
+			m_LeaveRoomService = leaveRoomService ?? throw new ArgumentNullException(nameof(leaveRoomService));
 			m_Logger = logger ?? throw new ArgumentNullException(nameof(logger));
 		}
 
 		public async ValueTask HandleAsync(Msg msg, CancellationToken cancellationToken)
 		{
-			var request = JoinRoomRequest.Parser.ParseFrom(msg.Data);
+			var request = LeaveRoomRequest.Parser.ParseFrom(msg.Data);
 
-			await m_JoinRoomService.ExecuteAsync(new JoinRoomCommand
+			await m_LeaveRoomService.ExecuteAsync(new LeaveRoomCommand
 			{
 				SessionId = request.SessionId,
 				Room = request.Room
@@ -36,7 +36,7 @@ namespace RoomServer.Models
 
 			await m_MessageQueueService.PublishAsync(msg.Reply, null).ConfigureAwait(false);
 
-			m_Logger.LogInformation($"({request.SessionId}, {request.Room}) joined.");
+			m_Logger.LogInformation($"({request.SessionId}, {request.Room}) leaved.");
 		}
 	}
 }

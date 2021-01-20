@@ -6,7 +6,7 @@ using Common;
 using Microsoft.Extensions.Logging;
 using NATS.Client;
 
-namespace SessionServer.Models
+namespace SessionServer.Models.Handlers
 {
 	public class RegisterSessionHandler : IMessageHandler
 	{

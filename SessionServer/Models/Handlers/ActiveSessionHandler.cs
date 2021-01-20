@@ -5,7 +5,7 @@ using Chat.Protos;
 using Common;
 using NATS.Client;
 
-namespace SessionServer.Models
+namespace SessionServer.Models.Handlers
 {
 	public class ActiveSessionHandler : IMessageHandler
 	{
