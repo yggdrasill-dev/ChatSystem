@@ -3,7 +3,12 @@
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>net5.0</TargetFramework>
+    <Nullable>enable</Nullable>
   </PropertyGroup>
+
+  <ItemGroup>
+    <None Remove="Protos\.gitkeep" />
+  </ItemGroup>
 
   <ItemGroup>
     <Protobuf Include="..\protos\client.proto">

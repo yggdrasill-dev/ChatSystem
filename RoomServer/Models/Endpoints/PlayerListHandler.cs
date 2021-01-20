@@ -13,17 +13,20 @@ namespace RoomServer.Models.Endpoints
 	public class PlayerListHandler : IMessageHandler
 	{
 		private readonly IMessageQueueService m_MessageQueueService;
+		private readonly IGetService<GetRoomBySessionIdQuery, string?> m_GetRoomService;
 		private readonly IQueryService<PlayerInfoQuery, PlayerInfo> m_PlayerQueryService;
 		private readonly IQueryService<RoomSessionsQuery, string> m_RoomListService;
 		private readonly ILogger<PlayerListHandler> m_Logger;
 
 		public PlayerListHandler(
 			IMessageQueueService messageQueueService,
+			IGetService<GetRoomBySessionIdQuery, string?> getRoomService,
 			IQueryService<PlayerInfoQuery, PlayerInfo> playerQueryService,
 			IQueryService<RoomSessionsQuery, string> roomListService,
 			ILogger<PlayerListHandler> logger)
 		{
-			m_MessageQueueService = messageQueueService;
+			m_MessageQueueService = messageQueueService ?? throw new ArgumentNullException(nameof(messageQueueService));
+			m_GetRoomService = getRoomService ?? throw new ArgumentNullException(nameof(getRoomService));
 			m_PlayerQueryService = playerQueryService ?? throw new ArgumentNullException(nameof(playerQueryService));
 			m_RoomListService = roomListService ?? throw new ArgumentNullException(nameof(roomListService));
 			m_Logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -35,9 +38,18 @@ namespace RoomServer.Models.Endpoints
 
 			m_Logger.LogInformation($"chat.player.list => Receive packet from {packet.SessionId}");
 
+			var playerInRoom = await m_GetRoomService
+				.GetAsync(new GetRoomBySessionIdQuery
+				{
+					SessionId = packet.SessionId
+				}).ConfigureAwait(false);
+
+			if (string.IsNullOrEmpty(playerInRoom))
+				return;
+
 			var responseSessionIds = m_RoomListService.QueryAsync(new RoomSessionsQuery
 			{
-				Room = "test"
+				Room = playerInRoom
 			});
 
 			var playersContent = new PlayerList();

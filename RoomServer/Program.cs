@@ -19,16 +19,18 @@ namespace RoomServer
 							config
 								.AddHandler<JoinRoomHandler>("room.join", "room.join")
 								.AddHandler<LeaveRoomHandler>("room.leave", "room.leave")
-								.AddHandler<QueryRoomHandler>("room.query", "room.query")
+								.AddHandler<QuerySessionsByRoomHandler>("room.query", "room.query")
 								.AddHandler<PlayerListHandler>("room.player.list", "room.player.list")
-								.AddHandler<RoomListHandler>("room.list", "room.list");
+								.AddHandler<RoomListHandler>("room.list", "room.list")
+								.AddHandler<GetRoomBySessionIdHandler>("room.session.get", "room.session.get");
 						})
 						.AddSingleton<RoomRepository>()
 						.AddTransient<ICommandService<JoinRoomCommand>, JoinRoomCommandService>()
 						.AddTransient<ICommandService<LeaveRoomCommand>, LeaveRoomCommandService>()
 						.AddTransient<IQueryService<RoomSessionsQuery, string>, RoomSessionsQueryService>()
 						.AddTransient<IQueryService<RoomListQuery, string>, RoomListQueryService>()
-						.AddTransient<IQueryService<PlayerInfoQuery, PlayerInfo>, PlayerInfoQueryService>();
+						.AddTransient<IQueryService<PlayerInfoQuery, PlayerInfo>, PlayerInfoQueryService>()
+						.AddTransient<IGetService<GetRoomBySessionIdQuery, string?>, GetRoomBySessionIdQueryService>();
 				});
 
 		private static void Main(string[] args)

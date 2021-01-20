@@ -13,19 +13,22 @@ namespace ChatServer.Models.Endpoints
 	public class ChatSendHandler : IMessageHandler
 	{
 		private readonly IMessageQueueService m_MessageQueueService;
-		private readonly IQueryService<PlayerInfoQuery, PlayerInfo> m_QueryPlayerService;
-		private readonly IQueryService<ListPlayerQuery, string> m_RoomListService;
+		private readonly IGetService<PlayerInfoQuery, PlayerInfo?> m_QueryPlayerService;
+		private readonly IQueryService<ListPlayerQuery, PlayerInfo> m_RoomListService;
+		private readonly IGetService<GetRoomBySessionidQuery, string?> m_GetRoomService;
 		private readonly ILogger<ChatSendHandler> m_Logger;
 
 		public ChatSendHandler(
 			IMessageQueueService messageQueueService,
-			IQueryService<PlayerInfoQuery, PlayerInfo> queryPlayerService,
-			IQueryService<ListPlayerQuery, string> roomListService,
+			IGetService<PlayerInfoQuery, PlayerInfo?> queryPlayerService,
+			IQueryService<ListPlayerQuery, PlayerInfo> roomListService,
+			IGetService<GetRoomBySessionidQuery, string?> getRoomService,
 			ILogger<ChatSendHandler> logger)
 		{
 			m_MessageQueueService = messageQueueService ?? throw new ArgumentNullException(nameof(messageQueueService));
 			m_QueryPlayerService = queryPlayerService ?? throw new ArgumentNullException(nameof(queryPlayerService));
 			m_RoomListService = roomListService ?? throw new ArgumentNullException(nameof(roomListService));
+			m_GetRoomService = getRoomService ?? throw new ArgumentNullException(nameof(getRoomService));
 			m_Logger = logger ?? throw new ArgumentNullException(nameof(logger));
 		}
 
@@ -39,15 +42,19 @@ namespace ChatServer.Models.Endpoints
 			m_Logger.LogInformation($"Scope: {content.Scope}, Target: {content.Target}, Message: {content.Message}");
 
 			var fromPlayerInfo = await m_QueryPlayerService
-				.QueryAsync(new PlayerInfoQuery
+				.GetAsync(new PlayerInfoQuery
 				{
-					SessionIds = new[] { packet.SessionId }
+					SessionId = packet.SessionId
 				})
-				.FirstOrDefaultAsync()
 				.ConfigureAwait(false);
 
 			if (fromPlayerInfo?.SessionId != packet.SessionId)
 				return;
+
+			var room = await m_GetRoomService.GetAsync(new GetRoomBySessionidQuery
+			{
+				SessionId = fromPlayerInfo.SessionId
+			}).ConfigureAwait(false);
 
 			var sendContent = new ChatMessage
 			{
@@ -56,18 +63,11 @@ namespace ChatServer.Models.Endpoints
 				Message = content.Message
 			};
 
-			var roomSessionIds = m_RoomListService
+			var roomPlayers = m_RoomListService
 				.QueryAsync(new ListPlayerQuery
 				{
-					Room = "test"
-				})
-				.ToEnumerable()
-				.ToArray();
-
-			var roomPlayers = m_QueryPlayerService.QueryAsync(new PlayerInfoQuery
-			{
-				SessionIds = roomSessionIds.ToArray()
-			});
+					Room = room
+				});
 
 			switch (content.Scope)
 			{
@@ -81,7 +81,7 @@ namespace ChatServer.Models.Endpoints
 							Subject = "chat.receive"
 						};
 
-						sendMsg.SessionIds.AddRange(roomSessionIds);
+						sendMsg.SessionIds.AddRange(g.Select(player => player.SessionId).ToEnumerable());
 
 						sendMsg.Payload = contentByteString;
 

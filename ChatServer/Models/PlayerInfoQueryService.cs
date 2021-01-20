@@ -1,50 +1,38 @@
 ﻿using System;
-using System.Collections.Generic;
+using System.Threading.Tasks;
 using Chat.Protos;
 using Common;
 using Google.Protobuf;
 
 namespace ChatServer.Models
 {
-	public class PlayerInfoQueryService : IQueryService<PlayerInfoQuery, PlayerInfo>
+	public class PlayerInfoQueryService : IGetService<PlayerInfoQuery, PlayerInfo?>
 	{
 		private readonly IMessageQueueService m_MessageQueueService;
-		private readonly ICommandService<LeaveRoomCommand> m_LeaveRoomService;
 
 		public PlayerInfoQueryService(
-			IMessageQueueService messageQueueService,
-			ICommandService<LeaveRoomCommand> leaveRoomService)
+			IMessageQueueService messageQueueService)
 		{
 			m_MessageQueueService = messageQueueService ?? throw new ArgumentNullException(nameof(messageQueueService));
-			m_LeaveRoomService = leaveRoomService ?? throw new ArgumentNullException(nameof(leaveRoomService));
 		}
 
-		public async IAsyncEnumerable<PlayerInfo> QueryAsync(PlayerInfoQuery query)
+		public async ValueTask<PlayerInfo?> GetAsync(PlayerInfoQuery query)
 		{
-			foreach (var sessionId in query.SessionIds)
+			var getPlayerQuery = new GetPlayerRequest
 			{
-				var getPlayerQuery = new GetPlayerRequest
-				{
-					SessionId = sessionId
-				};
+				SessionId = query.SessionId
+			};
 
-				var queryReply = await m_MessageQueueService
-					.RequestAsync("session.get", getPlayerQuery.ToByteArray())
-					.ConfigureAwait(false);
+			var queryReply = await m_MessageQueueService
+				.RequestAsync("session.get", getPlayerQuery.ToByteArray())
+				.ConfigureAwait(false);
 
-				var data = GetPlayerResponse.Parser.ParseFrom(queryReply.Data);
+			var data = GetPlayerResponse.Parser.ParseFrom(queryReply.Data);
 
-				if (data.Player == null)
-					await m_LeaveRoomService
-						.ExecuteAsync(new LeaveRoomCommand
-						{
-							SessionId = sessionId,
-							Room = "test"
-						})
-						.ConfigureAwait(false);
-				else
-					yield return new PlayerInfo(data.Player.SessionId, data.Player.ConnectorId, data.Player.Name);
-			}
+			if (data.Player != null)
+				return new PlayerInfo(data.Player.SessionId, data.Player.ConnectorId, data.Player.Name);
+			else
+				return null;
 		}
 	}
 }

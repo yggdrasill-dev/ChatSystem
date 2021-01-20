@@ -9,31 +9,49 @@ using NATS.Client;
 
 namespace RoomServer.Models.Handlers
 {
-	public class QueryRoomHandler : IMessageHandler
+	public class QuerySessionsByRoomHandler : IMessageHandler
 	{
 		private readonly IMessageQueueService m_MessageQueueService;
 		private readonly IQueryService<RoomSessionsQuery, string> m_RoomSessionsService;
+		private readonly IQueryService<PlayerInfoQuery, PlayerInfo> m_PlayerInfoService;
 
-		public QueryRoomHandler(
+		public QuerySessionsByRoomHandler(
 			IMessageQueueService messageQueueService,
-			IQueryService<RoomSessionsQuery, string> roomSessionsService)
+			IQueryService<RoomSessionsQuery, string> roomSessionsService,
+			IQueryService<PlayerInfoQuery, PlayerInfo> playerInfoService)
 		{
 			m_MessageQueueService = messageQueueService ?? throw new ArgumentNullException(nameof(messageQueueService));
 			m_RoomSessionsService = roomSessionsService ?? throw new ArgumentNullException(nameof(roomSessionsService));
+			m_PlayerInfoService = playerInfoService ?? throw new ArgumentNullException(nameof(playerInfoService));
 		}
 
 		public async ValueTask HandleAsync(Msg msg, CancellationToken cancellationToken)
 		{
 			var request = RoomSessionsRequest.Parser.ParseFrom(msg.Data);
 
-			var sessionIds = await m_RoomSessionsService.QueryAsync(new RoomSessionsQuery
+			var sessionIds = m_RoomSessionsService
+				.QueryAsync(new RoomSessionsQuery
+				{
+					Room = request.Room
+				})
+				.ToEnumerable()
+				.ToArray();
+
+			var allPlayers = m_PlayerInfoService.QueryAsync(new PlayerInfoQuery
 			{
-				Room = request.Room
-			}).ToArrayAsync();
+				SessionIds = sessionIds
+			});
 
 			var response = new RoomSessionsResponse();
 
-			response.SessionIds.AddRange(sessionIds);
+			response.Players.AddRange(allPlayers
+				.Select(player => new Chat.Protos.PlayerInfo
+				{
+					SessionId = player.SessionId,
+					ConnectorId = player.ConnectorId,
+					Name = player.Name
+				})
+				.ToEnumerable());
 
 			await m_MessageQueueService.PublishAsync(msg.Reply, response.ToByteArray());
 		}

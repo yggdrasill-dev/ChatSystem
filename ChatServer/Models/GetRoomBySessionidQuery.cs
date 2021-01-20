@@ -1,9 +1,7 @@
 ﻿namespace ChatServer.Models
 {
-	public struct LeaveRoomCommand
+	public struct GetRoomBySessionidQuery
 	{
 		public string SessionId { get; set; }
-
-		public string Room { get; set; }
 	}
 }

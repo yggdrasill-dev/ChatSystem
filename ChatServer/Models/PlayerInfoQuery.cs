@@ -2,6 +2,6 @@
 {
 	public struct PlayerInfoQuery
 	{
-		public string[] SessionIds { get; set; }
+		public string SessionId { get; set; }
 	}
 }

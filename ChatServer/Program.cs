@@ -18,9 +18,9 @@ namespace ChatServer
 							config
 								.AddHandler<ChatSendHandler>("chat.send", "chat.send");
 						})
-						.AddTransient<IQueryService<PlayerInfoQuery, PlayerInfo>, PlayerInfoQueryService>()
-						.AddTransient<IQueryService<ListPlayerQuery, string>, ListPlayerQueryService>()
-						.AddTransient<ICommandService<LeaveRoomCommand>, LeaveRoomCommandService>();
+						.AddTransient<IGetService<PlayerInfoQuery, PlayerInfo?>, PlayerInfoQueryService>()
+						.AddTransient<IQueryService<ListPlayerQuery, PlayerInfo>, ListPlayerQueryService>()
+						.AddTransient<IGetService<GetRoomBySessionidQuery, string?>, GetRoomBySessionIdQueryService>();
 				});
 
 		private static void Main(string[] args)

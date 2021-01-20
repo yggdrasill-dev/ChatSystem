@@ -3,6 +3,8 @@ syntax = "proto3";
 option csharp_namespace = "Chat.Protos";
 package chat;
 
+import 'session.proto';
+
 message JoinRoomRequest {
     string session_id = 1;
     string room = 2;
@@ -18,9 +20,17 @@ message RoomSessionsRequest {
 }
 
 message RoomSessionsResponse {
-    repeated string session_ids = 1;
+    repeated PlayerInfo players = 1;
 }
 
 message RoomsResponse {
     repeated string rooms = 1;
+}
+
+message GetRoomBySessionIdRequest {
+    string session_id = 1;
+}
+
+message GetRoomBySessionIdResponse {
+    string room = 1;
 }
