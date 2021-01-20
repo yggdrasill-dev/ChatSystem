@@ -36,10 +36,15 @@ namespace RoomServer.Models
 			if (m_Rooms.TryGetValue(room, out var list))
 			{
 				lock (list)
-					return list.ToArray().ToAsyncEnumerable();
+					return list.ToAsyncEnumerable();
 			}
 
-			return Array.Empty<string>().ToAsyncEnumerable();
+			return AsyncEnumerable.Empty<string>();
+		}
+
+		public IAsyncEnumerable<string> QueryRoomsAsync()
+		{
+			return m_Rooms.Keys.ToAsyncEnumerable();
 		}
 	}
 }

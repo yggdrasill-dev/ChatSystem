@@ -21,9 +21,9 @@ namespace ChatConnector.Models
 
 		public Task Execute(IJobExecutionContext context)
 		{
-			var allSessionIds = m_SocketRepository.ToArray().Select(p => p.Key).ToArray();
+			var allSessionIds = m_SocketRepository.Keys;
 
-			var sendData = new ActiveSessions();
+			var sendData = new ActiveSessionsRequest();
 			sendData.SessionIds.AddRange(allSessionIds);
 
 			return m_MessageQueueService.PublishAsync("session.active", sendData.ToByteArray()).AsTask();

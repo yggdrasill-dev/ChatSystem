@@ -13,14 +13,14 @@ namespace ChatServer.Models
 	public class ChatSendHandler : IMessageHandler
 	{
 		private readonly IMessageQueueService m_MessageQueueService;
-		private readonly IQueryService<GetPlayerQuery, PlayerInfo> m_QueryPlayerService;
-		private readonly IQueryService<RoomListQuery, string> m_RoomListService;
+		private readonly IQueryService<PlayerInfoQuery, PlayerInfo> m_QueryPlayerService;
+		private readonly IQueryService<ListPlayerQuery, string> m_RoomListService;
 		private readonly ILogger<ChatSendHandler> m_Logger;
 
 		public ChatSendHandler(
 			IMessageQueueService messageQueueService,
-			IQueryService<GetPlayerQuery, PlayerInfo> queryPlayerService,
-			IQueryService<RoomListQuery, string> roomListService,
+			IQueryService<PlayerInfoQuery, PlayerInfo> queryPlayerService,
+			IQueryService<ListPlayerQuery, string> roomListService,
 			ILogger<ChatSendHandler> logger)
 		{
 			m_MessageQueueService = messageQueueService ?? throw new ArgumentNullException(nameof(messageQueueService));
@@ -35,32 +35,38 @@ namespace ChatServer.Models
 
 			m_Logger.LogInformation($"Receive packet from {packet.SessionId}");
 
-			var content = ChatContent.Parser.ParseFrom(packet.Payload);
+			var content = ChatMessage.Parser.ParseFrom(packet.Payload);
 			m_Logger.LogInformation($"Scope: {content.Scope}, Target: {content.Target}, Message: {content.Message}");
 
-			var playerInfo = await m_QueryPlayerService.QueryAsync(new GetPlayerQuery
-			{
-				SessionIds = new[] { packet.SessionId }
-			}).FirstOrDefaultAsync().ConfigureAwait(false);
+			var fromPlayerInfo = await m_QueryPlayerService
+				.QueryAsync(new PlayerInfoQuery
+				{
+					SessionIds = new[] { packet.SessionId }
+				})
+				.FirstOrDefaultAsync()
+				.ConfigureAwait(false);
 
-			if (playerInfo?.SessionId != packet.SessionId)
+			if (fromPlayerInfo?.SessionId != packet.SessionId)
 				return;
 
-			var sendContent = new ChatContent
+			var sendContent = new ChatMessage
 			{
 				Scope = content.Scope,
-				From = playerInfo.Name,
+				From = fromPlayerInfo.Name,
 				Message = content.Message
 			};
 
-			var responseSessionIds = await m_RoomListService.QueryAsync(new RoomListQuery
-			{
-				Room = "test"
-			}).ToArrayAsync().ConfigureAwait(false);
+			var roomSessionIds = m_RoomListService
+				.QueryAsync(new ListPlayerQuery
+				{
+					Room = "test"
+				})
+				.ToEnumerable()
+				.ToArray();
 
-			var roomPlayers = m_QueryPlayerService.QueryAsync(new GetPlayerQuery
+			var roomPlayers = m_QueryPlayerService.QueryAsync(new PlayerInfoQuery
 			{
-				SessionIds = responseSessionIds
+				SessionIds = roomSessionIds.ToArray()
 			});
 
 			switch (content.Scope)
@@ -75,7 +81,7 @@ namespace ChatServer.Models
 							Subject = "chat.receive"
 						};
 
-						sendMsg.SessionIds.AddRange(responseSessionIds);
+						sendMsg.SessionIds.AddRange(roomSessionIds);
 
 						sendMsg.Payload = contentByteString;
 
@@ -89,25 +95,78 @@ namespace ChatServer.Models
 					var targetName = content.Target;
 
 					var matchedPlayer = await roomPlayers
+						.Where(player => player.SessionId != fromPlayerInfo.SessionId)
 						.Where(player => player.Name.Equals(targetName, StringComparison.OrdinalIgnoreCase))
 						.FirstOrDefaultAsync()
 						.ConfigureAwait(false);
 
 					if (matchedPlayer != null)
 					{
+						sendContent.Target = matchedPlayer.Name;
+
+						if (fromPlayerInfo.ConnectorId == matchedPlayer.ConnectorId)
+						{
+							var sendMsg = new SendPacket
+							{
+								Subject = "chat.receive"
+							};
+
+							sendMsg.SessionIds.Add(matchedPlayer.SessionId);
+							sendMsg.SessionIds.Add(fromPlayerInfo.SessionId);
+
+							sendMsg.Payload = sendContent.ToByteString();
+
+							await m_MessageQueueService.PublishAsync(
+								$"connect.send.{matchedPlayer.ConnectorId}",
+								sendMsg.ToByteArray()).ConfigureAwait(false);
+						}
+						else
+						{
+							var sendMsg = new SendPacket
+							{
+								Subject = "chat.receive"
+							};
+
+							sendMsg.Payload = sendContent.ToByteString();
+
+							sendMsg.SessionIds.Add(matchedPlayer.SessionId);
+
+							await m_MessageQueueService.PublishAsync(
+								$"connect.send.{matchedPlayer.ConnectorId}",
+								sendMsg.ToByteArray()).ConfigureAwait(false);
+
+							sendMsg.SessionIds.Clear();
+							sendMsg.SessionIds.Add(fromPlayerInfo.SessionId);
+
+							await m_MessageQueueService.PublishAsync(
+								$"connect.send.{fromPlayerInfo.ConnectorId}",
+								sendMsg.ToByteArray()).ConfigureAwait(false);
+						}
+					}
+					else
+					{
 						var sendMsg = new SendPacket
 						{
 							Subject = "chat.receive"
 						};
 
-						sendMsg.SessionIds.Add(matchedPlayer.SessionId);
-						sendMsg.SessionIds.Add(packet.SessionId);
+						sendMsg.SessionIds.Add(fromPlayerInfo.SessionId);
 
-						sendContent.Target = matchedPlayer.Name;
-						sendMsg.Payload = sendContent.ToByteString();
+						sendContent.Target = fromPlayerInfo.Name;
+
+						var notFoundPlayerContent = new ChatMessage
+						{
+							Scope = Scope.System,
+							Message = $"Can't send message to {targetName}",
+							From = "System",
+							Target = fromPlayerInfo.Name
+						};
+
+						sendMsg.Payload = notFoundPlayerContent.ToByteString();
 
 						await m_MessageQueueService.PublishAsync(
-							$"connect.send.{matchedPlayer.ConnectorId}", sendMsg.ToByteArray()).ConfigureAwait(false);
+							$"connect.send.{fromPlayerInfo.ConnectorId}",
+							sendMsg.ToByteArray()).ConfigureAwait(false);
 					}
 					break;
 			}

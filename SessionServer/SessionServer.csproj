@@ -29,9 +29,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Protobuf Include="..\protos\chat.proto" Access="Internal" GrpcServices="None">
-      <Link>Protos\chat.proto</Link>
-    </Protobuf>
     <Protobuf Include="..\protos\session.proto" Access="Internal" GrpcServices="None">
       <Link>Protos\session.proto</Link>
     </Protobuf>

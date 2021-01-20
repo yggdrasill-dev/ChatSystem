@@ -54,7 +54,7 @@ export class RoomComponent implements OnInit, OnDestroy {
 				.pipe(
 					filter(msg => msg.subject == 'chat.receive'),
 					map(msg => {
-						const content = chat.ChatContent.decode(msg.payload);
+						const content = chat.ChatMessage.decode(msg.payload);
 
 						return JSON.stringify(content);
 					})
@@ -65,7 +65,7 @@ export class RoomComponent implements OnInit, OnDestroy {
 		this.m_MessageSubscriptions.push(
 			this.m_ChatClient.receiver
 				.pipe(
-					filter(msg => msg.subject == 'chat.room.list'),
+					filter(msg => msg.subject == 'chat.player.list'),
 					map(msg => {
 						const reply = chat.PlayerList.decode(msg.payload);
 
@@ -75,6 +75,19 @@ export class RoomComponent implements OnInit, OnDestroy {
 				.subscribe(players => {
 					this.players = players;
 				})
+		);
+
+		this.m_MessageSubscriptions.push(
+			this.m_ChatClient.receiver
+				.pipe(
+					filter(msg => msg.subject == 'chat.root.list'),
+					map(msg => {
+						const reply = chat.RoomList.decode(msg.payload);
+
+						return reply.rooms;
+					})
+				)
+				.subscribe(rooms => { })
 		);
 
 		await this.m_ChatClient.open();
@@ -98,20 +111,20 @@ export class RoomComponent implements OnInit, OnDestroy {
 
 		if (message?.length > 0) {
 			if (sendTarget != '*') {
-				let packet = chat.ChatContent.create({
+				let packet = chat.ChatMessage.create({
 					scope: chat.Scope.PERSON,
 					target: sendTarget,
 					message
 				});
 
-				this.m_ChatClient.send("chat.send", chat.ChatContent.encode(packet).finish());
+				this.m_ChatClient.send("chat.send", chat.ChatMessage.encode(packet).finish());
 			} else {
-				let packet = chat.ChatContent.create({
+				let packet = chat.ChatMessage.create({
 					scope: chat.Scope.ROOM,
 					message
 				});
 
-				this.m_ChatClient.send("chat.send", chat.ChatContent.encode(packet).finish());
+				this.m_ChatClient.send("chat.send", chat.ChatMessage.encode(packet).finish());
 			}
 		}
 

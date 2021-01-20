@@ -3,23 +3,4 @@ syntax = "proto3";
 option csharp_namespace = "Chat.Protos";
 package chat;
 
-message ChatMessage {
-	string subject = 1;
-	bytes payload = 2;
-}
 
-enum LoginStatus {
-	REJECT = 0;
-	ACCPET = 1;
-}
-
-message LoginReply {
-	LoginStatus status = 1;
-	string name = 2;
-	string room = 3;
-}
-
-message LoginRegistration {
-	string name = 1;
-	string channel = 2;
-}

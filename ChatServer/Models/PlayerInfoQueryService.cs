@@ -6,7 +6,7 @@ using Google.Protobuf;
 
 namespace ChatServer.Models
 {
-	public class PlayerInfoQueryService : IQueryService<GetPlayerQuery, PlayerInfo>
+	public class PlayerInfoQueryService : IQueryService<PlayerInfoQuery, PlayerInfo>
 	{
 		private readonly IMessageQueueService m_MessageQueueService;
 		private readonly ICommandService<LeaveRoomCommand> m_LeaveRoomService;
@@ -19,11 +19,11 @@ namespace ChatServer.Models
 			m_LeaveRoomService = leaveRoomService ?? throw new ArgumentNullException(nameof(leaveRoomService));
 		}
 
-		public async IAsyncEnumerable<PlayerInfo> QueryAsync(GetPlayerQuery query)
+		public async IAsyncEnumerable<PlayerInfo> QueryAsync(PlayerInfoQuery query)
 		{
 			foreach (var sessionId in query.SessionIds)
 			{
-				var getPlayerQuery = new PlayerQuery
+				var getPlayerQuery = new GetPlayerRequest
 				{
 					SessionId = sessionId
 				};
@@ -32,16 +32,18 @@ namespace ChatServer.Models
 					.RequestAsync("session.get", getPlayerQuery.ToByteArray())
 					.ConfigureAwait(false);
 
-				var data = PlayerRegistration.Parser.ParseFrom(queryReply.Data);
+				var data = GetPlayerResponse.Parser.ParseFrom(queryReply.Data);
 
-				if (sessionId != data.SessionId)
-					await m_LeaveRoomService.ExecuteAsync(new LeaveRoomCommand
-					{
-						SessionId = sessionId,
-						Room = "test"
-					}).ConfigureAwait(false);
+				if (data.Player == null)
+					await m_LeaveRoomService
+						.ExecuteAsync(new LeaveRoomCommand
+						{
+							SessionId = sessionId,
+							Room = "test"
+						})
+						.ConfigureAwait(false);
 				else
-					yield return new PlayerInfo(data.SessionId, data.ConnectorId, data.Name);
+					yield return new PlayerInfo(data.Player.SessionId, data.Player.ConnectorId, data.Player.Name);
 			}
 		}
 	}

@@ -1,0 +1,42 @@
+syntax = "proto3";
+
+option csharp_namespace = "Chat.Protos";
+package chat;
+
+message Packet {
+    string subject = 1;
+	bytes payload = 2;
+}
+
+enum LoginStatus {
+	REJECT = 0;
+	ACCPET = 1;
+}
+
+message LoginReply {
+	LoginStatus status = 1;
+	string name = 2;
+	string room = 3;
+}
+
+enum Scope {
+    NONE = 0;
+    PERSON = 1;
+    ROOM = 2;
+    SYSTEM = 3;
+}
+
+message ChatMessage {
+    Scope scope = 1;
+    string message = 2;
+    string target = 3;
+    string from = 4;
+}
+
+message PlayerList {
+    repeated string players = 1;
+}
+
+message RoomList {
+    repeated string rooms = 1;
+}

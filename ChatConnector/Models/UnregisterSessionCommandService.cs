@@ -17,7 +17,7 @@ namespace ChatConnector.Models
 
 		public async ValueTask ExecuteAsync(UnregisterSessionCommand command)
 		{
-			var loginInfo = new PlayerRegistration
+			var loginInfo = new UnregisterRequest
 			{
 				SessionId = command.SessionId
 			};

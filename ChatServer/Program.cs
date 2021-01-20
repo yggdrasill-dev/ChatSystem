@@ -23,11 +23,13 @@ namespace ChatServer
 						{
 							config
 								.AddHandler<ChatSendHandler>("chat.send", "chat.send")
-								.AddHandler<PlayerListHandler>("chat.player.list", "chat.player.list");
+								.AddHandler<PlayerListHandler>("chat.player.list", "chat.player.list")
+								.AddHandler<RoomListHandler>("chat.room.list", "chat.room.list");
 						})
-						.AddTransient<IQueryService<GetPlayerQuery, PlayerInfo>, PlayerInfoQueryService>()
-						.AddTransient<IQueryService<RoomListQuery, string>, RoomListQueryService>()
-						.AddTransient<ICommandService<LeaveRoomCommand>, LeaveRoomCommandService>();
+						.AddTransient<IQueryService<PlayerInfoQuery, PlayerInfo>, PlayerInfoQueryService>()
+						.AddTransient<IQueryService<ListPlayerQuery, string>, ListPlayerQueryService>()
+						.AddTransient<ICommandService<LeaveRoomCommand>, LeaveRoomCommandService>()
+						.AddTransient<IQueryService<ListRoomQuery, string>, ListRoomQueryService>();
 				});
 	}
 }

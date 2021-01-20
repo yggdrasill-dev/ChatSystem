@@ -23,7 +23,7 @@ namespace SessionServer.Models
 
 		public async ValueTask HandleAsync(Msg msg, CancellationToken cancellationToken)
 		{
-			var query = PlayerQuery.Parser.ParseFrom(msg.Data);
+			var query = GetPlayerRequest.Parser.ParseFrom(msg.Data);
 
 			var playerReg = await m_PlayerService.GetAsync(new GetPlayerBySessionIdQuery
 			{
@@ -31,19 +31,26 @@ namespace SessionServer.Models
 			}).ConfigureAwait(false);
 
 
+			var reply = new GetPlayerResponse();
 
 			if (playerReg != null)
 			{
-				var reply = new PlayerRegistration();
 
-				reply.SessionId = playerReg.SessionId;
-				reply.ConnectorId = playerReg.ConnectorId;
-				reply.Name = playerReg.Name;
+				reply.Player = new PlayerInfo
+				{
+					SessionId = playerReg.SessionId,
+					ConnectorId = playerReg.ConnectorId,
+					Name = playerReg.Name
+				};
 
 				await m_MessageQueueService.PublishAsync(msg.Reply, reply.ToByteArray()).ConfigureAwait(false);
 			}
 			else
-				await m_MessageQueueService.PublishAsync(msg.Reply, null).ConfigureAwait(false);
+			{
+				reply.Player = null;
+
+				await m_MessageQueueService.PublishAsync(msg.Reply, reply.ToByteArray()).ConfigureAwait(false);
+			}
 		}
 	}
 }

@@ -24,8 +24,11 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Protobuf Include="..\protos\chat.proto" GrpcServices="None" Access="Internal">
+    <Protobuf Include="..\protos\chat.proto">
       <Link>Protos\chat.proto</Link>
+    </Protobuf>
+    <Protobuf Include="..\protos\client.proto">
+      <Link>Protos\client.proto</Link>
     </Protobuf>
     <Protobuf Include="..\protos\common.proto" Access="Internal" GrpcServices="None">
       <Link>Protos\common.proto</Link>

@@ -21,7 +21,7 @@ namespace ChatConnector.Models
 		public async ValueTask HandleAsync(Msg msg, CancellationToken cancellationToken)
 		{
 			var content = SendPacket.Parser.ParseFrom(msg.Data);
-			var message = new ChatMessage
+			var message = new Packet
 			{
 				Subject = content.Subject,
 				Payload = content.Payload

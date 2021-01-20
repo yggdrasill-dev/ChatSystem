@@ -6,16 +6,16 @@ using Google.Protobuf;
 
 namespace ChatServer.Models
 {
-	public class RoomListQueryService : IQueryService<RoomListQuery, string>
+	public class ListPlayerQueryService : IQueryService<ListPlayerQuery, string>
 	{
 		private readonly IMessageQueueService m_MessageQueueService;
 
-		public RoomListQueryService(IMessageQueueService messageQueueService)
+		public ListPlayerQueryService(IMessageQueueService messageQueueService)
 		{
 			m_MessageQueueService = messageQueueService ?? throw new ArgumentNullException(nameof(messageQueueService));
 		}
 
-		public async IAsyncEnumerable<string> QueryAsync(RoomListQuery query)
+		public async IAsyncEnumerable<string> QueryAsync(ListPlayerQuery query)
 		{
 			var roomQuery = new RoomSessionsRequest
 			{

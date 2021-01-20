@@ -3,16 +3,30 @@ syntax = "proto3";
 option csharp_namespace = "Chat.Protos";
 package chat;
 
-message PlayerRegistration {
+message RegisterRequest {
 	string session_id = 1;
 	string connector_id = 2;
 	string name = 3;
 }
 
-message PlayerQuery {
+message UnregisterRequest {
 	string session_id = 1;
 }
 
-message ActiveSessions {
+message GetPlayerRequest {
+	string session_id = 1;
+}
+
+message PlayerInfo {
+	string session_id = 1;
+	string connector_id = 2;
+	string name = 3;
+}
+
+message GetPlayerResponse {
+	PlayerInfo player = 1;
+}
+
+message ActiveSessionsRequest {
 	repeated string session_ids = 1;
 }

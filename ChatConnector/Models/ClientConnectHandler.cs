@@ -50,7 +50,7 @@ namespace ChatConnector.Models
 					Status = LoginStatus.Reject
 				};
 
-				var reply = new ChatMessage
+				var reply = new Packet
 				{
 					Subject = "connect.login.reply",
 					Payload = rejectMsg.ToByteString()
@@ -99,7 +99,7 @@ namespace ChatConnector.Models
 					Room = "test"
 				};
 
-				var reply = new ChatMessage
+				var reply = new Packet
 				{
 					Subject = "connect.login.reply",
 					Payload = accpetMsg.ToByteString()
@@ -144,7 +144,7 @@ namespace ChatConnector.Models
 		{
 			var scope = httpContext.RequestServices.CreateScope();
 
-			var msg = ChatMessage.Parser.ParseFrom(new ReadOnlySequence<byte>(buffer));
+			var msg = Packet.Parser.ParseFrom(new ReadOnlySequence<byte>(buffer));
 
 			m_Logger.LogInformation($"receive subject: {msg.Subject}");
 

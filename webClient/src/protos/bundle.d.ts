@@ -2,97 +2,97 @@ import * as $protobuf from "protobufjs";
 /** Namespace chat. */
 export namespace chat {
 
-    /** Properties of a ChatMessage. */
-    interface IChatMessage {
+    /** Properties of a Packet. */
+    interface IPacket {
 
-        /** ChatMessage subject */
+        /** Packet subject */
         subject?: (string|null);
 
-        /** ChatMessage payload */
+        /** Packet payload */
         payload?: (Uint8Array|null);
     }
 
-    /** Represents a ChatMessage. */
-    class ChatMessage implements IChatMessage {
+    /** Represents a Packet. */
+    class Packet implements IPacket {
 
         /**
-         * Constructs a new ChatMessage.
+         * Constructs a new Packet.
          * @param [properties] Properties to set
          */
-        constructor(properties?: chat.IChatMessage);
+        constructor(properties?: chat.IPacket);
 
-        /** ChatMessage subject. */
+        /** Packet subject. */
         public subject: string;
 
-        /** ChatMessage payload. */
+        /** Packet payload. */
         public payload: Uint8Array;
 
         /**
-         * Creates a new ChatMessage instance using the specified properties.
+         * Creates a new Packet instance using the specified properties.
          * @param [properties] Properties to set
-         * @returns ChatMessage instance
+         * @returns Packet instance
          */
-        public static create(properties?: chat.IChatMessage): chat.ChatMessage;
+        public static create(properties?: chat.IPacket): chat.Packet;
 
         /**
-         * Encodes the specified ChatMessage message. Does not implicitly {@link chat.ChatMessage.verify|verify} messages.
-         * @param message ChatMessage message or plain object to encode
+         * Encodes the specified Packet message. Does not implicitly {@link chat.Packet.verify|verify} messages.
+         * @param message Packet message or plain object to encode
          * @param [writer] Writer to encode to
          * @returns Writer
          */
-        public static encode(message: chat.IChatMessage, writer?: $protobuf.Writer): $protobuf.Writer;
+        public static encode(message: chat.IPacket, writer?: $protobuf.Writer): $protobuf.Writer;
 
         /**
-         * Encodes the specified ChatMessage message, length delimited. Does not implicitly {@link chat.ChatMessage.verify|verify} messages.
-         * @param message ChatMessage message or plain object to encode
+         * Encodes the specified Packet message, length delimited. Does not implicitly {@link chat.Packet.verify|verify} messages.
+         * @param message Packet message or plain object to encode
          * @param [writer] Writer to encode to
          * @returns Writer
          */
-        public static encodeDelimited(message: chat.IChatMessage, writer?: $protobuf.Writer): $protobuf.Writer;
+        public static encodeDelimited(message: chat.IPacket, writer?: $protobuf.Writer): $protobuf.Writer;
 
         /**
-         * Decodes a ChatMessage message from the specified reader or buffer.
+         * Decodes a Packet message from the specified reader or buffer.
          * @param reader Reader or buffer to decode from
          * @param [length] Message length if known beforehand
-         * @returns ChatMessage
+         * @returns Packet
          * @throws {Error} If the payload is not a reader or valid buffer
          * @throws {$protobuf.util.ProtocolError} If required fields are missing
          */
-        public static decode(reader: ($protobuf.Reader|Uint8Array), length?: number): chat.ChatMessage;
+        public static decode(reader: ($protobuf.Reader|Uint8Array), length?: number): chat.Packet;
 
         /**
-         * Decodes a ChatMessage message from the specified reader or buffer, length delimited.
+         * Decodes a Packet message from the specified reader or buffer, length delimited.
          * @param reader Reader or buffer to decode from
-         * @returns ChatMessage
+         * @returns Packet
          * @throws {Error} If the payload is not a reader or valid buffer
          * @throws {$protobuf.util.ProtocolError} If required fields are missing
          */
-        public static decodeDelimited(reader: ($protobuf.Reader|Uint8Array)): chat.ChatMessage;
+        public static decodeDelimited(reader: ($protobuf.Reader|Uint8Array)): chat.Packet;
 
         /**
-         * Verifies a ChatMessage message.
+         * Verifies a Packet message.
          * @param message Plain object to verify
          * @returns `null` if valid, otherwise the reason why it is not
          */
         public static verify(message: { [k: string]: any }): (string|null);
 
         /**
-         * Creates a ChatMessage message from a plain object. Also converts values to their respective internal types.
+         * Creates a Packet message from a plain object. Also converts values to their respective internal types.
          * @param object Plain object
-         * @returns ChatMessage
+         * @returns Packet
          */
-        public static fromObject(object: { [k: string]: any }): chat.ChatMessage;
+        public static fromObject(object: { [k: string]: any }): chat.Packet;
 
         /**
-         * Creates a plain object from a ChatMessage message. Also converts values to other types if specified.
-         * @param message ChatMessage
+         * Creates a plain object from a Packet message. Also converts values to other types if specified.
+         * @param message Packet
          * @param [options] Conversion options
          * @returns Plain object
          */
-        public static toObject(message: chat.ChatMessage, options?: $protobuf.IConversionOptions): { [k: string]: any };
+        public static toObject(message: chat.Packet, options?: $protobuf.IConversionOptions): { [k: string]: any };
 
         /**
-         * Converts this ChatMessage to JSON.
+         * Converts this Packet to JSON.
          * @returns JSON object
          */
         public toJSON(): { [k: string]: any };
@@ -206,102 +206,6 @@ export namespace chat {
         public toJSON(): { [k: string]: any };
     }
 
-    /** Properties of a LoginRegistration. */
-    interface ILoginRegistration {
-
-        /** LoginRegistration name */
-        name?: (string|null);
-
-        /** LoginRegistration channel */
-        channel?: (string|null);
-    }
-
-    /** Represents a LoginRegistration. */
-    class LoginRegistration implements ILoginRegistration {
-
-        /**
-         * Constructs a new LoginRegistration.
-         * @param [properties] Properties to set
-         */
-        constructor(properties?: chat.ILoginRegistration);
-
-        /** LoginRegistration name. */
-        public name: string;
-
-        /** LoginRegistration channel. */
-        public channel: string;
-
-        /**
-         * Creates a new LoginRegistration instance using the specified properties.
-         * @param [properties] Properties to set
-         * @returns LoginRegistration instance
-         */
-        public static create(properties?: chat.ILoginRegistration): chat.LoginRegistration;
-
-        /**
-         * Encodes the specified LoginRegistration message. Does not implicitly {@link chat.LoginRegistration.verify|verify} messages.
-         * @param message LoginRegistration message or plain object to encode
-         * @param [writer] Writer to encode to
-         * @returns Writer
-         */
-        public static encode(message: chat.ILoginRegistration, writer?: $protobuf.Writer): $protobuf.Writer;
-
-        /**
-         * Encodes the specified LoginRegistration message, length delimited. Does not implicitly {@link chat.LoginRegistration.verify|verify} messages.
-         * @param message LoginRegistration message or plain object to encode
-         * @param [writer] Writer to encode to
-         * @returns Writer
-         */
-        public static encodeDelimited(message: chat.ILoginRegistration, writer?: $protobuf.Writer): $protobuf.Writer;
-
-        /**
-         * Decodes a LoginRegistration message from the specified reader or buffer.
-         * @param reader Reader or buffer to decode from
-         * @param [length] Message length if known beforehand
-         * @returns LoginRegistration
-         * @throws {Error} If the payload is not a reader or valid buffer
-         * @throws {$protobuf.util.ProtocolError} If required fields are missing
-         */
-        public static decode(reader: ($protobuf.Reader|Uint8Array), length?: number): chat.LoginRegistration;
-
-        /**
-         * Decodes a LoginRegistration message from the specified reader or buffer, length delimited.
-         * @param reader Reader or buffer to decode from
-         * @returns LoginRegistration
-         * @throws {Error} If the payload is not a reader or valid buffer
-         * @throws {$protobuf.util.ProtocolError} If required fields are missing
-         */
-        public static decodeDelimited(reader: ($protobuf.Reader|Uint8Array)): chat.LoginRegistration;
-
-        /**
-         * Verifies a LoginRegistration message.
-         * @param message Plain object to verify
-         * @returns `null` if valid, otherwise the reason why it is not
-         */
-        public static verify(message: { [k: string]: any }): (string|null);
-
-        /**
-         * Creates a LoginRegistration message from a plain object. Also converts values to their respective internal types.
-         * @param object Plain object
-         * @returns LoginRegistration
-         */
-        public static fromObject(object: { [k: string]: any }): chat.LoginRegistration;
-
-        /**
-         * Creates a plain object from a LoginRegistration message. Also converts values to other types if specified.
-         * @param message LoginRegistration
-         * @param [options] Conversion options
-         * @returns Plain object
-         */
-        public static toObject(message: chat.LoginRegistration, options?: $protobuf.IConversionOptions): { [k: string]: any };
-
-        /**
-         * Converts this LoginRegistration to JSON.
-         * @returns JSON object
-         */
-        public toJSON(): { [k: string]: any };
-    }
-
     /** Scope enum. */
     enum Scope {
         NONE = 0,
@@ -310,109 +214,109 @@ export namespace chat {
         SYSTEM = 3
     }
 
-    /** Properties of a ChatContent. */
-    interface IChatContent {
+    /** Properties of a ChatMessage. */
+    interface IChatMessage {
 
-        /** ChatContent scope */
+        /** ChatMessage scope */
         scope?: (chat.Scope|null);
 
-        /** ChatContent message */
+        /** ChatMessage message */
         message?: (string|null);
 
-        /** ChatContent target */
+        /** ChatMessage target */
         target?: (string|null);
 
-        /** ChatContent from */
+        /** ChatMessage from */
         from?: (string|null);
     }
 
-    /** Represents a ChatContent. */
-    class ChatContent implements IChatContent {
+    /** Represents a ChatMessage. */
+    class ChatMessage implements IChatMessage {
 
         /**
-         * Constructs a new ChatContent.
+         * Constructs a new ChatMessage.
          * @param [properties] Properties to set
          */
-        constructor(properties?: chat.IChatContent);
+        constructor(properties?: chat.IChatMessage);
 
-        /** ChatContent scope. */
+        /** ChatMessage scope. */
         public scope: chat.Scope;
 
-        /** ChatContent message. */
+        /** ChatMessage message. */
         public message: string;
 
-        /** ChatContent target. */
+        /** ChatMessage target. */
         public target: string;
 
-        /** ChatContent from. */
+        /** ChatMessage from. */
         public from: string;
 
         /**
-         * Creates a new ChatContent instance using the specified properties.
+         * Creates a new ChatMessage instance using the specified properties.
          * @param [properties] Properties to set
-         * @returns ChatContent instance
+         * @returns ChatMessage instance
          */
-        public static create(properties?: chat.IChatContent): chat.ChatContent;
+        public static create(properties?: chat.IChatMessage): chat.ChatMessage;
 
         /**
-         * Encodes the specified ChatContent message. Does not implicitly {@link chat.ChatContent.verify|verify} messages.
-         * @param message ChatContent message or plain object to encode
+         * Encodes the specified ChatMessage message. Does not implicitly {@link chat.ChatMessage.verify|verify} messages.
+         * @param message ChatMessage message or plain object to encode
          * @param [writer] Writer to encode to
          * @returns Writer
          */
-        public static encode(message: chat.IChatContent, writer?: $protobuf.Writer): $protobuf.Writer;
+        public static encode(message: chat.IChatMessage, writer?: $protobuf.Writer): $protobuf.Writer;
 
         /**
-         * Encodes the specified ChatContent message, length delimited. Does not implicitly {@link chat.ChatContent.verify|verify} messages.
-         * @param message ChatContent message or plain object to encode
+         * Encodes the specified ChatMessage message, length delimited. Does not implicitly {@link chat.ChatMessage.verify|verify} messages.
+         * @param message ChatMessage message or plain object to encode
          * @param [writer] Writer to encode to
          * @returns Writer
          */
-        public static encodeDelimited(message: chat.IChatContent, writer?: $protobuf.Writer): $protobuf.Writer;
+        public static encodeDelimited(message: chat.IChatMessage, writer?: $protobuf.Writer): $protobuf.Writer;
 
         /**
-         * Decodes a ChatContent message from the specified reader or buffer.
+         * Decodes a ChatMessage message from the specified reader or buffer.
          * @param reader Reader or buffer to decode from
          * @param [length] Message length if known beforehand
-         * @returns ChatContent
+         * @returns ChatMessage
          * @throws {Error} If the payload is not a reader or valid buffer
          * @throws {$protobuf.util.ProtocolError} If required fields are missing
          */
-        public static decode(reader: ($protobuf.Reader|Uint8Array), length?: number): chat.ChatContent;
+        public static decode(reader: ($protobuf.Reader|Uint8Array), length?: number): chat.ChatMessage;
 
         /**
-         * Decodes a ChatContent message from the specified reader or buffer, length delimited.
+         * Decodes a ChatMessage message from the specified reader or buffer, length delimited.
          * @param reader Reader or buffer to decode from
-         * @returns ChatContent
+         * @returns ChatMessage
          * @throws {Error} If the payload is not a reader or valid buffer
          * @throws {$protobuf.util.ProtocolError} If required fields are missing
          */
-        public static decodeDelimited(reader: ($protobuf.Reader|Uint8Array)): chat.ChatContent;
+        public static decodeDelimited(reader: ($protobuf.Reader|Uint8Array)): chat.ChatMessage;
 
         /**
-         * Verifies a ChatContent message.
+         * Verifies a ChatMessage message.
          * @param message Plain object to verify
          * @returns `null` if valid, otherwise the reason why it is not
          */
         public static verify(message: { [k: string]: any }): (string|null);
 
         /**
-         * Creates a ChatContent message from a plain object. Also converts values to their respective internal types.
+         * Creates a ChatMessage message from a plain object. Also converts values to their respective internal types.
          * @param object Plain object
-         * @returns ChatContent
+         * @returns ChatMessage
          */
-        public static fromObject(object: { [k: string]: any }): chat.ChatContent;
+        public static fromObject(object: { [k: string]: any }): chat.ChatMessage;
 
         /**
-         * Creates a plain object from a ChatContent message. Also converts values to other types if specified.
-         * @param message ChatContent
+         * Creates a plain object from a ChatMessage message. Also converts values to other types if specified.
+         * @param message ChatMessage
          * @param [options] Conversion options
          * @returns Plain object
          */
-        public static toObject(message: chat.ChatContent, options?: $protobuf.IConversionOptions): { [k: string]: any };
+        public static toObject(message: chat.ChatMessage, options?: $protobuf.IConversionOptions): { [k: string]: any };
 
         /**
-         * Converts this ChatContent to JSON.
+         * Converts this ChatMessage to JSON.
          * @returns JSON object
          */
         public toJSON(): { [k: string]: any };
@@ -503,6 +407,96 @@ export namespace chat {
 
         /**
          * Converts this PlayerList to JSON.
+         * @returns JSON object
+         */
+        public toJSON(): { [k: string]: any };
+    }
+
+    /** Properties of a RoomList. */
+    interface IRoomList {
+
+        /** RoomList rooms */
+        rooms?: (string[]|null);
+    }
+
+    /** Represents a RoomList. */
+    class RoomList implements IRoomList {
+
+        /**
+         * Constructs a new RoomList.
+         * @param [properties] Properties to set
+         */
+        constructor(properties?: chat.IRoomList);
+
+        /** RoomList rooms. */
+        public rooms: string[];
+
+        /**
+         * Creates a new RoomList instance using the specified properties.
+         * @param [properties] Properties to set
+         * @returns RoomList instance
+         */
+        public static create(properties?: chat.IRoomList): chat.RoomList;
+
+        /**
+         * Encodes the specified RoomList message. Does not implicitly {@link chat.RoomList.verify|verify} messages.
+         * @param message RoomList message or plain object to encode
+         * @param [writer] Writer to encode to
+         * @returns Writer
+         */
+        public static encode(message: chat.IRoomList, writer?: $protobuf.Writer): $protobuf.Writer;
+
+        /**
+         * Encodes the specified RoomList message, length delimited. Does not implicitly {@link chat.RoomList.verify|verify} messages.
+         * @param message RoomList message or plain object to encode
+         * @param [writer] Writer to encode to
+         * @returns Writer
+         */
+        public static encodeDelimited(message: chat.IRoomList, writer?: $protobuf.Writer): $protobuf.Writer;
+
+        /**
+         * Decodes a RoomList message from the specified reader or buffer.
+         * @param reader Reader or buffer to decode from
+         * @param [length] Message length if known beforehand
+         * @returns RoomList
+         * @throws {Error} If the payload is not a reader or valid buffer
+         * @throws {$protobuf.util.ProtocolError} If required fields are missing
+         */
+        public static decode(reader: ($protobuf.Reader|Uint8Array), length?: number): chat.RoomList;
+
+        /**
+         * Decodes a RoomList message from the specified reader or buffer, length delimited.
+         * @param reader Reader or buffer to decode from
+         * @returns RoomList
+         * @throws {Error} If the payload is not a reader or valid buffer
+         * @throws {$protobuf.util.ProtocolError} If required fields are missing
+         */
+        public static decodeDelimited(reader: ($protobuf.Reader|Uint8Array)): chat.RoomList;
+
+        /**
+         * Verifies a RoomList message.
+         * @param message Plain object to verify
+         * @returns `null` if valid, otherwise the reason why it is not
+         */
+        public static verify(message: { [k: string]: any }): (string|null);
+
+        /**
+         * Creates a RoomList message from a plain object. Also converts values to their respective internal types.
+         * @param object Plain object
+         * @returns RoomList
+         */
+        public static fromObject(object: { [k: string]: any }): chat.RoomList;
+
+        /**
+         * Creates a plain object from a RoomList message. Also converts values to other types if specified.
+         * @param message RoomList
+         * @param [options] Conversion options
+         * @returns Plain object
+         */
+        public static toObject(message: chat.RoomList, options?: $protobuf.IConversionOptions): { [k: string]: any };
+
+        /**
+         * Converts this RoomList to JSON.
          * @returns JSON object
          */
         public toJSON(): { [k: string]: any };

@@ -13,14 +13,14 @@ namespace ChatServer.Models
 	public class PlayerListHandler : IMessageHandler
 	{
 		private readonly IMessageQueueService m_MessageQueueService;
-		private readonly IQueryService<GetPlayerQuery, PlayerInfo> m_PlayerQueryService;
-		private readonly IQueryService<RoomListQuery, string> m_RoomListService;
+		private readonly IQueryService<PlayerInfoQuery, PlayerInfo> m_PlayerQueryService;
+		private readonly IQueryService<ListPlayerQuery, string> m_RoomListService;
 		private readonly ILogger<PlayerListHandler> m_Logger;
 
 		public PlayerListHandler(
 			IMessageQueueService messageQueueService,
-			IQueryService<GetPlayerQuery, PlayerInfo> playerQueryService,
-			IQueryService<RoomListQuery, string> roomListService,
+			IQueryService<PlayerInfoQuery, PlayerInfo> playerQueryService,
+			IQueryService<ListPlayerQuery, string> roomListService,
 			ILogger<PlayerListHandler> logger)
 		{
 			m_MessageQueueService = messageQueueService;
@@ -35,14 +35,14 @@ namespace ChatServer.Models
 
 			m_Logger.LogInformation($"chat.player.list => Receive packet from {packet.SessionId}");
 
-			var responseSessionIds = m_RoomListService.QueryAsync(new RoomListQuery
+			var responseSessionIds = m_RoomListService.QueryAsync(new ListPlayerQuery
 			{
 				Room = "test"
 			});
 
 			var playersContent = new PlayerList();
 
-			var allPlayers = m_PlayerQueryService.QueryAsync(new GetPlayerQuery
+			var allPlayers = m_PlayerQueryService.QueryAsync(new PlayerInfoQuery
 			{
 				SessionIds = await responseSessionIds.ToArrayAsync().ConfigureAwait(false)
 			});
@@ -51,7 +51,7 @@ namespace ChatServer.Models
 
 			var sendMsg = new SendPacket
 			{
-				Subject = "chat.room.list",
+				Subject = "chat.player.list",
 				Payload = playersContent.ToByteString()
 			};
 

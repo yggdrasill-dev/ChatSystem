@@ -20,3 +20,7 @@ message RoomSessionsRequest {
 message RoomSessionsResponse {
     repeated string session_ids = 1;
 }
+
+message RoomsResponse {
+    repeated string rooms = 1;
+}

@@ -26,7 +26,7 @@ namespace SessionServer.Models
 
 		public async ValueTask HandleAsync(Msg msg, CancellationToken cancellationToken)
 		{
-			var registration = PlayerRegistration.Parser.ParseFrom(msg.Data);
+			var registration = UnregisterRequest.Parser.ParseFrom(msg.Data);
 
 			await m_UnregisterSessionService.ExecuteAsync(new UnregisterSessionCommand
 			{
@@ -35,7 +35,7 @@ namespace SessionServer.Models
 
 			await m_MessageQueueService.PublishAsync(msg.Reply, null).ConfigureAwait(false);
 
-			m_Logger.LogInformation($"({registration.SessionId}, {registration.Name}) unregistered.");
+			m_Logger.LogInformation($"({registration.SessionId}) unregistered.");
 		}
 	}
 }

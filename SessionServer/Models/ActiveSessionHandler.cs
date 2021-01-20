@@ -18,7 +18,7 @@ namespace SessionServer.Models
 
 		public async ValueTask HandleAsync(Msg msg, CancellationToken cancellationToken)
 		{
-			var request = ActiveSessions.Parser.ParseFrom(msg.Data);
+			var request = ActiveSessionsRequest.Parser.ParseFrom(msg.Data);
 
 			await Task.WhenAll(
 				request.SessionIds.Select(

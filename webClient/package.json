@@ -8,7 +8,7 @@
     "test": "ng test",
     "lint": "ng lint",
     "e2e": "ng e2e",
-    "proto": "npx pbjs -t static-module -o .\\src\\protos\\bundle.js ..\\protos\\connector.proto ..\\protos\\chat.proto && npx pbts -o .\\src\\protos\\bundle.d.ts .\\src\\protos\\bundle.js"
+    "proto": "npx pbjs -t static-module -o .\\src\\protos\\bundle.js ..\\protos\\client.proto ..\\protos\\chat.proto && npx pbts -o .\\src\\protos\\bundle.d.ts .\\src\\protos\\bundle.js"
   },
   "private": true,
   "dependencies": {

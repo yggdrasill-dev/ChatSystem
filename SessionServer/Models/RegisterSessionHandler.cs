@@ -26,7 +26,7 @@ namespace SessionServer.Models
 
 		public async ValueTask HandleAsync(Msg msg, CancellationToken cancellationToken)
 		{
-			var registration = PlayerRegistration.Parser.ParseFrom(msg.Data);
+			var registration = RegisterRequest.Parser.ParseFrom(msg.Data);
 
 			await m_RegisterService.ExecuteAsync(new RegisterCommand
 			{

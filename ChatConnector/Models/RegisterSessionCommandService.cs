@@ -17,7 +17,7 @@ namespace ChatConnector.Models
 
 		public async ValueTask ExecuteAsync(RegisterSessionCommand command)
 		{
-			var loginInfo = new PlayerRegistration
+			var loginInfo = new RegisterRequest
 			{
 				SessionId = command.SessionId,
 				ConnectorId = command.ConnectorId,
