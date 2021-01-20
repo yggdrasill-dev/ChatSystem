@@ -80,7 +80,7 @@ export class RoomComponent implements OnInit, OnDestroy {
 		this.m_MessageSubscriptions.push(
 			this.m_ChatClient.receiver
 				.pipe(
-					filter(msg => msg.subject == 'chat.root.list'),
+					filter(msg => msg.subject == 'chat.room.list'),
 					map(msg => {
 						const reply = chat.RoomList.decode(msg.payload);
 
@@ -92,7 +92,7 @@ export class RoomComponent implements OnInit, OnDestroy {
 
 		await this.m_ChatClient.open();
 
-		await this.m_ChatClient.send("chat.player.list", '');
+		await this.m_ChatClient.send("room.player.list", '');
 	}
 
 	ngOnDestroy(): void {

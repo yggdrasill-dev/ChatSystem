@@ -6,7 +6,16 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Protobuf Include="..\protos\client.proto">
+      <Link>Protos\client.proto</Link>
+    </Protobuf>
+    <Protobuf Include="..\protos\common.proto">
+      <Link>Protos\common.proto</Link>
+    </Protobuf>
     <Protobuf Include="..\protos\room.proto" Link="Protos\room.proto" GrpcServices="None" Access="Internal" />
+    <Protobuf Include="..\protos\session.proto">
+      <Link>Protos\session.proto</Link>
+    </Protobuf>
   </ItemGroup>
 
   <ItemGroup>

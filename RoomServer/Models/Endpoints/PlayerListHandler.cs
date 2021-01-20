@@ -8,19 +8,19 @@ using Google.Protobuf;
 using Microsoft.Extensions.Logging;
 using NATS.Client;
 
-namespace ChatServer.Models.Endpoints
+namespace RoomServer.Models.Endpoints
 {
 	public class PlayerListHandler : IMessageHandler
 	{
 		private readonly IMessageQueueService m_MessageQueueService;
 		private readonly IQueryService<PlayerInfoQuery, PlayerInfo> m_PlayerQueryService;
-		private readonly IQueryService<ListPlayerQuery, string> m_RoomListService;
+		private readonly IQueryService<RoomSessionsQuery, string> m_RoomListService;
 		private readonly ILogger<PlayerListHandler> m_Logger;
 
 		public PlayerListHandler(
 			IMessageQueueService messageQueueService,
 			IQueryService<PlayerInfoQuery, PlayerInfo> playerQueryService,
-			IQueryService<ListPlayerQuery, string> roomListService,
+			IQueryService<RoomSessionsQuery, string> roomListService,
 			ILogger<PlayerListHandler> logger)
 		{
 			m_MessageQueueService = messageQueueService;
@@ -35,7 +35,7 @@ namespace ChatServer.Models.Endpoints
 
 			m_Logger.LogInformation($"chat.player.list => Receive packet from {packet.SessionId}");
 
-			var responseSessionIds = m_RoomListService.QueryAsync(new ListPlayerQuery
+			var responseSessionIds = m_RoomListService.QueryAsync(new RoomSessionsQuery
 			{
 				Room = "test"
 			});

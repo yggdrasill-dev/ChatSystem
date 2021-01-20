@@ -2,6 +2,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using RoomServer.Models;
+using RoomServer.Models.Endpoints;
 using RoomServer.Models.Handlers;
 
 namespace RoomServer
@@ -19,13 +20,15 @@ namespace RoomServer
 								.AddHandler<JoinRoomHandler>("room.join", "room.join")
 								.AddHandler<LeaveRoomHandler>("room.leave", "room.leave")
 								.AddHandler<QueryRoomHandler>("room.query", "room.query")
-								.AddHandler<ListRoomHandler>("room.list", "room.list");
+								.AddHandler<PlayerListHandler>("room.player.list", "room.player.list")
+								.AddHandler<RoomListHandler>("room.list", "room.list");
 						})
 						.AddSingleton<RoomRepository>()
 						.AddTransient<ICommandService<JoinRoomCommand>, JoinRoomCommandService>()
 						.AddTransient<ICommandService<LeaveRoomCommand>, LeaveRoomCommandService>()
 						.AddTransient<IQueryService<RoomSessionsQuery, string>, RoomSessionsQueryService>()
-						.AddTransient<IQueryService<RoomListQuery, string>, RoomListQueryService>();
+						.AddTransient<IQueryService<RoomListQuery, string>, RoomListQueryService>()
+						.AddTransient<IQueryService<PlayerInfoQuery, PlayerInfo>, PlayerInfoQueryService>();
 				});
 
 		private static void Main(string[] args)

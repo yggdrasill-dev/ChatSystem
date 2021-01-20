@@ -7,16 +7,16 @@ using Common;
 using Google.Protobuf;
 using NATS.Client;
 
-namespace ChatServer.Models.Endpoints
+namespace RoomServer.Models.Endpoints
 {
 	public class RoomListHandler : IMessageHandler
 	{
 		private readonly IMessageQueueService m_MessageQueueService;
-		private readonly IQueryService<ListRoomQuery, string> m_ListRoomService;
+		private readonly IQueryService<RoomListQuery, string> m_ListRoomService;
 
 		public RoomListHandler(
 			IMessageQueueService messageQueueService,
-			IQueryService<ListRoomQuery, string> listRoomService)
+			IQueryService<RoomListQuery, string> listRoomService)
 		{
 			m_MessageQueueService = messageQueueService ?? throw new ArgumentNullException(nameof(messageQueueService));
 			m_ListRoomService = listRoomService ?? throw new ArgumentNullException(nameof(listRoomService));
@@ -26,7 +26,7 @@ namespace ChatServer.Models.Endpoints
 		{
 			var packet = QueuePacket.Parser.ParseFrom(msg.Data);
 
-			var rooms = m_ListRoomService.QueryAsync(new ListRoomQuery());
+			var rooms = m_ListRoomService.QueryAsync(new RoomListQuery());
 
 			var response = new RoomList();
 
