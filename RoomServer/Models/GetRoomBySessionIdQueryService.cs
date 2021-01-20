@@ -6,9 +6,9 @@ namespace RoomServer.Models
 {
 	public class GetRoomBySessionIdQueryService : IGetService<GetRoomBySessionIdQuery, string?>
 	{
-		private readonly RoomRepository m_RoomRepository;
+		private readonly IRoomRepository m_RoomRepository;
 
-		public GetRoomBySessionIdQueryService(RoomRepository roomRepository)
+		public GetRoomBySessionIdQueryService(IRoomRepository roomRepository)
 		{
 			m_RoomRepository = roomRepository ?? throw new ArgumentNullException(nameof(roomRepository));
 		}

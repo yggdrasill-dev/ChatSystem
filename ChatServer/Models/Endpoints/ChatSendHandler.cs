@@ -56,6 +56,9 @@ namespace ChatServer.Models.Endpoints
 				SessionId = fromPlayerInfo.SessionId
 			}).ConfigureAwait(false);
 
+			if (string.IsNullOrEmpty(room))
+				return;
+
 			var sendContent = new ChatMessage
 			{
 				Scope = content.Scope,

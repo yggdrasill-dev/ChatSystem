@@ -6,9 +6,9 @@ namespace RoomServer.Models
 {
 	public class JoinRoomCommandService : ICommandService<JoinRoomCommand>
 	{
-		private readonly RoomRepository m_RoomRepository;
+		private readonly IRoomRepository m_RoomRepository;
 
-		public JoinRoomCommandService(RoomRepository roomRepository)
+		public JoinRoomCommandService(IRoomRepository roomRepository)
 		{
 			m_RoomRepository = roomRepository ?? throw new ArgumentNullException(nameof(roomRepository));
 		}

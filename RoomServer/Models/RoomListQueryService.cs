@@ -5,9 +5,9 @@ namespace RoomServer.Models
 {
 	public class RoomListQueryService : IQueryService<RoomListQuery, string>
 	{
-		private readonly RoomRepository m_RoomRepository;
+		private readonly IRoomRepository m_RoomRepository;
 
-		public RoomListQueryService(RoomRepository roomRepository)
+		public RoomListQueryService(IRoomRepository roomRepository)
 		{
 			m_RoomRepository = roomRepository;
 		}

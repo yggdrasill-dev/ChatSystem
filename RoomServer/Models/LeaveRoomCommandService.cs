@@ -6,9 +6,9 @@ namespace RoomServer.Models
 {
 	public class LeaveRoomCommandService : ICommandService<LeaveRoomCommand>
 	{
-		private readonly RoomRepository m_RoomRepository;
+		private readonly IRoomRepository m_RoomRepository;
 
-		public LeaveRoomCommandService(RoomRepository roomRepository)
+		public LeaveRoomCommandService(IRoomRepository roomRepository)
 		{
 			m_RoomRepository = roomRepository ?? throw new ArgumentNullException(nameof(roomRepository));
 		}

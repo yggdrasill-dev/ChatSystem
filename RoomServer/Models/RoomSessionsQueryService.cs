@@ -6,9 +6,9 @@ namespace RoomServer.Models
 {
 	public class RoomSessionsQueryService : IQueryService<RoomSessionsQuery, string>
 	{
-		private readonly RoomRepository m_RoomRepository;
+		private readonly IRoomRepository m_RoomRepository;
 
-		public RoomSessionsQueryService(RoomRepository roomRepository)
+		public RoomSessionsQueryService(IRoomRepository roomRepository)
 		{
 			m_RoomRepository = roomRepository ?? throw new ArgumentNullException(nameof(roomRepository));
 		}

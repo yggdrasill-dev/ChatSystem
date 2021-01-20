@@ -1,71 +1,86 @@
 ﻿using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using StackExchange.Redis;
 
 namespace RoomServer.Models
 {
-	public class RoomRepository
+	internal class RoomRepository : IRoomRepository
 	{
-		private readonly ConcurrentDictionary<string, HashSet<string>> m_Rooms =
-			new ConcurrentDictionary<string, HashSet<string>>();
+		private readonly IDatabase m_Database;
+		private readonly IServer m_Server;
 
-		private readonly ConcurrentDictionary<string, string> m_Sessions =
-			new ConcurrentDictionary<string, string>();
-
-		public ValueTask JoinRoomAsync(string sessionId, string room)
+		public RoomRepository(RedisConnectionFactory redisConnectionFactory)
 		{
-			var roomList = m_Rooms.GetOrAdd(room, roomKey => new HashSet<string>(StringComparer.InvariantCulture));
-
-			lock (roomList)
-				roomList.Add(sessionId);
-
-			m_Sessions.AddOrUpdate(sessionId, room, (newRoom, oldRoom) =>
+			if (redisConnectionFactory is null)
 			{
-				LeaveRoomAsync(sessionId, oldRoom).GetAwaiter().GetResult();
-
-				return newRoom;
-			});
-
-			return ValueTask.CompletedTask;
-		}
-
-		public ValueTask LeaveRoomAsync(string sessionId, string room)
-		{
-			var roomList = m_Rooms.GetOrAdd(room, roomKey => new HashSet<string>(StringComparer.InvariantCulture));
-
-			lock (roomList)
-				roomList.Remove(sessionId);
-
-			if (m_Sessions.TryGetValue(sessionId, out var inRoom) && inRoom == room)
-				m_Sessions.TryRemove(sessionId, out _);
-
-			return ValueTask.CompletedTask;
-		}
-
-		public IAsyncEnumerable<string> QuerySessionsByRoomAsync(string room)
-		{
-			if (m_Rooms.TryGetValue(room, out var list))
-			{
-				lock (list)
-					return list.ToAsyncEnumerable();
+				throw new ArgumentNullException(nameof(redisConnectionFactory));
 			}
 
-			return AsyncEnumerable.Empty<string>();
+			m_Database = redisConnectionFactory.Database;
+			m_Server = redisConnectionFactory.Server;
 		}
 
-		public ValueTask<string?> GetRoomBySessionIdAsync(string sessionId)
+		public async ValueTask JoinRoomAsync(string sessionId, string room)
 		{
-			if (m_Sessions.TryGetValue(sessionId, out var room))
-				return ValueTask.FromResult<string?>(room);
+			var sessionInRoom = await m_Database
+				.StringGetAsync($"Rooms:Sessions:{sessionId}")
+				.ConfigureAwait(false);
+
+			await m_Database
+				.SetAddAsync($"Rooms:Room:{room}", sessionId)
+				.ConfigureAwait(false);
+
+			await m_Database
+				.StringSetAsync($"Rooms:Sessions:{sessionId}", room)
+				.ConfigureAwait(false);
+
+			if (sessionInRoom.HasValue && (string)sessionInRoom != room)
+				await LeaveRoomAsync(sessionId, sessionInRoom).ConfigureAwait(false);
+		}
+
+		public async ValueTask LeaveRoomAsync(string sessionId, string room)
+		{
+			var sessionInRoom = await m_Database
+				.StringGetAsync($"Rooms:Sessions:{sessionId}")
+				.ConfigureAwait(false);
+
+			await m_Database.SetRemoveAsync($"Rooms:Room:{room}", sessionId).ConfigureAwait(false);
+
+			if (sessionInRoom.HasValue && sessionInRoom == room)
+				await m_Database
+					.KeyDeleteAsync($"Rooms:Sessions:{sessionId}")
+					.ConfigureAwait(false);
+		}
+
+		public async IAsyncEnumerable<string> QuerySessionsByRoomAsync(string room)
+		{
+			var sessionIds = await m_Database
+				.SetMembersAsync($"Rooms:Room:{room}")
+				.ConfigureAwait(false);
+
+			foreach (var sessionId in sessionIds)
+				yield return sessionId;
+		}
+
+		public async ValueTask<string?> GetRoomBySessionIdAsync(string sessionId)
+		{
+			var room = await m_Database
+				.StringGetAsync($"Rooms:Sessions:{sessionId}")
+				.ConfigureAwait(false);
+
+			if (room.HasValue)
+				return room;
 			else
-				return ValueTask.FromResult<string?>(null);
+				return null;
 		}
 
 		public IAsyncEnumerable<string> QueryRoomsAsync()
 		{
-			return m_Rooms.Keys.ToAsyncEnumerable();
+			return m_Server.KeysAsync(pattern: "Rooms:Room:*")
+				.Select(key => (string)key)
+				.Select(key => key.Split(":").Last());
 		}
 	}
 }

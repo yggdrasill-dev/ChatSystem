@@ -24,7 +24,8 @@ namespace RoomServer
 								.AddHandler<RoomListHandler>("room.list", "room.list")
 								.AddHandler<GetRoomBySessionIdHandler>("room.session.get", "room.session.get");
 						})
-						.AddSingleton<RoomRepository>()
+						.AddSingleton<RedisConnectionFactory>()
+						.AddSingleton<IRoomRepository, RoomRepository>()
 						.AddTransient<ICommandService<JoinRoomCommand>, JoinRoomCommandService>()
 						.AddTransient<ICommandService<LeaveRoomCommand>, LeaveRoomCommandService>()
 						.AddTransient<IQueryService<RoomSessionsQuery, string>, RoomSessionsQueryService>()
