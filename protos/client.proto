@@ -16,7 +16,6 @@ enum LoginStatus {
 message LoginReply {
 	LoginStatus status = 1;
 	string name = 2;
-	string room = 3;
 }
 
 enum Scope {
@@ -34,9 +33,15 @@ message ChatMessage {
 }
 
 message PlayerList {
-	repeated string players = 1;
+	string room = 1;
+	repeated string players = 2;
 }
 
 message RoomList {
 	repeated string rooms = 1;
+}
+
+message JoinRoom {
+	string room = 1;
+	string password = 2;
 }

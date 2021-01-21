@@ -266,7 +266,6 @@
              * @interface ILoginReply
              * @property {chat.LoginStatus|null} [status] LoginReply status
              * @property {string|null} [name] LoginReply name
-             * @property {string|null} [room] LoginReply room
              */
     
             /**
@@ -301,14 +300,6 @@
             LoginReply.prototype.name = "";
     
             /**
-             * LoginReply room.
-             * @member {string} room
-             * @memberof chat.LoginReply
-             * @instance
-             */
-            LoginReply.prototype.room = "";
-    
-            /**
              * Creates a new LoginReply instance using the specified properties.
              * @function create
              * @memberof chat.LoginReply
@@ -336,8 +327,6 @@
                     writer.uint32(/* id 1, wireType 0 =*/8).int32(message.status);
                 if (message.name != null && Object.hasOwnProperty.call(message, "name"))
                     writer.uint32(/* id 2, wireType 2 =*/18).string(message.name);
-                if (message.room != null && Object.hasOwnProperty.call(message, "room"))
-                    writer.uint32(/* id 3, wireType 2 =*/26).string(message.room);
                 return writer;
             };
     
@@ -377,9 +366,6 @@
                         break;
                     case 2:
                         message.name = reader.string();
-                        break;
-                    case 3:
-                        message.room = reader.string();
                         break;
                     default:
                         reader.skipType(tag & 7);
@@ -427,9 +413,6 @@
                 if (message.name != null && message.hasOwnProperty("name"))
                     if (!$util.isString(message.name))
                         return "name: string expected";
-                if (message.room != null && message.hasOwnProperty("room"))
-                    if (!$util.isString(message.room))
-                        return "room: string expected";
                 return null;
             };
     
@@ -457,8 +440,6 @@
                 }
                 if (object.name != null)
                     message.name = String(object.name);
-                if (object.room != null)
-                    message.room = String(object.room);
                 return message;
             };
     
@@ -478,14 +459,11 @@
                 if (options.defaults) {
                     object.status = options.enums === String ? "REJECT" : 0;
                     object.name = "";
-                    object.room = "";
                 }
                 if (message.status != null && message.hasOwnProperty("status"))
                     object.status = options.enums === String ? $root.chat.LoginStatus[message.status] : message.status;
                 if (message.name != null && message.hasOwnProperty("name"))
                     object.name = message.name;
-                if (message.room != null && message.hasOwnProperty("room"))
-                    object.room = message.room;
                 return object;
             };
     
@@ -804,6 +782,7 @@
              * Properties of a PlayerList.
              * @memberof chat
              * @interface IPlayerList
+             * @property {string|null} [room] PlayerList room
              * @property {Array.<string>|null} [players] PlayerList players
              */
     
@@ -822,6 +801,14 @@
                         if (properties[keys[i]] != null)
                             this[keys[i]] = properties[keys[i]];
             }
+    
+            /**
+             * PlayerList room.
+             * @member {string} room
+             * @memberof chat.PlayerList
+             * @instance
+             */
+            PlayerList.prototype.room = "";
     
             /**
              * PlayerList players.
@@ -855,9 +842,11 @@
             PlayerList.encode = function encode(message, writer) {
                 if (!writer)
                     writer = $Writer.create();
+                if (message.room != null && Object.hasOwnProperty.call(message, "room"))
+                    writer.uint32(/* id 1, wireType 2 =*/10).string(message.room);
                 if (message.players != null && message.players.length)
                     for (var i = 0; i < message.players.length; ++i)
-                        writer.uint32(/* id 1, wireType 2 =*/10).string(message.players[i]);
+                        writer.uint32(/* id 2, wireType 2 =*/18).string(message.players[i]);
                 return writer;
             };
     
@@ -893,6 +882,9 @@
                     var tag = reader.uint32();
                     switch (tag >>> 3) {
                     case 1:
+                        message.room = reader.string();
+                        break;
+                    case 2:
                         if (!(message.players && message.players.length))
                             message.players = [];
                         message.players.push(reader.string());
@@ -932,6 +924,9 @@
             PlayerList.verify = function verify(message) {
                 if (typeof message !== "object" || message === null)
                     return "object expected";
+                if (message.room != null && message.hasOwnProperty("room"))
+                    if (!$util.isString(message.room))
+                        return "room: string expected";
                 if (message.players != null && message.hasOwnProperty("players")) {
                     if (!Array.isArray(message.players))
                         return "players: array expected";
@@ -954,6 +949,8 @@
                 if (object instanceof $root.chat.PlayerList)
                     return object;
                 var message = new $root.chat.PlayerList();
+                if (object.room != null)
+                    message.room = String(object.room);
                 if (object.players) {
                     if (!Array.isArray(object.players))
                         throw TypeError(".chat.PlayerList.players: array expected");
@@ -979,6 +976,10 @@
                 var object = {};
                 if (options.arrays || options.defaults)
                     object.players = [];
+                if (options.defaults)
+                    object.room = "";
+                if (message.room != null && message.hasOwnProperty("room"))
+                    object.room = message.room;
                 if (message.players && message.players.length) {
                     object.players = [];
                     for (var j = 0; j < message.players.length; ++j)
@@ -1202,6 +1203,216 @@
             };
     
             return RoomList;
+        })();
+    
+        chat.JoinRoom = (function() {
+    
+            /**
+             * Properties of a JoinRoom.
+             * @memberof chat
+             * @interface IJoinRoom
+             * @property {string|null} [room] JoinRoom room
+             * @property {string|null} [password] JoinRoom password
+             */
+    
+            /**
+             * Constructs a new JoinRoom.
+             * @memberof chat
+             * @classdesc Represents a JoinRoom.
+             * @implements IJoinRoom
+             * @constructor
+             * @param {chat.IJoinRoom=} [properties] Properties to set
+             */
+            function JoinRoom(properties) {
+                if (properties)
+                    for (var keys = Object.keys(properties), i = 0; i < keys.length; ++i)
+                        if (properties[keys[i]] != null)
+                            this[keys[i]] = properties[keys[i]];
+            }
+    
+            /**
+             * JoinRoom room.
+             * @member {string} room
+             * @memberof chat.JoinRoom
+             * @instance
+             */
+            JoinRoom.prototype.room = "";
+    
+            /**
+             * JoinRoom password.
+             * @member {string} password
+             * @memberof chat.JoinRoom
+             * @instance
+             */
+            JoinRoom.prototype.password = "";
+    
+            /**
+             * Creates a new JoinRoom instance using the specified properties.
+             * @function create
+             * @memberof chat.JoinRoom
+             * @static
+             * @param {chat.IJoinRoom=} [properties] Properties to set
+             * @returns {chat.JoinRoom} JoinRoom instance
+             */
+            JoinRoom.create = function create(properties) {
+                return new JoinRoom(properties);
+            };
+    
+            /**
+             * Encodes the specified JoinRoom message. Does not implicitly {@link chat.JoinRoom.verify|verify} messages.
+             * @function encode
+             * @memberof chat.JoinRoom
+             * @static
+             * @param {chat.IJoinRoom} message JoinRoom message or plain object to encode
+             * @param {$protobuf.Writer} [writer] Writer to encode to
+             * @returns {$protobuf.Writer} Writer
+             */
+            JoinRoom.encode = function encode(message, writer) {
+                if (!writer)
+                    writer = $Writer.create();
+                if (message.room != null && Object.hasOwnProperty.call(message, "room"))
+                    writer.uint32(/* id 1, wireType 2 =*/10).string(message.room);
+                if (message.password != null && Object.hasOwnProperty.call(message, "password"))
+                    writer.uint32(/* id 2, wireType 2 =*/18).string(message.password);
+                return writer;
+            };
+    
+            /**
+             * Encodes the specified JoinRoom message, length delimited. Does not implicitly {@link chat.JoinRoom.verify|verify} messages.
+             * @function encodeDelimited
+             * @memberof chat.JoinRoom
+             * @static
+             * @param {chat.IJoinRoom} message JoinRoom message or plain object to encode
+             * @param {$protobuf.Writer} [writer] Writer to encode to
+             * @returns {$protobuf.Writer} Writer
+             */
+            JoinRoom.encodeDelimited = function encodeDelimited(message, writer) {
+                return this.encode(message, writer).ldelim();
+            };
+    
+            /**
+             * Decodes a JoinRoom message from the specified reader or buffer.
+             * @function decode
+             * @memberof chat.JoinRoom
+             * @static
+             * @param {$protobuf.Reader|Uint8Array} reader Reader or buffer to decode from
+             * @param {number} [length] Message length if known beforehand
+             * @returns {chat.JoinRoom} JoinRoom
+             * @throws {Error} If the payload is not a reader or valid buffer
+             * @throws {$protobuf.util.ProtocolError} If required fields are missing
+             */
+            JoinRoom.decode = function decode(reader, length) {
+                if (!(reader instanceof $Reader))
+                    reader = $Reader.create(reader);
+                var end = length === undefined ? reader.len : reader.pos + length, message = new $root.chat.JoinRoom();
+                while (reader.pos < end) {
+                    var tag = reader.uint32();
+                    switch (tag >>> 3) {
+                    case 1:
+                        message.room = reader.string();
+                        break;
+                    case 2:
+                        message.password = reader.string();
+                        break;
+                    default:
+                        reader.skipType(tag & 7);
+                        break;
+                    }
+                }
+                return message;
+            };
+    
+            /**
+             * Decodes a JoinRoom message from the specified reader or buffer, length delimited.
+             * @function decodeDelimited
+             * @memberof chat.JoinRoom
+             * @static
+             * @param {$protobuf.Reader|Uint8Array} reader Reader or buffer to decode from
+             * @returns {chat.JoinRoom} JoinRoom
+             * @throws {Error} If the payload is not a reader or valid buffer
+             * @throws {$protobuf.util.ProtocolError} If required fields are missing
+             */
+            JoinRoom.decodeDelimited = function decodeDelimited(reader) {
+                if (!(reader instanceof $Reader))
+                    reader = new $Reader(reader);
+                return this.decode(reader, reader.uint32());
+            };
+    
+            /**
+             * Verifies a JoinRoom message.
+             * @function verify
+             * @memberof chat.JoinRoom
+             * @static
+             * @param {Object.<string,*>} message Plain object to verify
+             * @returns {string|null} `null` if valid, otherwise the reason why it is not
+             */
+            JoinRoom.verify = function verify(message) {
+                if (typeof message !== "object" || message === null)
+                    return "object expected";
+                if (message.room != null && message.hasOwnProperty("room"))
+                    if (!$util.isString(message.room))
+                        return "room: string expected";
+                if (message.password != null && message.hasOwnProperty("password"))
+                    if (!$util.isString(message.password))
+                        return "password: string expected";
+                return null;
+            };
+    
+            /**
+             * Creates a JoinRoom message from a plain object. Also converts values to their respective internal types.
+             * @function fromObject
+             * @memberof chat.JoinRoom
+             * @static
+             * @param {Object.<string,*>} object Plain object
+             * @returns {chat.JoinRoom} JoinRoom
+             */
+            JoinRoom.fromObject = function fromObject(object) {
+                if (object instanceof $root.chat.JoinRoom)
+                    return object;
+                var message = new $root.chat.JoinRoom();
+                if (object.room != null)
+                    message.room = String(object.room);
+                if (object.password != null)
+                    message.password = String(object.password);
+                return message;
+            };
+    
+            /**
+             * Creates a plain object from a JoinRoom message. Also converts values to other types if specified.
+             * @function toObject
+             * @memberof chat.JoinRoom
+             * @static
+             * @param {chat.JoinRoom} message JoinRoom
+             * @param {$protobuf.IConversionOptions} [options] Conversion options
+             * @returns {Object.<string,*>} Plain object
+             */
+            JoinRoom.toObject = function toObject(message, options) {
+                if (!options)
+                    options = {};
+                var object = {};
+                if (options.defaults) {
+                    object.room = "";
+                    object.password = "";
+                }
+                if (message.room != null && message.hasOwnProperty("room"))
+                    object.room = message.room;
+                if (message.password != null && message.hasOwnProperty("password"))
+                    object.password = message.password;
+                return object;
+            };
+    
+            /**
+             * Converts this JoinRoom to JSON.
+             * @function toJSON
+             * @memberof chat.JoinRoom
+             * @instance
+             * @returns {Object.<string,*>} JSON object
+             */
+            JoinRoom.prototype.toJSON = function toJSON() {
+                return this.constructor.toObject(this, $protobuf.util.toJSONOptions);
+            };
+    
+            return JoinRoom;
         })();
     
         return chat;

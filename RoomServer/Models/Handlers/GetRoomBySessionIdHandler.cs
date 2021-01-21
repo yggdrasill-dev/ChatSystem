@@ -34,7 +34,7 @@ namespace RoomServer.Models.Handlers
 
 			var response = new GetRoomBySessionIdResponse
 			{
-				Room = room
+				Room = room ?? string.Empty
 			};
 
 			await m_MessageQueueService.PublishAsync(

@@ -71,19 +71,12 @@ namespace ChatConnector.Models
 			{
 				var regCommandService = scope.ServiceProvider.GetRequiredService<ICommandService<RegisterSessionCommand>>();
 				var addSocketCommandService = scope.ServiceProvider.GetRequiredService<ICommandService<AddSocketCommand>>();
-				var joinRoomCommandService = scope.ServiceProvider.GetRequiredService<ICommandService<JoinRoomCommand>>();
 
 				await regCommandService.ExecuteAsync(new RegisterSessionCommand
 				{
 					SessionId = httpContext.TraceIdentifier,
 					ConnectorId = m_ConnectorId,
 					Name = httpContext.User.Identity.Name
-				});
-
-				await joinRoomCommandService.ExecuteAsync(new JoinRoomCommand
-				{
-					SessionId = httpContext.TraceIdentifier,
-					Room = "test"
 				});
 
 				await addSocketCommandService.ExecuteAsync(new AddSocketCommand
@@ -95,8 +88,7 @@ namespace ChatConnector.Models
 				var accpetMsg = new LoginReply
 				{
 					Status = LoginStatus.Accpet,
-					Name = httpContext.User.Identity.Name,
-					Room = "test"
+					Name = httpContext.User.Identity.Name
 				};
 
 				var reply = new Packet

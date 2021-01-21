@@ -47,12 +47,26 @@ namespace RoomServer.Models.Endpoints
 			if (string.IsNullOrEmpty(playerInRoom))
 				return;
 
+			var fromPlayerInfo = await m_PlayerQueryService
+				.QueryAsync(new PlayerInfoQuery
+				{
+					SessionIds = new[] { packet.SessionId }
+				})
+				.FirstOrDefaultAsync()
+				.ConfigureAwait(false);
+
+			if (fromPlayerInfo?.SessionId != packet.SessionId)
+				return;
+
 			var responseSessionIds = m_RoomListService.QueryAsync(new RoomSessionsQuery
 			{
 				Room = playerInRoom
 			});
 
-			var playersContent = new PlayerList();
+			var playersContent = new PlayerList
+			{
+				Room = playerInRoom
+			};
 
 			var allPlayers = m_PlayerQueryService.QueryAsync(new PlayerInfoQuery
 			{
@@ -69,7 +83,7 @@ namespace RoomServer.Models.Endpoints
 
 			sendMsg.SessionIds.Add(packet.SessionId);
 
-			await m_MessageQueueService.PublishAsync("connect.send", sendMsg.ToByteArray());
+			await m_MessageQueueService.PublishAsync($"connect.send.{fromPlayerInfo.ConnectorId}", sendMsg.ToByteArray());
 		}
 	}
 }

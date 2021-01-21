@@ -1,6 +1,6 @@
 import { Router } from '@angular/router';
 import { Subscription } from 'rxjs';
-import { filter, map } from 'rxjs/operators';
+import { filter, map, subscribeOn } from 'rxjs/operators';
 import { ChatClientService } from './../services/chat-client.service';
 import { Component, OnDestroy, OnInit } from '@angular/core';
 import { chat } from 'src/protos';
@@ -33,19 +33,40 @@ export class RoomComponent implements OnInit, OnDestroy {
 		this.m_MessageSubscriptions.push(
 			this.m_ChatClient.receiver
 				.pipe(
-					filter(msg => msg.subject == 'connect.login.reply'),
-					map(msg => {
-						const reply = chat.LoginReply.decode(msg.payload);
-
-						return {
-							name: reply.name,
-							room: reply.room
-						};
-					})
+					filter(msg => msg.subject == 'connect.login.reply')
 				)
 				.subscribe(msg => {
-					this.name = msg.name;
-					this.channelName = msg.room;
+					const reply = chat.LoginReply.decode(msg.payload);
+
+					if (reply.status == chat.LoginStatus.ACCPET) {
+						this.name = reply.name;
+
+						this.m_ChatClient.send(
+							'room.join',
+							chat.JoinRoom.encode({
+								room: 'test'
+							}).finish());
+					}
+				})
+		);
+
+		this.m_MessageSubscriptions.push(
+			this.m_ChatClient.receiver
+				.pipe(
+					filter(msg => msg.subject == "room.join.reply")
+				)
+				.subscribe(msg => {
+					this.m_ChatClient.send("room.player.list", '');
+				})
+		);
+
+		this.m_MessageSubscriptions.push(
+			this.m_ChatClient.receiver
+				.pipe(
+					filter(msg => msg.subject == "room.player.refrash")
+				)
+				.subscribe(msg => {
+					this.m_ChatClient.send("room.player.list", '');
 				})
 		);
 
@@ -69,11 +90,12 @@ export class RoomComponent implements OnInit, OnDestroy {
 					map(msg => {
 						const reply = chat.PlayerList.decode(msg.payload);
 
-						return reply.players;
+						return reply;
 					})
 				)
-				.subscribe(players => {
-					this.players = players;
+				.subscribe(reply => {
+					this.channelName = reply.room;
+					this.players = reply.players;
 				})
 		);
 
@@ -91,8 +113,6 @@ export class RoomComponent implements OnInit, OnDestroy {
 		);
 
 		await this.m_ChatClient.open();
-
-		await this.m_ChatClient.send("room.player.list", '');
 	}
 
 	ngOnDestroy(): void {

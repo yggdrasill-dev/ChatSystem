@@ -112,9 +112,6 @@ export namespace chat {
 
         /** LoginReply name */
         name?: (string|null);
-
-        /** LoginReply room */
-        room?: (string|null);
     }
 
     /** Represents a LoginReply. */
@@ -131,9 +128,6 @@ export namespace chat {
 
         /** LoginReply name. */
         public name: string;
-
-        /** LoginReply room. */
-        public room: string;
 
         /**
          * Creates a new LoginReply instance using the specified properties.
@@ -325,6 +319,9 @@ export namespace chat {
     /** Properties of a PlayerList. */
     interface IPlayerList {
 
+        /** PlayerList room */
+        room?: (string|null);
+
         /** PlayerList players */
         players?: (string[]|null);
     }
@@ -337,6 +334,9 @@ export namespace chat {
          * @param [properties] Properties to set
          */
         constructor(properties?: chat.IPlayerList);
+
+        /** PlayerList room. */
+        public room: string;
 
         /** PlayerList players. */
         public players: string[];
@@ -497,6 +497,102 @@ export namespace chat {
 
         /**
          * Converts this RoomList to JSON.
+         * @returns JSON object
+         */
+        public toJSON(): { [k: string]: any };
+    }
+
+    /** Properties of a JoinRoom. */
+    interface IJoinRoom {
+
+        /** JoinRoom room */
+        room?: (string|null);
+
+        /** JoinRoom password */
+        password?: (string|null);
+    }
+
+    /** Represents a JoinRoom. */
+    class JoinRoom implements IJoinRoom {
+
+        /**
+         * Constructs a new JoinRoom.
+         * @param [properties] Properties to set
+         */
+        constructor(properties?: chat.IJoinRoom);
+
+        /** JoinRoom room. */
+        public room: string;
+
+        /** JoinRoom password. */
+        public password: string;
+
+        /**
+         * Creates a new JoinRoom instance using the specified properties.
+         * @param [properties] Properties to set
+         * @returns JoinRoom instance
+         */
+        public static create(properties?: chat.IJoinRoom): chat.JoinRoom;
+
+        /**
+         * Encodes the specified JoinRoom message. Does not implicitly {@link chat.JoinRoom.verify|verify} messages.
+         * @param message JoinRoom message or plain object to encode
+         * @param [writer] Writer to encode to
+         * @returns Writer
+         */
+        public static encode(message: chat.IJoinRoom, writer?: $protobuf.Writer): $protobuf.Writer;
+
+        /**
+         * Encodes the specified JoinRoom message, length delimited. Does not implicitly {@link chat.JoinRoom.verify|verify} messages.
+         * @param message JoinRoom message or plain object to encode
+         * @param [writer] Writer to encode to
+         * @returns Writer
+         */
+        public static encodeDelimited(message: chat.IJoinRoom, writer?: $protobuf.Writer): $protobuf.Writer;
+
+        /**
+         * Decodes a JoinRoom message from the specified reader or buffer.
+         * @param reader Reader or buffer to decode from
+         * @param [length] Message length if known beforehand
+         * @returns JoinRoom
+         * @throws {Error} If the payload is not a reader or valid buffer
+         * @throws {$protobuf.util.ProtocolError} If required fields are missing
+         */
+        public static decode(reader: ($protobuf.Reader|Uint8Array), length?: number): chat.JoinRoom;
+
+        /**
+         * Decodes a JoinRoom message from the specified reader or buffer, length delimited.
+         * @param reader Reader or buffer to decode from
+         * @returns JoinRoom
+         * @throws {Error} If the payload is not a reader or valid buffer
+         * @throws {$protobuf.util.ProtocolError} If required fields are missing
+         */
+        public static decodeDelimited(reader: ($protobuf.Reader|Uint8Array)): chat.JoinRoom;
+
+        /**
+         * Verifies a JoinRoom message.
+         * @param message Plain object to verify
+         * @returns `null` if valid, otherwise the reason why it is not
+         */
+        public static verify(message: { [k: string]: any }): (string|null);
+
+        /**
+         * Creates a JoinRoom message from a plain object. Also converts values to their respective internal types.
+         * @param object Plain object
+         * @returns JoinRoom
+         */
+        public static fromObject(object: { [k: string]: any }): chat.JoinRoom;
+
+        /**
+         * Creates a plain object from a JoinRoom message. Also converts values to other types if specified.
+         * @param message JoinRoom
+         * @param [options] Conversion options
+         * @returns Plain object
+         */
+        public static toObject(message: chat.JoinRoom, options?: $protobuf.IConversionOptions): { [k: string]: any };
+
+        /**
+         * Converts this JoinRoom to JSON.
          * @returns JSON object
          */
         public toJSON(): { [k: string]: any };
