@@ -9,3 +9,10 @@ services:
     image: redis
     ports:
       - 6379:6379
+  db:
+    image: mcr.microsoft.com/mssql/server:2019-latest
+    environment:
+      ACCEPT_EULA: "Y"
+      SA_PASSWORD: 19U*@sYG%~%1O>^t
+    ports:
+      - 1433:1433

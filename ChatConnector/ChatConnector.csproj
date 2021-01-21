@@ -1,57 +1,68 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk.Web">
 
-  <PropertyGroup>
-    <TargetFramework>net5.0</TargetFramework>
-    <StartupObject>ChatConnector.Program</StartupObject>
-  </PropertyGroup>
+	<PropertyGroup>
+		<TargetFramework>net5.0</TargetFramework>
+		<StartupObject>ChatConnector.Program</StartupObject>
+		<UserSecretsId>99184b97-d58c-41de-9c30-55ada7d6a765</UserSecretsId>
+		<DockerDefaultTargetOS>Linux</DockerDefaultTargetOS>
+		<DockerfileBuildArguments>--build-arg "BuildConfiguration=$(Configuration)"</DockerfileBuildArguments>
+		<DockerfileTag Condition="$(DockerfileTag) == ''">chat/connector</DockerfileTag>
+	</PropertyGroup>
 
-  <ItemGroup>
-    <PackageReference Include="Google.Protobuf" Version="3.14.0" />
-    <PackageReference Include="Grpc.Tools" Version="2.34.0">
-      <PrivateAssets>all</PrivateAssets>
-      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
-    </PackageReference>
-    <PackageReference Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" Version="5.0.2" />
-    <PackageReference Include="Microsoft.VisualStudio.Web.CodeGeneration.Design" Version="5.0.1" />
-    <PackageReference Include="Quartz.AspNetCore" Version="3.2.3" />
-    <PackageReference Include="ValhallaWebSockets" Version="0.0.7" />
-  </ItemGroup>
+	<ItemGroup>
+		<PackageReference Include="Google.Protobuf" Version="3.14.0" />
+		<PackageReference Include="Grpc.Tools" Version="2.34.0">
+			<PrivateAssets>all</PrivateAssets>
+			<IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+		</PackageReference>
+		<PackageReference Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" Version="5.0.2" />
+		<PackageReference Include="Microsoft.VisualStudio.Azure.Containers.Tools.Targets" Version="1.10.9" />
+		<PackageReference Include="Microsoft.VisualStudio.Web.CodeGeneration.Design" Version="5.0.1" />
+		<PackageReference Include="Quartz.AspNetCore" Version="3.2.3" />
+		<PackageReference Include="ValhallaWebSockets" Version="0.0.7" />
+	</ItemGroup>
 
-  <ItemGroup>
-    <Protobuf Include="..\protos\client.proto">
-      <Link>Protos\client.proto</Link>
-    </Protobuf>
-    <Protobuf Include="..\protos\common.proto" GrpcServices="None" Access="Internal">
-      <Link>Protos\common.proto</Link>
-    </Protobuf>
-    <Protobuf Include="..\protos\connector.proto" GrpcServices="None" Access="Internal">
-      <Link>Protos\connector.proto</Link>
-    </Protobuf>
-    <Protobuf Include="..\protos\room.proto" GrpcServices="None" Access="Internal">
-      <Link>Protos\room.proto</Link>
-    </Protobuf>
-    <Protobuf Include="..\protos\session.proto" GrpcServices="None" Access="Internal">
-      <Link>Protos\session.proto</Link>
-    </Protobuf>
-  </ItemGroup>
+	<ItemGroup>
+		<Protobuf Include="..\protos\client.proto">
+			<Link>Protos\client.proto</Link>
+		</Protobuf>
+		<Protobuf Include="..\protos\common.proto" GrpcServices="None" Access="Internal">
+			<Link>Protos\common.proto</Link>
+		</Protobuf>
+		<Protobuf Include="..\protos\connector.proto" GrpcServices="None" Access="Internal">
+			<Link>Protos\connector.proto</Link>
+		</Protobuf>
+		<Protobuf Include="..\protos\room.proto" GrpcServices="None" Access="Internal">
+			<Link>Protos\room.proto</Link>
+		</Protobuf>
+		<Protobuf Include="..\protos\session.proto" GrpcServices="None" Access="Internal">
+			<Link>Protos\session.proto</Link>
+		</Protobuf>
+	</ItemGroup>
 
-  <ItemGroup>
-    <Folder Include="Data\" />
-    <Folder Include="wwwroot\css\" />
-    <Folder Include="wwwroot\images\" />
-    <Folder Include="wwwroot\js\" />
-    <Folder Include="wwwroot\lib\bootstrap\" />
-    <Folder Include="wwwroot\lib\bootstrap\dist\css\" />
-    <Folder Include="wwwroot\lib\bootstrap\dist\js\" />
-    <Folder Include="wwwroot\lib\jquery-validation-unobtrusive\" />
-    <Folder Include="wwwroot\lib\jquery-validation\" />
-    <Folder Include="wwwroot\lib\jquery-validation\dist\" />
-    <Folder Include="wwwroot\lib\jquery\" />
-    <Folder Include="wwwroot\lib\jquery\dist\" />
-  </ItemGroup>
+	<ItemGroup>
+		<Folder Include="Data\" />
+		<Folder Include="wwwroot\css\" />
+		<Folder Include="wwwroot\images\" />
+		<Folder Include="wwwroot\js\" />
+		<Folder Include="wwwroot\lib\bootstrap\" />
+		<Folder Include="wwwroot\lib\bootstrap\dist\css\" />
+		<Folder Include="wwwroot\lib\bootstrap\dist\js\" />
+		<Folder Include="wwwroot\lib\jquery-validation-unobtrusive\" />
+		<Folder Include="wwwroot\lib\jquery-validation\" />
+		<Folder Include="wwwroot\lib\jquery-validation\dist\" />
+		<Folder Include="wwwroot\lib\jquery\" />
+		<Folder Include="wwwroot\lib\jquery\dist\" />
+	</ItemGroup>
 
-  <ItemGroup>
-    <ProjectReference Include="..\Common\Common.csproj" />
-  </ItemGroup>
+	<ItemGroup>
+		<ProjectReference Include="..\Common\Common.csproj" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<None Update="..\.dockerignore">
+			<DependentUpon>dockerfile</DependentUpon>
+		</None>
+	</ItemGroup>
 
 </Project>
