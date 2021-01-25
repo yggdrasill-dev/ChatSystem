@@ -35,7 +35,7 @@ namespace SessionServer.Models.Handlers
 				Name = registration.Name
 			}).ConfigureAwait(false);
 
-			await m_MessageQueueService.PublishAsync(msg.Reply, null);
+			await m_MessageQueueService.PublishAsync(msg.Reply, Array.Empty<byte>());
 
 			m_Logger.LogInformation($"({registration.SessionId}, {registration.Name}) registered.");
 		}

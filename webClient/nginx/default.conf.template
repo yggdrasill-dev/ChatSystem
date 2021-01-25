@@ -1,0 +1,44 @@
+server {
+    listen  80;
+
+    index index.html;
+    large_client_header_buffers 4 32k;
+
+    location ^~ /webclient/index.html {
+        alias /usr/share/nginx/html/index.html;
+
+        add_header Cache-Control "no-cache, no-store, must-revalidate";
+        add_header Pragma "no-cache";
+        add_header Expires "0";
+        add_header Last_Modified "";
+    }
+
+    location ^~ /webclient {
+        index index.html;
+
+        alias /usr/share/nginx/html/;
+    }
+
+    location = /ws {
+        proxy_set_header Host $http_host;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+
+        proxy_pass ${PROXY_SITE};
+    }
+
+    location / {
+        proxy_set_header Host $http_host;
+
+        proxy_pass ${PROXY_SITE};
+
+        #定義header記錄使用者IP
+        proxy_set_header X-Real-IP $remote_addr;
+
+        #讓後端的Web伺服器可以取得使用者真實IP
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+
+        #把 Protocol header 也往後送
+        proxy_set_header X-Forwarded-Proto $http_x_forwarded_proto;
+    }
+}

@@ -57,7 +57,7 @@ namespace RoomServer.Models.Handlers
 				"connect.send",
 				refrashPacket.ToByteArray()).ConfigureAwait(false);
 
-			await m_MessageQueueService.PublishAsync(msg.Reply, null).ConfigureAwait(false);
+			await m_MessageQueueService.PublishAsync(msg.Reply, Array.Empty<byte>()).ConfigureAwait(false);
 
 			m_Logger.LogInformation($"({request.SessionId}, {request.Room}) leaved.");
 		}

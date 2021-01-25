@@ -16,3 +16,40 @@ services:
       SA_PASSWORD: 19U*@sYG%~%1O>^t
     ports:
       - 1433:1433
+  auth:
+    image: chat/auth
+    environment:
+      ConnectionStrings__DefaultConnection: "Server=db;Database=ChatDB;USER=sa;PWD=19U*@sYG%~%1O>^t"
+      AuthServer__Issuer: "https://192.168.90.100:17001"
+  connector:
+    image: chat/connector
+    environment:
+      Auth__Authority: "http://auth:80"
+      MessageQueue__Url: "nats://nats:4222"
+  chat:
+    image: chat/chat
+    environment:
+      MessageQueue__Url: "nats://nats:4222"
+  room:
+    image: chat/room
+    environment:
+      MessageQueue__Url: "nats://nats:4222"
+      Redis__ConnectionString: "redis:6379"
+  session:
+    image: chat/session
+    environment:
+      MessageQueue__Url: "nats://nats:4222"
+      Redis__ConnectionString: "redis:6379"
+  web:
+    image: chat/web
+    environment:
+      PROXY_SITE: "http://connector"
+  haproxy:
+    image: haproxy
+    ports:
+      - 17001:7001
+      - 17002:7002
+      - 18404:8404
+    volumes:
+      - ./docker-configs/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+      - ./docker-configs/localhost.pem:/etc/ssl/live/localhost/localhost.pem:ro

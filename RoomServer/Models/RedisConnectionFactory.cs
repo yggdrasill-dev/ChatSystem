@@ -8,13 +8,13 @@ namespace RoomServer.Models
 
 		public IServer Server { get; }
 
-		public RedisConnectionFactory()
+		public RedisConnectionFactory(string connectionString)
 		{
-			var connection = ConnectionMultiplexer.Connect("localhost:6379");
+			var connection = ConnectionMultiplexer.Connect(connectionString);
 
 			Database = connection.GetDatabase();
 
-			Server = connection.GetServer("localhost:6379");
+			Server = connection.GetServer(connectionString);
 		}
 	}
 }

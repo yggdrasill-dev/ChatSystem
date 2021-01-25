@@ -1,3 +1,4 @@
+using System.Net;
 using AuthServer.Data;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -7,6 +8,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using OpenIddict.Server;
 using static OpenIddict.Abstractions.OpenIddictConstants;
 using static OpenIddict.Server.OpenIddictServerEvents;
 
@@ -19,6 +21,7 @@ namespace AuthServer
 		{
 			services.Configure<ForwardedHeadersOptions>(options =>
 			{
+				options.KnownNetworks.Add(new IPNetwork(IPAddress.Parse("172.0.0.0"), 8));
 				options.ForwardedHeaders = ForwardedHeaders.All;
 			});
 
@@ -43,6 +46,12 @@ namespace AuthServer
 				options.ClaimsIdentity.UserIdClaimType = Claims.Subject;
 				options.ClaimsIdentity.RoleClaimType = Claims.Role;
 			});
+
+			services.AddOptions<OpenIddictServerOptions>()
+				.Configure<IConfiguration>((options, config) =>
+				{
+					config.GetSection("AuthServer").Bind(options);
+				});
 
 			services.AddOpenIddict()
 				.AddCore(builder =>
@@ -76,7 +85,8 @@ namespace AuthServer
 						.RequireProofKeyForCodeExchange();
 
 					builder.UseAspNetCore()
-						.EnableAuthorizationEndpointPassthrough();
+						.EnableAuthorizationEndpointPassthrough()
+						.DisableTransportSecurityRequirement();
 				});
 
 			services.AddHostedService<Worker>();
@@ -99,7 +109,7 @@ namespace AuthServer
 				app.UseHsts();
 			}
 
-			app.UseHttpsRedirection();
+			//app.UseHttpsRedirection();
 			app.UseStaticFiles();
 
 			app.UseRouting();

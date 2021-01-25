@@ -1,4 +1,5 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Common.Configuration
@@ -8,6 +9,9 @@ namespace Common.Configuration
 		private List<ISubscribeRegistration> m_SubscribeRegistrations = new List<ISubscribeRegistration>();
 
 		public IServiceCollection Services { get; }
+
+		internal Action<MessageQueueOptions, IServiceProvider> OptionsConfigure { get; private set; } =
+			(options, sp) => { };
 
 		public MessageQueueConfiguration(IServiceCollection services)
 		{
@@ -26,6 +30,13 @@ namespace Common.Configuration
 		public MessageQueueConfiguration AddHandler<THandler>(string subject, string group) where THandler : IMessageHandler
 		{
 			m_SubscribeRegistrations.Add(new GroupRegistration<THandler>(subject, group));
+
+			return this;
+		}
+
+		public MessageQueueConfiguration ConfigQueueOptions(Action<MessageQueueOptions, IServiceProvider> configure)
+		{
+			OptionsConfigure = configure;
 
 			return this;
 		}

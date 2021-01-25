@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Threading.Tasks;
+using Microsoft.Extensions.Options;
 using NATS.Client;
 
 namespace Common
@@ -8,9 +9,10 @@ namespace Common
 	{
 		private readonly IConnection m_Connection;
 
-		public MessageQueueService(ConnectionFactory connectionFactory)
+		public MessageQueueService(
+			IConnection connection)
 		{
-			m_Connection = connectionFactory.CreateConnection();
+			m_Connection = connection ?? throw new ArgumentNullException(nameof(connection));
 		}
 
 		public ValueTask PublishAsync(string subject, byte[] data)

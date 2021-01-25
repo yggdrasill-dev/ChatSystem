@@ -1,0 +1,23 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: session-deployment
+  labels:
+    app: chat-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: session
+  template:
+    metadata:
+      labels:
+        app: session
+    spec:
+      containers:
+        - name: chat
+          image: chat/session
+          resources:
+            limits:
+              cpu: "500m"
+              memory: "1g"

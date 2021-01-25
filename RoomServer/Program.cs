@@ -1,4 +1,5 @@
 ﻿using Common;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using RoomServer.Models;
@@ -23,8 +24,20 @@ namespace RoomServer
 								.AddHandler<PlayerListHandler>("room.player.list", "room.player.list")
 								.AddHandler<RoomListHandler>("room.list", "room.list")
 								.AddHandler<GetRoomBySessionIdHandler>("room.session.get", "room.session.get");
+
+							config.ConfigQueueOptions((options, sp) =>
+							{
+								var configuration = sp.GetRequiredService<IConfiguration>();
+
+								configuration.GetSection("MessageQueue").Bind(options);
+							});
 						})
-						.AddSingleton<RedisConnectionFactory>()
+						.AddSingleton<RedisConnectionFactory>(sp =>
+						{
+							var config = sp.GetRequiredService<IConfiguration>();
+
+							return new RedisConnectionFactory(config.GetValue<string>("Redis:ConnectionString"));
+						})
 						.AddSingleton<IRoomRepository, RoomRepository>()
 						.AddTransient<ICommandService<JoinRoomCommand>, JoinRoomCommandService>()
 						.AddTransient<ICommandService<LeaveRoomCommand>, LeaveRoomCommandService>()

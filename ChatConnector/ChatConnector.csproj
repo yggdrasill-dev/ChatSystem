@@ -7,9 +7,11 @@
 		<DockerDefaultTargetOS>Linux</DockerDefaultTargetOS>
 		<DockerfileBuildArguments>--build-arg "BuildConfiguration=$(Configuration)"</DockerfileBuildArguments>
 		<DockerfileTag Condition="$(DockerfileTag) == ''">chat/connector</DockerfileTag>
+		<EnforceCodeStyleInBuild>false</EnforceCodeStyleInBuild>
 	</PropertyGroup>
 
 	<ItemGroup>
+		<PackageReference Include="BuildBundlerMinifier" Version="3.2.449" />
 		<PackageReference Include="Google.Protobuf" Version="3.14.0" />
 		<PackageReference Include="Grpc.Tools" Version="2.34.0">
 			<PrivateAssets>all</PrivateAssets>

@@ -33,7 +33,7 @@ namespace SessionServer.Models.Handlers
 				SessionId = registration.SessionId
 			}).ConfigureAwait(false);
 
-			await m_MessageQueueService.PublishAsync(msg.Reply, null).ConfigureAwait(false);
+			await m_MessageQueueService.PublishAsync(msg.Reply, Array.Empty<byte>()).ConfigureAwait(false);
 
 			m_Logger.LogInformation($"({registration.SessionId}) unregistered.");
 		}

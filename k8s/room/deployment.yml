@@ -1,0 +1,23 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: room-deployment
+  labels:
+    app: chat-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: room
+  template:
+    metadata:
+      labels:
+        app: room
+    spec:
+      containers:
+        - name: chat
+          image: chat/room
+          resources:
+            limits:
+              cpu: "500m"
+              memory: "1g"

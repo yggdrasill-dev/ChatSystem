@@ -24,7 +24,7 @@ export class ChatClientService {
 	open(): Promise<void> {
 		return new Promise<void>(
 			(resolve, reject) => {
-				this.m_Socket = new WebSocket('wss://localhost:5002/ws');
+				this.m_Socket = new WebSocket('wss://localhost:17002/ws');
 
 				this.m_Socket.onmessage = async (ev: MessageEvent<Blob>) => {
 					try {
