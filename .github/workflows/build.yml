@@ -21,4 +21,4 @@ jobs:
         run: dotnet restore
 
       - name: build auth
-        run: dotnet build -c ${{env.BuildConfiguration}} -t:ContainerBuild -p:DockerfileTag=${{env.ImageRegistry}}/chat/auth:${{env.GITHUB_RUN_NUMBER}} --no-restore AuthServer/AuthServer.csproj
+        run: dotnet build -c ${{env.BuildConfiguration}} -t:ContainerBuild -p:DockerfileTag=${{env.ImageRegistry}}/chat/auth:${{GITHUB_RUN_NUMBER}} --no-restore AuthServer/AuthServer.csproj
