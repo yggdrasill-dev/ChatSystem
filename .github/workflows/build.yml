@@ -21,6 +21,6 @@ jobs:
         run: dotnet restore
 
       - name: build auth
-        run: |
-          SET DOCKER_HOST=tcp://localhost:2376
-          dotnet build -c ${{env.BuildConfiguration}} -t:ContainerBuild -p:DockerfileTag=${{env.ImageRegistry}}/chat/auth:${{github.run_number}} --no-restore AuthServer/AuthServer.csproj
+        env:
+          DOCKER_HOST: tcp://localhost:2376
+        run: dotnet build -c ${{env.BuildConfiguration}} -t:ContainerBuild -p:DockerfileTag=${{env.ImageRegistry}}/chat/auth:${{github.run_number}} --no-restore AuthServer/AuthServer.csproj
