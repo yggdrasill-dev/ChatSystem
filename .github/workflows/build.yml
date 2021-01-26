@@ -9,6 +9,7 @@ on:
 env:
   BuildConfiguration: debug
   ImageRegistry: cr.yggdrasill.dev
+  DOCKER_HOST: tcp://localhost:2376
 
 jobs:
   build:
@@ -21,6 +22,26 @@ jobs:
         run: dotnet restore
 
       - name: build auth
-        env:
-          DOCKER_HOST: tcp://localhost:2376
         run: dotnet build -c ${{env.BuildConfiguration}} -t:ContainerBuild -p:DockerfileTag=${{env.ImageRegistry}}/chat/auth:${{github.run_number}} --no-restore AuthServer/AuthServer.csproj
+      - name: push auth image
+        run: docker push ${{env.ImageRegistry}}/chat/auth:${{github.run_number}}
+
+      - name: build connector
+        run: dotnet build -c ${{env.BuildConfiguration}} -t:ContainerBuild -p:DockerfileTag=${{env.ImageRegistry}}/chat/connect:${{github.run_number}} --no-restore ChatConnector/ChatConnector.csproj
+      - name: push connector image
+        run: docker push ${{env.ImageRegistry}}/chat/connect:${{github.run_number}}
+
+      - name: build chat
+        run: dotnet build -c ${{env.BuildConfiguration}} -t:ContainerBuild -p:DockerfileTag=${{env.ImageRegistry}}/chat/chat:${{github.run_number}} --no-restore ChatServer/ChatServer.csproj
+      - name: push chat image
+        run: docker push ${{env.ImageRegistry}}/chat/chat:${{github.run_number}}
+
+      - name: build room
+        run: dotnet build -c ${{env.BuildConfiguration}} -t:ContainerBuild -p:DockerfileTag=${{env.ImageRegistry}}/chat/room:${{github.run_number}} --no-restore RoomServer/RoomServer.csproj
+      - name: push room image
+        run: docker push ${{env.ImageRegistry}}/chat/room:${{github.run_number}}
+
+      - name: build session
+        run: dotnet build -c ${{env.BuildConfiguration}} -t:ContainerBuild -p:DockerfileTag=${{env.ImageRegistry}}/chat/session:${{github.run_number}} --no-restore SessionServer/SessionServer.csproj
+      - name: push session image
+        run: docker push ${{env.ImageRegistry}}/chat/session:${{github.run_number}}
