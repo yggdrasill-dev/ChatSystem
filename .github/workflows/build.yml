@@ -20,6 +20,9 @@ jobs:
 
       - name: Restore dependencies
         run: dotnet restore
+      
+      - name: login container registry
+        run: docker login -u robot$github -p ${{secrets.VALHALLAREGISTRYTOKEN}}
 
       - name: build auth
         run: dotnet build -c ${{env.BuildConfiguration}} -t:ContainerBuild -p:DockerfileTag=${{env.ImageRegistry}}/chat/auth:${{github.run_number}} --no-restore AuthServer/AuthServer.csproj
