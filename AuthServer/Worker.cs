@@ -5,8 +5,10 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using AuthServer.Data;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using OpenIddict.Abstractions;
 using static OpenIddict.Abstractions.OpenIddictConstants;
 
@@ -14,16 +16,21 @@ namespace AuthServer
 {
 	public class Worker : IHostedService
 	{
-		private readonly IServiceProvider _serviceProvider;
+		private readonly IServiceProvider m_ServiceProvider;
+		private readonly ILogger<Worker> m_Logger;
 
-		public Worker(IServiceProvider serviceProvider)
-			=> _serviceProvider = serviceProvider;
+		public Worker(IServiceProvider serviceProvider, ILogger<Worker> logger)
+		{
+			m_ServiceProvider = serviceProvider;
+			m_Logger = logger ?? throw new ArgumentNullException(nameof(logger));
+		}
 
 		public async Task StartAsync(CancellationToken cancellationToken)
 		{
-			using var scope = _serviceProvider.CreateScope();
+			using var scope = m_ServiceProvider.CreateScope();
 
 			var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+			m_Logger.LogInformation(context.Database.GetConnectionString());
 			await context.Database.EnsureCreatedAsync(cancellationToken);
 
 			await RegisterApplicationsAsync(scope.ServiceProvider);
