@@ -50,6 +50,8 @@ services:
       - 17001:7001
       - 17002:7002
       - 18404:8404
+      - 443:443
     volumes:
       - ./docker-configs/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
       - ./docker-configs/localhost.pem:/etc/ssl/live/localhost/localhost.pem:ro
+      - ./docker-configs/test.pem:/etc/ssl/live/test.com/test.com.pem:ro

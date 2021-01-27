@@ -14,12 +14,23 @@ spec:
       labels:
         app: connector
     spec:
+      imagePullSecrets:
+        - name: regcred
       containers:
         - name: connector
-          image: chat/connector
+          image: cr.yggdrasill.dev/chat/connect:10
           ports:
             - containerPort: 80
+          env:
+            - name: Auth__Authority
+              value: "https://auth.test.com"
+            - name: MessageQueue__Url
+              value: "nats://192.168.90.100:4222"
+            - name: Logging__LogLevel__Microsoft
+              value: Trace
+            - name: Logging__LogLevel__Default
+              value: Trace
           resources:
             limits:
               cpu: "500m"
-              memory: "1g"
+              memory: "1G"

@@ -31,6 +31,7 @@ namespace ChatConnector
 			services.Configure<ForwardedHeadersOptions>(options =>
 			{
 				options.KnownNetworks.Add(new IPNetwork(IPAddress.Parse("172.0.0.0"), 8));
+				options.KnownNetworks.Add(new IPNetwork(IPAddress.Parse("10.0.0.0"), 8));
 				options.ForwardedHeaders = ForwardedHeaders.All;
 			});
 

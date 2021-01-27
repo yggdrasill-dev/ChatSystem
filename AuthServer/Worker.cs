@@ -30,7 +30,7 @@ namespace AuthServer
 			using var scope = m_ServiceProvider.CreateScope();
 
 			var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-			m_Logger.LogInformation(context.Database.GetConnectionString());
+
 			await context.Database.EnsureCreatedAsync(cancellationToken);
 
 			await RegisterApplicationsAsync(scope.ServiceProvider);
@@ -54,11 +54,15 @@ namespace AuthServer
 						},
 						PostLogoutRedirectUris =
 						{
-							new Uri("https://localhost:44381/signout-callback-oidc")
+							new Uri("https://localhost:5002/signout-callback-oidc"),
+							new Uri("https://localhost:17002/signout-callback-oidc"),
+							new Uri("https://chat.test.com/signout-callback-oidc")
 						},
 						RedirectUris =
 						{
-							new Uri("https://localhost:44381/signin-oidc")
+							new Uri("https://localhost:5002/signin-oidc"),
+							new Uri("https://localhost:17002/signin-oidc"),
+							new Uri("https://chat.test.com/signin-oidc")
 						},
 						Permissions =
 						{

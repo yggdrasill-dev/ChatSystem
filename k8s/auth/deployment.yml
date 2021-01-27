@@ -14,12 +14,19 @@ spec:
       labels:
         app: auth
     spec:
+      imagePullSecrets:
+        - name: regcred
       containers:
         - name: auth
-          image: chat/auth
+          image: cr.yggdrasill.dev/chat/auth:10
           ports:
             - containerPort: 80
+          env:
+            - name: "ConnectionStrings__DefaultConnection"
+              value: "Server=192.168.90.100;Database=ChatDB;USER=sa;PWD=19U*@sYG%~%1O>^t"
+            - name: "AuthServer__Issuer"
+              value: "https://auth.test.com"
           resources:
             limits:
-              cpu: "500m"
-              memory: "1g"
+              cpu: 500m
+              memory: 1G
