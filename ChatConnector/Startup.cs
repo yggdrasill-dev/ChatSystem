@@ -148,6 +148,7 @@ namespace ChatConnector
 					logger.LogInformation($"{head.Key} => {head.Value}");
 				}
 
+				httpContext.Request.Scheme = "https";
 				await next();
 
 				logger.LogInformation($"Request Host: {httpContext.Request.Host}, IsHttps: {httpContext.Request.IsHttps}, RemoteIP: {httpContext.Connection.RemoteIpAddress}");
