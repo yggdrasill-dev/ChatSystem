@@ -138,7 +138,7 @@ namespace ChatConnector
 		// This method gets called by the runtime. Use this method to configure the HTTP request pipeline.
 		public void Configure(IApplicationBuilder app, IWebHostEnvironment env)
 		{
-			app.Use((httpContext, next) =>
+			app.Use(async (httpContext, next) =>
 			{
 				var logger = httpContext.RequestServices.GetService<ILogger<Startup>>();
 
@@ -147,7 +147,9 @@ namespace ChatConnector
 					logger.LogInformation($"{head.Key} => {head.Value}");
 				}
 
-				return next();
+				await next();
+
+				logger.LogInformation($"Request Host: {httpContext.Request.Host}, IsHttps: {httpContext.Request.IsHttps}");
 			});
 			app.UseForwardedHeaders();
 
