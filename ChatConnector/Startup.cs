@@ -149,7 +149,7 @@ namespace ChatConnector
 
 				await next();
 
-				logger.LogInformation($"Request Host: {httpContext.Request.Host}, IsHttps: {httpContext.Request.IsHttps}");
+				logger.LogInformation($"Request Host: {httpContext.Request.Host}, IsHttps: {httpContext.Request.IsHttps}, RemoteIP: {httpContext.Connection.RemoteIpAddress}");
 			});
 			app.UseForwardedHeaders();
 
