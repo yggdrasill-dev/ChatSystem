@@ -14,6 +14,7 @@ using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Microsoft.IdentityModel.Protocols.OpenIdConnect;
 using NATS.Client;
 using Quartz;
@@ -137,6 +138,17 @@ namespace ChatConnector
 		// This method gets called by the runtime. Use this method to configure the HTTP request pipeline.
 		public void Configure(IApplicationBuilder app, IWebHostEnvironment env)
 		{
+			app.Use((httpContext, next) =>
+			{
+				var logger = httpContext.RequestServices.GetService<ILogger<Startup>>();
+
+				foreach (var head in httpContext.Request.Headers)
+				{
+					logger.LogInformation($"{head.Key} => {head.Value}");
+				}
+
+				return next();
+			});
 			app.UseForwardedHeaders();
 
 			if (env.IsDevelopment())
