@@ -14,9 +14,14 @@ spec:
       labels:
         app: session
     spec:
+      imagePullSecrets:
+        - name: valhalla-cr
       containers:
         - name: chat
-          image: cr.yggdrasill.dev/chat/session:18
+          image: cr.yggdrasill.dev/chat/session:19
+          env:
+            - name: MessageQueue__Url
+              value: "nats://192.168.90.100:4222"
           resources:
             limits:
               cpu: "1"

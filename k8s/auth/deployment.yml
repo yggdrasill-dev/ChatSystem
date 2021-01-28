@@ -18,7 +18,7 @@ spec:
         - name: valhalla-cr
       containers:
         - name: auth
-          image: cr.yggdrasill.dev/chat/auth:18
+          image: cr.yggdrasill.dev/chat/auth:19
           ports:
             - containerPort: 80
           env:

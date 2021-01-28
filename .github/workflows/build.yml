@@ -48,3 +48,5 @@ jobs:
 
       - name: build webclient
         run: docker build -f webClient\Dockerfile -t ${{env.ImageRegistry}}/chat/web:${{github.run_number}} webClient
+      - name: push webclient image
+        run: docker push ${{env.ImageRegistry}}/chat/web:${{github.run_number}}

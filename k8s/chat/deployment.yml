@@ -15,7 +15,7 @@ spec:
         app: chat
     spec:
       imagePullSecrets:
-        - name: regcred
+        - name: valhalla-cr
       containers:
         - name: chat
           image: cr.yggdrasill.dev/chat/chat:18
