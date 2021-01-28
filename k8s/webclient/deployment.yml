@@ -18,7 +18,7 @@ spec:
         - name: valhalla-cr
       containers:
         - name: webclient
-          image: cr.yggdrasill.dev/chat/web:19
+          image: cr.yggdrasill.dev/chat/web:20
           ports:
             - containerPort: 80
           resources:

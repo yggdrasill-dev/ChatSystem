@@ -56,7 +56,7 @@ export class RoomComponent implements OnInit, OnDestroy {
 					filter(msg => msg.subject == "room.join.reply")
 				)
 				.subscribe(msg => {
-					this.m_ChatClient.send("room.player.list", '');
+					this.m_ChatClient.send("room.player.list", new Uint8Array());
 				})
 		);
 
@@ -66,7 +66,7 @@ export class RoomComponent implements OnInit, OnDestroy {
 					filter(msg => msg.subject == "room.player.refrash")
 				)
 				.subscribe(msg => {
-					this.m_ChatClient.send("room.player.list", '');
+					this.m_ChatClient.send("room.player.list", new Uint8Array());
 				})
 		);
 

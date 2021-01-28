@@ -1,6 +1,8 @@
-import { Injectable } from '@angular/core';
+import { AppSettingsToken } from './app-settings-token';
+import { AppSettings } from './app-settings';
 import { Observable, Subject } from 'rxjs';
 import { chat } from '../../protos/bundle';
+import { Inject, Injectable } from '@angular/core';
 
 @Injectable({
 	providedIn: 'root'
@@ -11,7 +13,7 @@ export class ChatClientService {
 	private m_Decoder = new TextDecoder();
 	private m_ReceiveMessages: Subject<chat.IPacket> = new Subject<chat.IPacket>();
 
-	constructor() { }
+	constructor(@Inject(AppSettingsToken) private m_AppConfig: AppSettings) { }
 
 	get isConnected(): boolean {
 		return this.m_Socket?.readyState == WebSocket.OPEN;
@@ -24,7 +26,7 @@ export class ChatClientService {
 	open(): Promise<void> {
 		return new Promise<void>(
 			(resolve, reject) => {
-				this.m_Socket = new WebSocket('wss://localhost:17002/ws');
+				this.m_Socket = new WebSocket(this.m_AppConfig.chatEndpoint);
 
 				this.m_Socket.onmessage = async (ev: MessageEvent<Blob>) => {
 					try {
@@ -44,23 +46,12 @@ export class ChatClientService {
 			});
 	}
 
-	send(subject: string, message: string | Uint8Array): void {
-		if (typeof message === "string") {
-			const msg = chat.Packet.create({
-				subject,
-				payload: this.m_Encoder.encode(message)
-			});
+	send(subject: string, message: Uint8Array): void {
+		const msg = chat.Packet.create({
+			subject,
+			payload: message
+		});
 
-			this.m_Socket.send(chat.Packet.encode(msg).finish());
-		}
-
-		if (message instanceof Uint8Array) {
-			const msg = chat.Packet.create({
-				subject,
-				payload: message
-			});
-
-			this.m_Socket.send(chat.Packet.encode(msg).finish());
-		}
+		this.m_Socket.send(chat.Packet.encode(msg).finish());
 	}
 }

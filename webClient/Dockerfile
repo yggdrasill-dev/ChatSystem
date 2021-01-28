@@ -5,10 +5,13 @@ FROM node AS sdk
 WORKDIR /src
 COPY . .
 RUN npm i
-RUN npx ng build --prod --base-href=/webclient/
+RUN node stringify.mjs > temp.json && cat temp.json > src/appSettings.json
+RUN npx ng build --prod
 
 FROM base AS final
 ENV PROXY_SITE=http://localhost
+ENV CHAT_ENDPOINT=wss://localhost:17001/ws
+ENV BASE_HREF=/
 COPY nginx/default.conf.template /etc/nginx/conf.d/
 COPY nginx/nginx.conf /etc/nginx/
 COPY nginx/entry.bash /

@@ -1,8 +1,0 @@
-syntax = "proto3";
-
-option csharp_namespace = "ChatConnector.Protos";
-
-message ChatMessage {
-	string subject = 1;
-	bytes payload = 2;
-}
