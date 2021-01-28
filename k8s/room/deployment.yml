@@ -16,8 +16,11 @@ spec:
     spec:
       containers:
         - name: chat
-          image: chat/room
+          image: cr.yggdrasill.dev/chat/room:15
+          env:
+            - name: MessageQueue__Url
+              value: "nats://192.168.90.100:4222"
           resources:
             limits:
               cpu: "500m"
-              memory: "1g"
+              memory: "1G"

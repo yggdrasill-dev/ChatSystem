@@ -8,6 +8,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using OpenIddict.Server;
 using static OpenIddict.Abstractions.OpenIddictConstants;
 using static OpenIddict.Server.OpenIddictServerEvents;
@@ -21,6 +22,7 @@ namespace AuthServer
 		{
 			services.Configure<ForwardedHeadersOptions>(options =>
 			{
+				options.ForwardLimit = 2;
 				options.KnownNetworks.Add(new IPNetwork(IPAddress.Parse("172.0.0.0"), 8));
 				options.KnownNetworks.Add(new IPNetwork(IPAddress.Parse("10.0.0.0"), 8));
 				options.ForwardedHeaders = ForwardedHeaders.All;
@@ -96,6 +98,20 @@ namespace AuthServer
 		// This method gets called by the runtime. Use this method to configure the HTTP request pipeline.
 		public void Configure(IApplicationBuilder app, IWebHostEnvironment env)
 		{
+			app.Use(async (httpContext, next) =>
+			{
+				var logger = httpContext.RequestServices.GetService<ILogger<Startup>>();
+
+				foreach (var head in httpContext.Request.Headers)
+				{
+					logger.LogInformation($"{head.Key} => {head.Value}");
+				}
+
+				//httpContext.Request.Scheme = "https";
+				await next();
+
+				logger.LogInformation($"Request Host: {httpContext.Request.Host}, IsHttps: {httpContext.Request.IsHttps}, RemoteIP: {httpContext.Connection.RemoteIpAddress}");
+			});
 			app.UseForwardedHeaders();
 
 			if (env.IsDevelopment())

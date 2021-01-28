@@ -15,10 +15,10 @@ spec:
         app: connector
     spec:
       imagePullSecrets:
-        - name: regcred
+        - name: valhalla-cr
       containers:
         - name: connector
-          image: cr.yggdrasill.dev/chat/connect:10
+          image: cr.yggdrasill.dev/chat/connect:17
           ports:
             - containerPort: 80
           env:
@@ -26,10 +26,6 @@ spec:
               value: "https://auth.test.com"
             - name: MessageQueue__Url
               value: "nats://192.168.90.100:4222"
-            - name: Logging__LogLevel__Microsoft
-              value: Trace
-            - name: Logging__LogLevel__Default
-              value: Trace
           resources:
             limits:
               cpu: "500m"

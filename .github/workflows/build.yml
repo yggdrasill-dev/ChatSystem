@@ -45,3 +45,6 @@ jobs:
         run: dotnet build -c ${{env.BuildConfiguration}} -t:ContainerBuild -p:DockerfileTag=${{env.ImageRegistry}}/chat/session:${{github.run_number}} --no-restore SessionServer/SessionServer.csproj
       - name: push session image
         run: docker push ${{env.ImageRegistry}}/chat/session:${{github.run_number}}
+
+      - name: build webclient
+        run: docker build -f webClient\Dockerfile -t ${{env.ImageRegistry}}/chat/web:${{github.run_number}} webClient

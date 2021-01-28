@@ -16,8 +16,8 @@ spec:
     spec:
       containers:
         - name: chat
-          image: chat/session
+          image: cr.yggdrasill.dev/chat/session:15
           resources:
             limits:
               cpu: "500m"
-              memory: "1g"
+              memory: "1G"

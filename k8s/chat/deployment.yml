@@ -14,10 +14,15 @@ spec:
       labels:
         app: chat
     spec:
+      imagePullSecrets:
+        - name: regcred
       containers:
         - name: chat
-          image: chat/chat
+          image: cr.yggdrasill.dev/chat/chat:10
+          env:
+            - name: MessageQueue__Url
+              value: "nats://192.168.90.100:4222"
           resources:
             limits:
               cpu: "500m"
-              memory: "1g"
+              memory: "1G"
