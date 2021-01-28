@@ -25,7 +25,7 @@ namespace AuthServer
 				options.ForwardLimit = 2;
 				options.KnownNetworks.Add(new IPNetwork(IPAddress.Parse("172.0.0.0"), 8));
 				options.KnownNetworks.Add(new IPNetwork(IPAddress.Parse("10.0.0.0"), 8));
-				options.ForwardedHeaders = ForwardedHeaders.All;
+				options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedHost;
 			});
 
 			services.AddDbContext<ApplicationDbContext>((sp, options) =>
@@ -107,7 +107,7 @@ namespace AuthServer
 					logger.LogInformation($"{head.Key} => {head.Value}");
 				}
 
-				//httpContext.Request.Scheme = "https";
+				httpContext.Request.Scheme = "https";
 				await next();
 
 				logger.LogInformation($"Request Host: {httpContext.Request.Host}, IsHttps: {httpContext.Request.IsHttps}, RemoteIP: {httpContext.Connection.RemoteIpAddress}");

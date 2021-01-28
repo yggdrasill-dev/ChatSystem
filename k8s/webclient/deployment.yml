@@ -1,25 +1,26 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: room-deployment
+  name: webclient-deployment
   labels:
     app: chat-system
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: room
+      app: webclient
   template:
     metadata:
       labels:
-        app: room
+        app: webclient
     spec:
+      imagePullSecrets:
+        - name: valhalla-cr
       containers:
-        - name: chat
-          image: cr.yggdrasill.dev/chat/room:18
-          env:
-            - name: MessageQueue__Url
-              value: "nats://192.168.90.100:4222"
+        - name: webclient
+          image: cr.yggdrasill.dev/chat/web:18
+          ports:
+            - containerPort: 80
           resources:
             limits:
               cpu: "1"

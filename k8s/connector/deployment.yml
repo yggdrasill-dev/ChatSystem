@@ -18,7 +18,7 @@ spec:
         - name: valhalla-cr
       containers:
         - name: connector
-          image: cr.yggdrasill.dev/chat/connect:17
+          image: cr.yggdrasill.dev/chat/connect:18
           ports:
             - containerPort: 80
           env:
@@ -28,5 +28,8 @@ spec:
               value: "nats://192.168.90.100:4222"
           resources:
             limits:
+              cpu: "1"
+              memory: "1Gi"
+            requests:
               cpu: "500m"
-              memory: "1G"
+              memory: "512Mi"

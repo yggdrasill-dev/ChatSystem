@@ -18,15 +18,16 @@ spec:
         - name: valhalla-cr
       containers:
         - name: auth
-          image: cr.yggdrasill.dev/chat/auth:11
+          image: cr.yggdrasill.dev/chat/auth:18
           ports:
             - containerPort: 80
           env:
             - name: "ConnectionStrings__DefaultConnection"
               value: "Server=192.168.90.100;Database=ChatDB;USER=sa;PWD=19U*@sYG%~%1O>^t"
-            - name: "AuthServer__Issuer"
-              value: "https://auth.test.com"
           resources:
             limits:
+              cpu: "1"
+              memory: 1Gi
+            requests:
               cpu: 500m
-              memory: 1G
+              memory: 512Mi

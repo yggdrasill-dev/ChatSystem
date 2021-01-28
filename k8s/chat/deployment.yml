@@ -18,11 +18,14 @@ spec:
         - name: regcred
       containers:
         - name: chat
-          image: cr.yggdrasill.dev/chat/chat:10
+          image: cr.yggdrasill.dev/chat/chat:18
           env:
             - name: MessageQueue__Url
               value: "nats://192.168.90.100:4222"
           resources:
             limits:
+              cpu: "1"
+              memory: "1Gi"
+            requests:
               cpu: "500m"
-              memory: "1G"
+              memory: "512Mi"

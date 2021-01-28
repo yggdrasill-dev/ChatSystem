@@ -14,3 +14,10 @@ spec:
                 name: connector-service
                 port:
                   number: 80
+          - path: /webclient
+            pathType: Prefix
+            backend:
+              service:
+                name: webclient-service
+                port:
+                  number: 80
