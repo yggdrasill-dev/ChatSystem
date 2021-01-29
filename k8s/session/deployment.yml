@@ -22,6 +22,8 @@ spec:
           env:
             - name: MessageQueue__Url
               value: "nats://192.168.90.100:4222"
+            - name: Redis__ConnectionString
+              value: 192.168.90.100:6379
           resources:
             limits:
               cpu: "1"

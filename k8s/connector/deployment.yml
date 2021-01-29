@@ -18,7 +18,7 @@ spec:
         - name: valhalla-cr
       containers:
         - name: connector
-          image: cr.yggdrasill.dev/chat/connect:18
+          image: cr.yggdrasill.dev/chat/connect:22
           ports:
             - containerPort: 80
           env:
