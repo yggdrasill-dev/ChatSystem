@@ -18,9 +18,14 @@ spec:
         - name: valhalla-cr
       containers:
         - name: webclient
-          image: cr.yggdrasill.dev/chat/web:20
+          image: cr.yggdrasill.dev/chat/web:21
           ports:
             - containerPort: 80
+          env:
+            - name: BASE_HREF
+              value: /webclient/
+            - name: CHAT_ENDPOINT
+              value: wss://chat.test.com/ws
           resources:
             limits:
               cpu: "1"

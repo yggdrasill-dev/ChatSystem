@@ -10,6 +10,7 @@ using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http.Extensions;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -151,7 +152,7 @@ namespace ChatConnector
 				httpContext.Request.Scheme = "https";
 				await next();
 
-				logger.LogInformation($"Request Host: {httpContext.Request.Host}, IsHttps: {httpContext.Request.IsHttps}, RemoteIP: {httpContext.Connection.RemoteIpAddress}");
+				logger.LogInformation($"Request Host: {httpContext.Request.Host}, IsHttps: {httpContext.Request.IsHttps}, RemoteIP: {httpContext.Connection.RemoteIpAddress}, Request Path: {httpContext.Request.GetEncodedPathAndQuery()}");
 			});
 			app.UseForwardedHeaders();
 
