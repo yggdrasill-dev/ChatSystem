@@ -39,10 +39,14 @@ spec:
             httpGet:
               path: /.well-known/openid-configuration
               port: http
+            initialDelaySeconds: 10
+            periodSeconds: 3
           readinessProbe:
             httpGet:
               path: /.well-known/openid-configuration
               port: http
+            initialDelaySeconds: 3
+            periodSeconds: 3
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
       {{- with .Values.nodeSelector }}
