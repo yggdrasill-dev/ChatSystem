@@ -81,5 +81,5 @@ jobs:
       - name: deploy authsystem
         run: |
           echo '${{ secrets.KUBECONFIG }}' | Out-File -Path kubeconfig
-          helm template .\k8s\authsystem --set ingress.hosts[0].host=auth.yggdrasill.dev --set database.connectionString='${{ secrets.CONNECTIONSTRING }}' | kubectl apply -f -
+          helm template .\k8s\authsystem --set ingress.hosts[0].host=auth.yggdrasill.dev --set database.connectionString='${{ secrets.CONNECTIONSTRING }}' | kubectl --kubeconfig .\kubeconfig apply -f -
           Remove-Item .\kubeconfig
