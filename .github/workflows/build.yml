@@ -50,3 +50,23 @@ jobs:
         run: docker build -f webClient\Dockerfile -t ${{env.ImageRegistry}}/chat/web:${{github.run_number}} webClient
       - name: push webclient image
         run: docker push ${{env.ImageRegistry}}/chat/web:${{github.run_number}}
+
+      - name: set image tag to helm template
+        run: |
+          $authValues = gc .\k8s\authsystem\values.yaml | ConvertFrom-Yaml
+          $authValues.image.tag = "${{github.run_number}}"
+          ConvertTo-Yaml $authValues -OutFile .\k8s\authsystem\values.yaml
+
+          $authValues = gc .\k8s\chatsystem\values.yaml | ConvertFrom-Yaml
+          $authValues.image.tag = "${{github.run_number}}"
+          ConvertTo-Yaml $authValues -OutFile .\k8s\chatsystem\values.yaml
+
+      - name: Upload a Build Artifact
+        uses: actions/upload-artifact@v2.2.2
+        with:
+          # Artifact name
+          name: k8s
+          # A file, directory or wildcard pattern that describes what to upload
+          path: k8s/**/*
+  # deploy:
+  #   runs-on: self-hosted
