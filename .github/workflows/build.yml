@@ -74,7 +74,7 @@ jobs:
     needs: build
     steps:
       - name: Download a build artifact
-        uses: actions/download-artifact
+        uses: actions/download-artifact@latest
         with:
           name: k8s
           path: k8s
