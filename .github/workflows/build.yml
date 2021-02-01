@@ -68,5 +68,18 @@ jobs:
           name: k8s
           # A file, directory or wildcard pattern that describes what to upload
           path: k8s/**/*
-  # deploy:
-  #   runs-on: self-hosted
+
+  deploy:
+    runs-on: self-hosted
+    needs: build
+    steps:
+      - name: Download a build artifact
+        uses: actions/download-artifact
+        with:
+          name: k8s
+          path: k8s
+      - name: deploy authsystem
+        run: |
+          echo '${{ secrets.KUBECONFIG }}' | Out-File -Path kubeconfig
+          helm template .\k8s\authsystem --set ingress.hosts[0].host=auth.yggdrasill.dev --set database.connectionString=${{ secrets.CONNECTIONSTRING }} | kubectl apply -f -
+          Remove-Item .\kubeconfig
