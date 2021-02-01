@@ -1,4 +1,4 @@
-name: Build & Push
+name: Build & Deploy
 
 on:
   push:
@@ -55,11 +55,11 @@ jobs:
         run: |
           $authValues = gc .\k8s\authsystem\values.yaml | ConvertFrom-Yaml
           $authValues.image.tag = "${{github.run_number}}"
-          ConvertTo-Yaml $authValues -OutFile .\k8s\authsystem\values.yaml
+          ConvertTo-Yaml $authValues -OutFile .\k8s\authsystem\values.yaml -Force
 
           $authValues = gc .\k8s\chatsystem\values.yaml | ConvertFrom-Yaml
           $authValues.image.tag = "${{github.run_number}}"
-          ConvertTo-Yaml $authValues -OutFile .\k8s\chatsystem\values.yaml
+          ConvertTo-Yaml $authValues -OutFile .\k8s\chatsystem\values.yaml -Force
 
       - name: Upload a Build Artifact
         uses: actions/upload-artifact@v2.2.2
