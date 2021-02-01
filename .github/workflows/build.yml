@@ -83,3 +83,17 @@ jobs:
           echo '${{ secrets.KUBECONFIG }}' | Out-File -Path kubeconfig
           helm template .\k8s\authsystem --set ingress.hosts[0].host=auth.yggdrasill.dev --set database.connectionString='${{ secrets.CONNECTIONSTRING }}' | kubectl --kubeconfig .\kubeconfig apply -f -
           Remove-Item .\kubeconfig
+      - name: deploy .\k8s\chatsystem\values.yaml
+        env:
+          redis: 192.168.2.21:6379
+          nats: nats://192.168.2.21:4222
+        run: |
+          echo '${{ secrets.KUBECONFIG }}' | Out-File -Path kubeconfig
+          helm template .\k8s\chatsystem `
+            --set ingress.hosts[0].host=chat.yggdrasill.dev `
+            --set authServer=https://auth.yggdrasill.dev `
+            --set messageServer=$env:nats `
+            --set redisServer=$env:redis `
+            --set chatEndpoint=wss://chat.yggdrasill.dev/ws `
+            | kubectl --kubeconfig .\kubeconfig apply -f -
+          Remove-Item .\kubeconfig
