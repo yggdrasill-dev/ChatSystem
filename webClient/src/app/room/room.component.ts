@@ -103,6 +103,8 @@ export class RoomComponent implements OnInit, OnDestroy {
 
 				this.m_ChatClient.send("chat.send", chat.ChatMessage.encode(packet).finish());
 			}
+
+			document.scrollingElement.scrollTop = document.scrollingElement.scrollHeight;
 		}
 
 		this.entryMessage = "";
