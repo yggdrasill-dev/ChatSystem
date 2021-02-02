@@ -1,0 +1,23 @@
+<div class="roomlist">
+  <div class="title">
+    Rooms
+  </div>
+  <div class="content">
+    <input id="rCreate" type="radio" value="create" name="type" [(ngModel)]="selectedType"><label
+      for="rCreate">建立房間</label>
+    <input id="rJoin" type="radio" value="join" name="type" [(ngModel)]="selectedType"><label for="rJoin">加入房間</label>
+  </div>
+  <div class="content" *ngIf="selectedType == 'join'">
+    <select name="rooms" [(ngModel)]="joinData.name">
+      <option value="">--- 選擇房間 ---</option>
+      <option *ngFor="let name of rooms">{{name}}</option>
+    </select>
+    <input type="password" placeholder="房間密碼" [(ngModel)]="joinData.password" />
+    <button type="button" (click)="joinRoom()">join</button>
+  </div>
+  <div class="content" *ngIf="selectedType == 'create'">
+    <input type="text" placeholder="輸入新建房間" [(ngModel)]="createData.name" />
+    <input type="password" placeholder="房間密碼" [(ngModel)]="createData.password" />
+    <button type="button" (click)="createRoom()">create</button>
+  </div>
+</div>

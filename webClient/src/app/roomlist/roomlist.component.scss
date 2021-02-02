@@ -1,0 +1,34 @@
+.roomlist {
+  width: 100%;
+  font-size: 13pt;
+  overflow: hidden;
+
+  * {
+    margin-right: 5px;
+  }
+  .title {
+    width: 100%;
+    margin-top: 150px;
+    font-size: 50pt;
+    text-align: center;
+    margin-bottom: 50px;
+  }
+
+  select, input[type=text], input[type=password] {
+    height: 30px;
+    width: 270px;
+    font-size: inherit;
+    margin-left: 15px;
+  }
+
+  button {
+    height: 30px;
+    width: 90px;
+    font-size: inherit;
+  }
+
+  .content {
+    width: fit-content;
+    margin: 10px auto auto;
+  }
+}

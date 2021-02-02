@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using Chat.Protos;
 using Common;
 using Google.Protobuf;
+using Microsoft.Extensions.Logging;
 using NATS.Client;
 
 namespace RoomServer.Models.Endpoints
@@ -13,17 +14,22 @@ namespace RoomServer.Models.Endpoints
 	{
 		private readonly IMessageQueueService m_MessageQueueService;
 		private readonly IQueryService<RoomListQuery, string> m_ListRoomService;
+		private readonly ILogger<RoomListHandler> m_Logger;
 
 		public RoomListHandler(
 			IMessageQueueService messageQueueService,
-			IQueryService<RoomListQuery, string> listRoomService)
+			IQueryService<RoomListQuery, string> listRoomService,
+			ILogger<RoomListHandler> logger)
 		{
 			m_MessageQueueService = messageQueueService ?? throw new ArgumentNullException(nameof(messageQueueService));
 			m_ListRoomService = listRoomService ?? throw new ArgumentNullException(nameof(listRoomService));
+			m_Logger = logger ?? throw new ArgumentNullException(nameof(logger));
 		}
 
 		public async ValueTask HandleAsync(Msg msg, CancellationToken cancellationToken)
 		{
+			m_Logger.LogInformation($"RoomList received.");
+
 			var packet = QueuePacket.Parser.ParseFrom(msg.Data);
 
 			var rooms = m_ListRoomService.QueryAsync(new RoomListQuery());

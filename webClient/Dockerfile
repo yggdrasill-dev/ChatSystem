@@ -6,7 +6,7 @@ WORKDIR /src
 COPY . .
 RUN npm i
 RUN node stringify.mjs > temp.json && cat temp.json > src/appSettings.json
-RUN npx ng build --prod
+RUN npx ng build --prod --index src/index.config.html
 
 FROM base AS final
 ENV PROXY_SITE=http://localhost

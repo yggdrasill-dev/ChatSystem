@@ -40,10 +40,10 @@ services:
     environment:
       MessageQueue__Url: "nats://nats:4222"
       Redis__ConnectionString: "redis:6379"
-  web:
-    image: chat/web
-    environment:
-      PROXY_SITE: "http://connector"
+  # web:
+  #   image: chat/web
+  #   environment:
+  #     PROXY_SITE: "http://connector"
   haproxy:
     image: haproxy
     ports:

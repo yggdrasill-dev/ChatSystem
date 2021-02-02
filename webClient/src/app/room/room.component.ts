@@ -27,38 +27,8 @@ export class RoomComponent implements OnInit, OnDestroy {
 		private m_Router: Router) { }
 
 	async ngOnInit(): Promise<void> {
-		// this.name = this.m_ChatClient.name;
+		this.name = await this.m_ChatClient.getUserName();
 		// this.channelName = this.m_ChatClient.channelName;
-
-		this.m_MessageSubscriptions.push(
-			this.m_ChatClient.receiver
-				.pipe(
-					filter(msg => msg.subject == 'connect.login.reply')
-				)
-				.subscribe(msg => {
-					const reply = chat.LoginReply.decode(msg.payload);
-
-					if (reply.status == chat.LoginStatus.ACCPET) {
-						this.name = reply.name;
-
-						this.m_ChatClient.send(
-							'room.join',
-							chat.JoinRoom.encode({
-								room: 'test'
-							}).finish());
-					}
-				})
-		);
-
-		this.m_MessageSubscriptions.push(
-			this.m_ChatClient.receiver
-				.pipe(
-					filter(msg => msg.subject == "room.join.reply")
-				)
-				.subscribe(msg => {
-					this.m_ChatClient.send("room.player.list", new Uint8Array());
-				})
-		);
 
 		this.m_MessageSubscriptions.push(
 			this.m_ChatClient.receiver
@@ -99,20 +69,7 @@ export class RoomComponent implements OnInit, OnDestroy {
 				})
 		);
 
-		this.m_MessageSubscriptions.push(
-			this.m_ChatClient.receiver
-				.pipe(
-					filter(msg => msg.subject == 'chat.room.list'),
-					map(msg => {
-						const reply = chat.RoomList.decode(msg.payload);
-
-						return reply.rooms;
-					})
-				)
-				.subscribe(rooms => { })
-		);
-
-		await this.m_ChatClient.open();
+		this.m_ChatClient.send("room.player.list", new Uint8Array());
 	}
 
 	ngOnDestroy(): void {
