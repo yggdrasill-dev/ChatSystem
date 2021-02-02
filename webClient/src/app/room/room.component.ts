@@ -14,7 +14,7 @@ export class RoomComponent implements OnInit, OnDestroy {
 	name: string;
 	channelName: string;
 	entryMessage: string;
-	history: string[] = [];
+	history: chat.ChatMessage[] = [];
 	players: string[] = [];
 	sendTarget: string = "*";
 
@@ -47,7 +47,7 @@ export class RoomComponent implements OnInit, OnDestroy {
 					map(msg => {
 						const content = chat.ChatMessage.decode(msg.payload);
 
-						return JSON.stringify(content);
+						return content;
 					})
 				)
 				.subscribe(this.onReceive.bind(this))
@@ -107,11 +107,37 @@ export class RoomComponent implements OnInit, OnDestroy {
 
 		this.entryMessage = "";
 	}
-	private onReceive(msg: string): void {
+	private onReceive(msg: chat.ChatMessage): void {
 		console.log(this.history);
 		this.history?.push(msg);
 
-		if (msg.length > 1000)
+		if (this.history?.length > 1000)
 			this.history.pop();
+	}
+
+	public formatMessage(msg: chat.ChatMessage): string {
+		switch (msg.scope) {
+			case chat.Scope.ROOM:
+				return `${msg.from} say: ${msg.message}`;
+			case chat.Scope.PERSON:
+				return `${msg.from} => ${msg.target}: ${msg.message}`;
+			case chat.Scope.SYSTEM:
+				return `System boardcast: ${msg.message}`;
+			default:
+				return `Receive message failed`;
+		}
+	}
+
+	public getMessageStyle(msg: chat.ChatMessage): string {
+		switch (msg.scope) {
+			case chat.Scope.ROOM:
+				return 'msg-room';
+			case chat.Scope.PERSON:
+				return 'msg-person';
+			case chat.Scope.SYSTEM:
+				return 'msg-system';
+			default:
+				return 'msg-error';
+		}
 	}
 }

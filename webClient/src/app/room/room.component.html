@@ -1,6 +1,8 @@
 <div class="history">
   <ul>
-    <li *ngFor="let msg of history">{{msg}}</li>
+    <li *ngFor="let msg of history">
+      <span [ngClass]="getMessageStyle(msg)">{{formatMessage(msg)}}</span>
+    </li>
   </ul>
 </div>
 <div class="toolbar">

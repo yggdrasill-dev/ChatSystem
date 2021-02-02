@@ -5,6 +5,22 @@
 
   ul {
     list-style: none;
+
+    .msg-room {
+      color: darkblue;
+    }
+
+    .msg-person {
+      color: black;
+    }
+
+    .msg-system {
+      color: goldenrod;
+    }
+
+    .msg-error {
+      color: red;
+    }
   }
 }
 
