@@ -20,7 +20,7 @@ namespace ChatConnector.Models
 			var request = new LeaveRoomRequest
 			{
 				SessionId = command.SessionId,
-				Room = command.Room
+				Room = command.Room ?? string.Empty
 			};
 
 			await m_MessageQueueService

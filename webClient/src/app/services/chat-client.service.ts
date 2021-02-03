@@ -120,7 +120,12 @@ class ChatOperator {
 				filter(msg => msg.subject == 'room.join.reply')
 			)
 			.subscribe(msg => {
-				source.resolve();
+				const reply = chat.JoinRoomReply.decode(msg.payload);
+
+				if (reply.status == chat.JoinRoomStatus.JOINROOMSTATUS_ACCPET)
+					source.resolve();
+				else
+					source.reject('進房失敗');
 			});
 
 		this.send(

@@ -117,8 +117,7 @@ namespace ChatConnector.Models
 
 			await leaveRoomService.ExecuteAsync(new LeaveRoomCommand
 			{
-				SessionId = httpContext.TraceIdentifier,
-				Room = "test"
+				SessionId = httpContext.TraceIdentifier
 			}).ConfigureAwait(false);
 
 			await unregisterService.ExecuteAsync(new UnregisterSessionCommand

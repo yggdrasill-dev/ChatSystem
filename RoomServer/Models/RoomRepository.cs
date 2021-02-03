@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using Microsoft.Extensions.Logging;
 using StackExchange.Redis;
 
 namespace RoomServer.Models
@@ -10,8 +11,9 @@ namespace RoomServer.Models
 	{
 		private readonly IDatabase m_Database;
 		private readonly IServer m_Server;
+		private readonly ILogger<RoomRepository> m_Logger;
 
-		public RoomRepository(RedisConnectionFactory redisConnectionFactory)
+		public RoomRepository(RedisConnectionFactory redisConnectionFactory, ILogger<RoomRepository> logger)
 		{
 			if (redisConnectionFactory is null)
 			{
@@ -20,6 +22,7 @@ namespace RoomServer.Models
 
 			m_Database = redisConnectionFactory.Database;
 			m_Server = redisConnectionFactory.Server;
+			m_Logger = logger ?? throw new ArgumentNullException(nameof(logger));
 		}
 
 		public async ValueTask JoinRoomAsync(string sessionId, string room)
@@ -45,6 +48,8 @@ namespace RoomServer.Models
 			var sessionInRoom = await m_Database
 				.StringGetAsync($"Rooms:Sessions:{sessionId}")
 				.ConfigureAwait(false);
+
+			m_Logger.LogInformation($"Session {sessionId} in {sessionInRoom}, leave room {room}");
 
 			await m_Database.SetRemoveAsync($"Rooms:Room:{room}", sessionId).ConfigureAwait(false);
 

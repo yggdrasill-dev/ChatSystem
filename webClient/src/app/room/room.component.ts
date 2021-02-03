@@ -122,11 +122,11 @@ export class RoomComponent implements OnInit, OnDestroy, AfterViewChecked {
 	public formatMessage(msg: chat.ChatMessage): string {
 		switch (msg.scope) {
 			case chat.Scope.SCOPE_ROOM:
-				return `${msg.from} say: ${msg.message}`;
+				return `[${msg.from}]: ${msg.message}`;
 			case chat.Scope.SCOPE_PERSON:
-				return `${msg.from} => ${msg.target}: ${msg.message}`;
+				return `[${msg.from}] => [${msg.target}]: ${msg.message}`;
 			case chat.Scope.SCOPE_SYSTEM:
-				return `System boardcast: ${msg.message}`;
+				return `[System]: ${msg.message}`;
 			default:
 				return `Receive message failed`;
 		}

@@ -26,7 +26,7 @@ export class RoomlistComponent implements OnInit {
 	}
 
 	async createRoom(): Promise<void> {
-		this.m_ChatClient.joinRoom(this.createData.name);
+		await this.m_ChatClient.joinRoom(this.createData.name);
 		await this.m_Router.navigate(['/room']);
 	}
 
