@@ -57,6 +57,13 @@ namespace RoomServer.Models.Endpoints
 
 			response.SessionIds.Add(packet.SessionId);
 
+			var responseContent = new JoinRoomReply
+			{
+				Status = JoinRoomStatus.Accpet
+			};
+
+			response.Payload = responseContent.ToByteString();
+
 			await m_MessageQueueService.PublishAsync(
 				"connect.send",
 				response.ToByteArray()).ConfigureAwait(false);

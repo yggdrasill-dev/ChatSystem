@@ -9,8 +9,8 @@ message Packet {
 }
 
 enum LoginStatus {
-	REJECT = 0;
-	ACCPET = 1;
+	LOGINSTATUS_REJECT = 0;
+	LOGINSTATUS_ACCPET = 1;
 }
 
 message LoginReply {
@@ -19,10 +19,10 @@ message LoginReply {
 }
 
 enum Scope {
-	NONE = 0;
-	PERSON = 1;
-	ROOM = 2;
-	SYSTEM = 3;
+	SCOPE_NONE = 0;
+	SCOPE_PERSON = 1;
+	SCOPE_ROOM = 2;
+	SCOPE_SYSTEM = 3;
 }
 
 message ChatMessage {
@@ -44,4 +44,14 @@ message RoomList {
 message JoinRoom {
 	string room = 1;
 	string password = 2;
+}
+
+enum JoinRoomStatus {
+	JOINROOMSTATUS_REJECT = 0;
+	JOINROOMSTATUS_ACCPET = 1;
+}
+
+message JoinRoomReply {
+	JoinRoomStatus status = 1;
+	string reason = 2;
 }

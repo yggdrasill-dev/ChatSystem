@@ -70,7 +70,7 @@ class ChatOperator {
 						.subscribe(msg => {
 							const reply = chat.LoginReply.decode(msg.payload);
 
-							if (reply.status == chat.LoginStatus.ACCPET) {
+							if (reply.status == chat.LoginStatus.LOGINSTATUS_ACCPET) {
 								resolve(reply.name)
 							}
 							else {

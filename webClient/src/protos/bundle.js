@@ -248,13 +248,13 @@
          * LoginStatus enum.
          * @name chat.LoginStatus
          * @enum {number}
-         * @property {number} REJECT=0 REJECT value
-         * @property {number} ACCPET=1 ACCPET value
+         * @property {number} LOGINSTATUS_REJECT=0 LOGINSTATUS_REJECT value
+         * @property {number} LOGINSTATUS_ACCPET=1 LOGINSTATUS_ACCPET value
          */
         chat.LoginStatus = (function() {
             var valuesById = {}, values = Object.create(valuesById);
-            values[valuesById[0] = "REJECT"] = 0;
-            values[valuesById[1] = "ACCPET"] = 1;
+            values[valuesById[0] = "LOGINSTATUS_REJECT"] = 0;
+            values[valuesById[1] = "LOGINSTATUS_ACCPET"] = 1;
             return values;
         })();
     
@@ -429,11 +429,11 @@
                     return object;
                 var message = new $root.chat.LoginReply();
                 switch (object.status) {
-                case "REJECT":
+                case "LOGINSTATUS_REJECT":
                 case 0:
                     message.status = 0;
                     break;
-                case "ACCPET":
+                case "LOGINSTATUS_ACCPET":
                 case 1:
                     message.status = 1;
                     break;
@@ -457,7 +457,7 @@
                     options = {};
                 var object = {};
                 if (options.defaults) {
-                    object.status = options.enums === String ? "REJECT" : 0;
+                    object.status = options.enums === String ? "LOGINSTATUS_REJECT" : 0;
                     object.name = "";
                 }
                 if (message.status != null && message.hasOwnProperty("status"))
@@ -485,17 +485,17 @@
          * Scope enum.
          * @name chat.Scope
          * @enum {number}
-         * @property {number} NONE=0 NONE value
-         * @property {number} PERSON=1 PERSON value
-         * @property {number} ROOM=2 ROOM value
-         * @property {number} SYSTEM=3 SYSTEM value
+         * @property {number} SCOPE_NONE=0 SCOPE_NONE value
+         * @property {number} SCOPE_PERSON=1 SCOPE_PERSON value
+         * @property {number} SCOPE_ROOM=2 SCOPE_ROOM value
+         * @property {number} SCOPE_SYSTEM=3 SCOPE_SYSTEM value
          */
         chat.Scope = (function() {
             var valuesById = {}, values = Object.create(valuesById);
-            values[valuesById[0] = "NONE"] = 0;
-            values[valuesById[1] = "PERSON"] = 1;
-            values[valuesById[2] = "ROOM"] = 2;
-            values[valuesById[3] = "SYSTEM"] = 3;
+            values[valuesById[0] = "SCOPE_NONE"] = 0;
+            values[valuesById[1] = "SCOPE_PERSON"] = 1;
+            values[valuesById[2] = "SCOPE_ROOM"] = 2;
+            values[valuesById[3] = "SCOPE_SYSTEM"] = 3;
             return values;
         })();
     
@@ -706,19 +706,19 @@
                     return object;
                 var message = new $root.chat.ChatMessage();
                 switch (object.scope) {
-                case "NONE":
+                case "SCOPE_NONE":
                 case 0:
                     message.scope = 0;
                     break;
-                case "PERSON":
+                case "SCOPE_PERSON":
                 case 1:
                     message.scope = 1;
                     break;
-                case "ROOM":
+                case "SCOPE_ROOM":
                 case 2:
                     message.scope = 2;
                     break;
-                case "SYSTEM":
+                case "SCOPE_SYSTEM":
                 case 3:
                     message.scope = 3;
                     break;
@@ -746,7 +746,7 @@
                     options = {};
                 var object = {};
                 if (options.defaults) {
-                    object.scope = options.enums === String ? "NONE" : 0;
+                    object.scope = options.enums === String ? "SCOPE_NONE" : 0;
                     object.message = "";
                     object.target = "";
                     object.from = "";
@@ -1413,6 +1413,243 @@
             };
     
             return JoinRoom;
+        })();
+    
+        /**
+         * JoinRoomStatus enum.
+         * @name chat.JoinRoomStatus
+         * @enum {number}
+         * @property {number} JOINROOMSTATUS_REJECT=0 JOINROOMSTATUS_REJECT value
+         * @property {number} JOINROOMSTATUS_ACCPET=1 JOINROOMSTATUS_ACCPET value
+         */
+        chat.JoinRoomStatus = (function() {
+            var valuesById = {}, values = Object.create(valuesById);
+            values[valuesById[0] = "JOINROOMSTATUS_REJECT"] = 0;
+            values[valuesById[1] = "JOINROOMSTATUS_ACCPET"] = 1;
+            return values;
+        })();
+    
+        chat.JoinRoomReply = (function() {
+    
+            /**
+             * Properties of a JoinRoomReply.
+             * @memberof chat
+             * @interface IJoinRoomReply
+             * @property {chat.JoinRoomStatus|null} [status] JoinRoomReply status
+             * @property {string|null} [reason] JoinRoomReply reason
+             */
+    
+            /**
+             * Constructs a new JoinRoomReply.
+             * @memberof chat
+             * @classdesc Represents a JoinRoomReply.
+             * @implements IJoinRoomReply
+             * @constructor
+             * @param {chat.IJoinRoomReply=} [properties] Properties to set
+             */
+            function JoinRoomReply(properties) {
+                if (properties)
+                    for (var keys = Object.keys(properties), i = 0; i < keys.length; ++i)
+                        if (properties[keys[i]] != null)
+                            this[keys[i]] = properties[keys[i]];
+            }
+    
+            /**
+             * JoinRoomReply status.
+             * @member {chat.JoinRoomStatus} status
+             * @memberof chat.JoinRoomReply
+             * @instance
+             */
+            JoinRoomReply.prototype.status = 0;
+    
+            /**
+             * JoinRoomReply reason.
+             * @member {string} reason
+             * @memberof chat.JoinRoomReply
+             * @instance
+             */
+            JoinRoomReply.prototype.reason = "";
+    
+            /**
+             * Creates a new JoinRoomReply instance using the specified properties.
+             * @function create
+             * @memberof chat.JoinRoomReply
+             * @static
+             * @param {chat.IJoinRoomReply=} [properties] Properties to set
+             * @returns {chat.JoinRoomReply} JoinRoomReply instance
+             */
+            JoinRoomReply.create = function create(properties) {
+                return new JoinRoomReply(properties);
+            };
+    
+            /**
+             * Encodes the specified JoinRoomReply message. Does not implicitly {@link chat.JoinRoomReply.verify|verify} messages.
+             * @function encode
+             * @memberof chat.JoinRoomReply
+             * @static
+             * @param {chat.IJoinRoomReply} message JoinRoomReply message or plain object to encode
+             * @param {$protobuf.Writer} [writer] Writer to encode to
+             * @returns {$protobuf.Writer} Writer
+             */
+            JoinRoomReply.encode = function encode(message, writer) {
+                if (!writer)
+                    writer = $Writer.create();
+                if (message.status != null && Object.hasOwnProperty.call(message, "status"))
+                    writer.uint32(/* id 1, wireType 0 =*/8).int32(message.status);
+                if (message.reason != null && Object.hasOwnProperty.call(message, "reason"))
+                    writer.uint32(/* id 2, wireType 2 =*/18).string(message.reason);
+                return writer;
+            };
+    
+            /**
+             * Encodes the specified JoinRoomReply message, length delimited. Does not implicitly {@link chat.JoinRoomReply.verify|verify} messages.
+             * @function encodeDelimited
+             * @memberof chat.JoinRoomReply
+             * @static
+             * @param {chat.IJoinRoomReply} message JoinRoomReply message or plain object to encode
+             * @param {$protobuf.Writer} [writer] Writer to encode to
+             * @returns {$protobuf.Writer} Writer
+             */
+            JoinRoomReply.encodeDelimited = function encodeDelimited(message, writer) {
+                return this.encode(message, writer).ldelim();
+            };
+    
+            /**
+             * Decodes a JoinRoomReply message from the specified reader or buffer.
+             * @function decode
+             * @memberof chat.JoinRoomReply
+             * @static
+             * @param {$protobuf.Reader|Uint8Array} reader Reader or buffer to decode from
+             * @param {number} [length] Message length if known beforehand
+             * @returns {chat.JoinRoomReply} JoinRoomReply
+             * @throws {Error} If the payload is not a reader or valid buffer
+             * @throws {$protobuf.util.ProtocolError} If required fields are missing
+             */
+            JoinRoomReply.decode = function decode(reader, length) {
+                if (!(reader instanceof $Reader))
+                    reader = $Reader.create(reader);
+                var end = length === undefined ? reader.len : reader.pos + length, message = new $root.chat.JoinRoomReply();
+                while (reader.pos < end) {
+                    var tag = reader.uint32();
+                    switch (tag >>> 3) {
+                    case 1:
+                        message.status = reader.int32();
+                        break;
+                    case 2:
+                        message.reason = reader.string();
+                        break;
+                    default:
+                        reader.skipType(tag & 7);
+                        break;
+                    }
+                }
+                return message;
+            };
+    
+            /**
+             * Decodes a JoinRoomReply message from the specified reader or buffer, length delimited.
+             * @function decodeDelimited
+             * @memberof chat.JoinRoomReply
+             * @static
+             * @param {$protobuf.Reader|Uint8Array} reader Reader or buffer to decode from
+             * @returns {chat.JoinRoomReply} JoinRoomReply
+             * @throws {Error} If the payload is not a reader or valid buffer
+             * @throws {$protobuf.util.ProtocolError} If required fields are missing
+             */
+            JoinRoomReply.decodeDelimited = function decodeDelimited(reader) {
+                if (!(reader instanceof $Reader))
+                    reader = new $Reader(reader);
+                return this.decode(reader, reader.uint32());
+            };
+    
+            /**
+             * Verifies a JoinRoomReply message.
+             * @function verify
+             * @memberof chat.JoinRoomReply
+             * @static
+             * @param {Object.<string,*>} message Plain object to verify
+             * @returns {string|null} `null` if valid, otherwise the reason why it is not
+             */
+            JoinRoomReply.verify = function verify(message) {
+                if (typeof message !== "object" || message === null)
+                    return "object expected";
+                if (message.status != null && message.hasOwnProperty("status"))
+                    switch (message.status) {
+                    default:
+                        return "status: enum value expected";
+                    case 0:
+                    case 1:
+                        break;
+                    }
+                if (message.reason != null && message.hasOwnProperty("reason"))
+                    if (!$util.isString(message.reason))
+                        return "reason: string expected";
+                return null;
+            };
+    
+            /**
+             * Creates a JoinRoomReply message from a plain object. Also converts values to their respective internal types.
+             * @function fromObject
+             * @memberof chat.JoinRoomReply
+             * @static
+             * @param {Object.<string,*>} object Plain object
+             * @returns {chat.JoinRoomReply} JoinRoomReply
+             */
+            JoinRoomReply.fromObject = function fromObject(object) {
+                if (object instanceof $root.chat.JoinRoomReply)
+                    return object;
+                var message = new $root.chat.JoinRoomReply();
+                switch (object.status) {
+                case "JOINROOMSTATUS_REJECT":
+                case 0:
+                    message.status = 0;
+                    break;
+                case "JOINROOMSTATUS_ACCPET":
+                case 1:
+                    message.status = 1;
+                    break;
+                }
+                if (object.reason != null)
+                    message.reason = String(object.reason);
+                return message;
+            };
+    
+            /**
+             * Creates a plain object from a JoinRoomReply message. Also converts values to other types if specified.
+             * @function toObject
+             * @memberof chat.JoinRoomReply
+             * @static
+             * @param {chat.JoinRoomReply} message JoinRoomReply
+             * @param {$protobuf.IConversionOptions} [options] Conversion options
+             * @returns {Object.<string,*>} Plain object
+             */
+            JoinRoomReply.toObject = function toObject(message, options) {
+                if (!options)
+                    options = {};
+                var object = {};
+                if (options.defaults) {
+                    object.status = options.enums === String ? "JOINROOMSTATUS_REJECT" : 0;
+                    object.reason = "";
+                }
+                if (message.status != null && message.hasOwnProperty("status"))
+                    object.status = options.enums === String ? $root.chat.JoinRoomStatus[message.status] : message.status;
+                if (message.reason != null && message.hasOwnProperty("reason"))
+                    object.reason = message.reason;
+                return object;
+            };
+    
+            /**
+             * Converts this JoinRoomReply to JSON.
+             * @function toJSON
+             * @memberof chat.JoinRoomReply
+             * @instance
+             * @returns {Object.<string,*>} JSON object
+             */
+            JoinRoomReply.prototype.toJSON = function toJSON() {
+                return this.constructor.toObject(this, $protobuf.util.toJSONOptions);
+            };
+    
+            return JoinRoomReply;
         })();
     
         return chat;

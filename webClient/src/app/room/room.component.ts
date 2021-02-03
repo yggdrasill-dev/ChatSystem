@@ -93,7 +93,7 @@ export class RoomComponent implements OnInit, OnDestroy, AfterViewChecked {
 		if (message?.length > 0) {
 			if (sendTarget != '*') {
 				let packet = chat.ChatMessage.create({
-					scope: chat.Scope.PERSON,
+					scope: chat.Scope.SCOPE_PERSON,
 					target: sendTarget,
 					message
 				});
@@ -101,7 +101,7 @@ export class RoomComponent implements OnInit, OnDestroy, AfterViewChecked {
 				this.m_ChatClient.send("chat.send", chat.ChatMessage.encode(packet).finish());
 			} else {
 				let packet = chat.ChatMessage.create({
-					scope: chat.Scope.ROOM,
+					scope: chat.Scope.SCOPE_ROOM,
 					message
 				});
 
@@ -121,11 +121,11 @@ export class RoomComponent implements OnInit, OnDestroy, AfterViewChecked {
 
 	public formatMessage(msg: chat.ChatMessage): string {
 		switch (msg.scope) {
-			case chat.Scope.ROOM:
+			case chat.Scope.SCOPE_ROOM:
 				return `${msg.from} say: ${msg.message}`;
-			case chat.Scope.PERSON:
+			case chat.Scope.SCOPE_PERSON:
 				return `${msg.from} => ${msg.target}: ${msg.message}`;
-			case chat.Scope.SYSTEM:
+			case chat.Scope.SCOPE_SYSTEM:
 				return `System boardcast: ${msg.message}`;
 			default:
 				return `Receive message failed`;
@@ -134,11 +134,11 @@ export class RoomComponent implements OnInit, OnDestroy, AfterViewChecked {
 
 	public getMessageStyle(msg: chat.ChatMessage): string {
 		switch (msg.scope) {
-			case chat.Scope.ROOM:
+			case chat.Scope.SCOPE_ROOM:
 				return 'msg-room';
-			case chat.Scope.PERSON:
+			case chat.Scope.SCOPE_PERSON:
 				return 'msg-person';
-			case chat.Scope.SYSTEM:
+			case chat.Scope.SCOPE_SYSTEM:
 				return 'msg-system';
 			default:
 				return 'msg-error';
