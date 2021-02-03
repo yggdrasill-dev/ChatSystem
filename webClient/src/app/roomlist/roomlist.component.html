@@ -10,7 +10,7 @@
   <div class="content" *ngIf="selectedType == 'join'">
     <select name="rooms" [(ngModel)]="joinData.name">
       <option value="">--- 選擇房間 ---</option>
-      <option *ngFor="let room of rooms">{{room.name}}{{room.hasPassword?'*':''}}</option>
+      <option *ngFor="let room of rooms" [value]="room.name">{{room.name}}{{room.hasPassword?'*':''}}</option>
     </select>
     <input type="password" placeholder="房間密碼" [(ngModel)]="joinData.password" />
     <button type="button" (click)="joinRoom()">join</button>
