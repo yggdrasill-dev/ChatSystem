@@ -1,15 +1,14 @@
-import { AsyncSubject } from "rxjs";
+import PromiseSource from "promise-cs";
 import { AppSettings } from "./services/app-settings";
 
-let subject = new AsyncSubject<AppSettings>();
+let source = new PromiseSource<AppSettings>();
 
-const configTask = subject.toPromise();
+const configTask = source.promise;
 
 export async function getConfig(): Promise<AppSettings> {
 	return await configTask;
 }
 
 export function setConfig(settings: AppSettings): void {
-	subject.next(settings);
-	subject.complete();
+	source.resolve(settings);
 }

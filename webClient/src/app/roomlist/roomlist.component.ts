@@ -31,7 +31,7 @@ export class RoomlistComponent implements OnInit {
 	}
 
 	async joinRoom(): Promise<void>{
-		this.m_ChatClient.joinRoom(this.joinData.name);
+		await this.m_ChatClient.joinRoom(this.joinData.name);
 		await this.m_Router.navigate(['/room']);
 	}
 }

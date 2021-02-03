@@ -6,12 +6,13 @@ import { chat } from '../../protos/bundle';
 import { Inject, Injectable, OnDestroy } from '@angular/core';
 import { interpret, Machine, Interpreter } from 'xstate';
 import { filter } from 'rxjs/operators';
+import PromiseSource from 'promise-cs';
 
 interface ChatBehavior {
 	open(): Promise<string>;
 	send(subject: string, message: Uint8Array): void;
 	listRoom(): Promise<string[]>;
-	joinRoom(room: string): void;
+	joinRoom(room: string): Promise<void>;
 }
 
 function buildContext(): ChatBehavior {
@@ -94,7 +95,7 @@ class ChatOperator {
 	listRoom(): Promise<string[]> {
 		this.send("room.list", new Uint8Array());
 
-		let subject = new AsyncSubject<string[]>();
+		let source = new PromiseSource<string[]>();
 
 		let subscription = this.receiver
 			.pipe(
@@ -103,21 +104,34 @@ class ChatOperator {
 			.subscribe(msg => {
 				const reply = chat.RoomList.decode(msg.payload);
 
-				subject.next(reply.rooms);
-				subject.complete();
+				source.resolve(reply.rooms);
 			});
 
-		return subject.toPromise().finally(() => {
+		return source.promise.finally(() => {
 			subscription.unsubscribe();
 		});
 	}
 
-	joinRoom(room: string): void {
+	joinRoom(room: string): Promise<void> {
+		let source = new PromiseSource<void>();
+
+		let subscription = this.receiver
+			.pipe(
+				filter(msg => msg.subject == 'room.join.reply')
+			)
+			.subscribe(msg => {
+				source.resolve();
+			});
+
 		this.send(
 			'room.join',
 			chat.JoinRoom.encode({
 				room
 			}).finish());
+
+		return source.promise.finally(() => {
+			subscription.unsubscribe();
+		});
 	}
 }
 
@@ -169,7 +183,7 @@ export class ChatClientService implements OnDestroy {
 					}
 				},
 				inRoom: {
-					entry: (context)=>{
+					entry: (context) => {
 						Object.assign(
 							context,
 							buildContext(),
@@ -209,8 +223,8 @@ export class ChatClientService implements OnDestroy {
 		return this.m_ConnectionService.state.context.listRoom();
 	}
 
-	joinRoom(room: string): void {
-		this.m_ConnectionService.state.context.joinRoom(room);
+	async joinRoom(room: string): Promise<void> {
+		await this.m_ConnectionService.state.context.joinRoom(room);
 		this.m_ConnectionService.send('join');
 	}
 
