@@ -1,8 +1,8 @@
 import { Router } from '@angular/router';
 import { Subscription } from 'rxjs';
-import { filter, map, subscribeOn } from 'rxjs/operators';
+import { filter, map } from 'rxjs/operators';
 import { ChatClientService } from './../services/chat-client.service';
-import { Component, OnDestroy, OnInit } from '@angular/core';
+import { AfterViewChecked, Component, OnDestroy, OnInit } from '@angular/core';
 import { chat } from 'src/protos';
 
 @Component({
@@ -10,7 +10,7 @@ import { chat } from 'src/protos';
 	templateUrl: './room.component.html',
 	styleUrls: ['./room.component.scss']
 })
-export class RoomComponent implements OnInit, OnDestroy {
+export class RoomComponent implements OnInit, OnDestroy, AfterViewChecked {
 	name: string;
 	channelName: string;
 	entryMessage: string;
@@ -25,6 +25,10 @@ export class RoomComponent implements OnInit, OnDestroy {
 	constructor(
 		private m_ChatClient: ChatClientService,
 		private m_Router: Router) { }
+
+	ngAfterViewChecked(): void {
+		document.scrollingElement.scrollTop = document.scrollingElement.scrollHeight;
+	}
 
 	async ngOnInit(): Promise<void> {
 		this.name = await this.m_ChatClient.getUserName();
@@ -103,8 +107,6 @@ export class RoomComponent implements OnInit, OnDestroy {
 
 				this.m_ChatClient.send("chat.send", chat.ChatMessage.encode(packet).finish());
 			}
-
-			document.scrollingElement.scrollTop = document.scrollingElement.scrollHeight;
 		}
 
 		this.entryMessage = "";
