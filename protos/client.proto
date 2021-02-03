@@ -37,8 +37,13 @@ message PlayerList {
 	repeated string players = 2;
 }
 
+message Room {
+	string name = 1;
+	bool has_password = 2;
+}
+
 message RoomList {
-	repeated string rooms = 1;
+	repeated Room rooms = 1;
 }
 
 message JoinRoom {

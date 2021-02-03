@@ -1,6 +1,7 @@
 import { ChatClientService } from './../services/chat-client.service';
 import { Component, OnInit } from '@angular/core';
 import { Router } from '@angular/router';
+import { chat } from 'src/protos';
 
 @Component({
 	selector: 'app-roomlist',
@@ -8,7 +9,7 @@ import { Router } from '@angular/router';
 	styleUrls: ['./roomlist.component.scss']
 })
 export class RoomlistComponent implements OnInit {
-	rooms: string[] = [];
+	rooms: chat.IRoom[] = [];
 	selectedRoom: string = '';
 	selectedType: string = 'join';
 	joinData: { name: string; password: string } = { name: '', password: '' };
@@ -26,12 +27,16 @@ export class RoomlistComponent implements OnInit {
 	}
 
 	async createRoom(): Promise<void> {
-		await this.m_ChatClient.joinRoom(this.createData.name);
+		await this.m_ChatClient.joinRoom(this.createData.name, this.createData.password);
 		await this.m_Router.navigate(['/room']);
 	}
 
-	async joinRoom(): Promise<void>{
-		await this.m_ChatClient.joinRoom(this.joinData.name);
-		await this.m_Router.navigate(['/room']);
+	async joinRoom(): Promise<void> {
+		try {
+			await this.m_ChatClient.joinRoom(this.joinData.name, this.joinData.password);
+			await this.m_Router.navigate(['/room']);
+		} catch (error) {
+			alert(error);
+		}
 	}
 }

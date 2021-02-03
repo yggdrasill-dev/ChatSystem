@@ -11,8 +11,9 @@ import PromiseSource from 'promise-cs';
 interface ChatBehavior {
 	open(): Promise<string>;
 	send(subject: string, message: Uint8Array): void;
-	listRoom(): Promise<string[]>;
-	joinRoom(room: string): Promise<void>;
+	listRoom(): Promise<chat.IRoom[]>;
+	joinRoom(room: string, password?: string): Promise<void>;
+	canCommunication(): boolean;
 }
 
 function buildContext(): ChatBehavior {
@@ -28,7 +29,8 @@ function buildContext(): ChatBehavior {
 		},
 		joinRoom: () => {
 			throw "current state can't joinRoom";
-		}
+		},
+		canCommunication: () => false
 	};
 }
 
@@ -92,10 +94,10 @@ class ChatOperator {
 		this.m_Socket.send(chat.Packet.encode(msg).finish());
 	}
 
-	listRoom(): Promise<string[]> {
+	listRoom(): Promise<chat.IRoom[]> {
 		this.send("room.list", new Uint8Array());
 
-		let source = new PromiseSource<string[]>();
+		let source = new PromiseSource<chat.IRoom[]>();
 
 		let subscription = this.receiver
 			.pipe(
@@ -112,7 +114,7 @@ class ChatOperator {
 		});
 	}
 
-	joinRoom(room: string): Promise<void> {
+	joinRoom(room: string, password?: string): Promise<void> {
 		let source = new PromiseSource<void>();
 
 		let subscription = this.receiver
@@ -131,7 +133,8 @@ class ChatOperator {
 		this.send(
 			'room.join',
 			chat.JoinRoom.encode({
-				room
+				room,
+				password
 			}).finish());
 
 		return source.promise.finally(() => {
@@ -179,7 +182,7 @@ export class ChatClientService implements OnDestroy {
 							buildContext(),
 							{
 								listRoom: () => this.m_Operator.listRoom(),
-								joinRoom: (room) => this.m_Operator.joinRoom(room)
+								joinRoom: (room, password) => this.m_Operator.joinRoom(room, password)
 							}
 						);
 					},
@@ -193,7 +196,8 @@ export class ChatClientService implements OnDestroy {
 							context,
 							buildContext(),
 							{
-								send: (subject, message) => this.m_Operator.send(subject, message)
+								send: (subject, message) => this.m_Operator.send(subject, message),
+								canCommunication: () => true
 							});
 					}
 				}
@@ -224,16 +228,20 @@ export class ChatClientService implements OnDestroy {
 		this.m_ConnectionService.send('open');
 	}
 
-	listRoom(): Promise<string[]> {
+	listRoom(): Promise<chat.IRoom[]> {
 		return this.m_ConnectionService.state.context.listRoom();
 	}
 
-	async joinRoom(room: string): Promise<void> {
-		await this.m_ConnectionService.state.context.joinRoom(room);
+	async joinRoom(room: string, password?: string): Promise<void> {
+		await this.m_ConnectionService.state.context.joinRoom(room, password);
 		this.m_ConnectionService.send('join');
 	}
 
 	send(subject: string, message: Uint8Array): void {
 		return this.m_ConnectionService.state.context.send(subject, message);
+	}
+
+	canCommunication(): boolean {
+		return this.m_ConnectionService.state.context.canCommunication();
 	}
 }

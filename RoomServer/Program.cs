@@ -42,7 +42,7 @@ namespace RoomServer
 						.AddTransient<ICommandService<JoinRoomCommand>, JoinRoomCommandService>()
 						.AddTransient<ICommandService<LeaveRoomCommand>, LeaveRoomCommandService>()
 						.AddTransient<IQueryService<RoomSessionsQuery, string>, RoomSessionsQueryService>()
-						.AddTransient<IQueryService<RoomListQuery, string>, RoomListQueryService>()
+						.AddTransient<IQueryService<RoomListQuery, RoomInfo>, RoomListQueryService>()
 						.AddTransient<IQueryService<PlayerInfoQuery, PlayerInfo>, PlayerInfoQueryService>()
 						.AddTransient<IGetService<GetRoomBySessionIdQuery, string?>, GetRoomBySessionIdQueryService>();
 				});

@@ -31,6 +31,10 @@ export class RoomComponent implements OnInit, OnDestroy, AfterViewChecked {
 	}
 
 	async ngOnInit(): Promise<void> {
+		if (!this.m_ChatClient.canCommunication()) {
+			await this.m_Router.navigate(["/"]);
+			return;
+		}
 		this.name = await this.m_ChatClient.getUserName();
 		// this.channelName = this.m_ChatClient.channelName;
 

@@ -15,7 +15,7 @@ namespace RoomServer.Models
 
 		public ValueTask ExecuteAsync(JoinRoomCommand command)
 		{
-			return m_RoomRepository.JoinRoomAsync(command.SessionId, command.Room);
+			return m_RoomRepository.JoinRoomAsync(command.SessionId, command.Room, command.Password);
 		}
 	}
 }

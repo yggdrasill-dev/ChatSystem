@@ -13,12 +13,12 @@ namespace RoomServer.Models.Endpoints
 	public class RoomListHandler : IMessageHandler
 	{
 		private readonly IMessageQueueService m_MessageQueueService;
-		private readonly IQueryService<RoomListQuery, string> m_ListRoomService;
+		private readonly IQueryService<RoomListQuery, RoomInfo> m_ListRoomService;
 		private readonly ILogger<RoomListHandler> m_Logger;
 
 		public RoomListHandler(
 			IMessageQueueService messageQueueService,
-			IQueryService<RoomListQuery, string> listRoomService,
+			IQueryService<RoomListQuery, RoomInfo> listRoomService,
 			ILogger<RoomListHandler> logger)
 		{
 			m_MessageQueueService = messageQueueService ?? throw new ArgumentNullException(nameof(messageQueueService));
@@ -36,7 +36,12 @@ namespace RoomServer.Models.Endpoints
 
 			var response = new RoomList();
 
-			response.Rooms.AddRange(rooms.ToEnumerable());
+			response.Rooms.AddRange(rooms
+				.Select(info => new Room
+				{
+					Name = info.Name,
+					HasPassword = info.HasPassword
+				}).ToEnumerable());
 
 			var sendMsg = new SendPacket
 			{

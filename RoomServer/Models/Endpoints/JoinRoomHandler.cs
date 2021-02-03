@@ -44,65 +44,92 @@ namespace RoomServer.Models.Endpoints
 				.ToEnumerable()
 				.ToArray();
 
-			await m_JoinRoomService.ExecuteAsync(new JoinRoomCommand
+			try
 			{
-				SessionId = packet.SessionId,
-				Room = joinRoomData.Room
-			}).ConfigureAwait(false);
-
-			var response = new SendPacket
-			{
-				Subject = "room.join.reply"
-			};
-
-			response.SessionIds.Add(packet.SessionId);
-
-			var responseContent = new JoinRoomReply
-			{
-				Status = JoinRoomStatus.Accpet
-			};
-
-			response.Payload = responseContent.ToByteString();
-
-			await m_MessageQueueService.PublishAsync(
-				"connect.send",
-				response.ToByteArray()).ConfigureAwait(false);
-
-			if (roomSessionIds.Length > 0)
-			{
-				var broadcast = new SendPacket
+				await m_JoinRoomService.ExecuteAsync(new JoinRoomCommand
 				{
-					Subject = "chat.receive"
+					SessionId = packet.SessionId,
+					Room = joinRoomData.Room,
+					Password = joinRoomData.Password
+				}).ConfigureAwait(false);
+
+				var response = new SendPacket
+				{
+					Subject = "room.join.reply"
 				};
 
-				broadcast.SessionIds.AddRange(roomSessionIds);
+				response.SessionIds.Add(packet.SessionId);
 
-				var chatMessage = new ChatMessage
+				var responseContent = new JoinRoomReply
 				{
-					Scope = Scope.Room,
-					From = "System",
-					Message = $"New player joined!"
+					Status = JoinRoomStatus.Accpet
 				};
 
-				broadcast.Payload = chatMessage.ToByteString();
+				response.Payload = responseContent.ToByteString();
 
 				await m_MessageQueueService.PublishAsync(
 					"connect.send",
-					broadcast.ToByteArray()).ConfigureAwait(false);
+					response.ToByteArray()).ConfigureAwait(false);
 
-				var refrashPacket = new SendPacket
+				if (roomSessionIds.Length > 0)
 				{
-					Subject = "room.player.refrash"
-				};
+					var broadcast = new SendPacket
+					{
+						Subject = "chat.receive"
+					};
 
-				refrashPacket.SessionIds.AddRange(roomSessionIds);
+					broadcast.SessionIds.AddRange(roomSessionIds);
 
-				await m_MessageQueueService.PublishAsync(
-					"connect.send",
-					refrashPacket.ToByteArray()).ConfigureAwait(false);
+					var chatMessage = new ChatMessage
+					{
+						Scope = Scope.Room,
+						From = "System",
+						Message = $"New player joined!"
+					};
+
+					broadcast.Payload = chatMessage.ToByteString();
+
+					await m_MessageQueueService.PublishAsync(
+						"connect.send",
+						broadcast.ToByteArray()).ConfigureAwait(false);
+
+					var refrashPacket = new SendPacket
+					{
+						Subject = "room.player.refrash"
+					};
+
+					refrashPacket.SessionIds.AddRange(roomSessionIds);
+
+					await m_MessageQueueService.PublishAsync(
+						"connect.send",
+						refrashPacket.ToByteArray()).ConfigureAwait(false);
+				}
+
+				m_Logger.LogInformation($"({packet.SessionId}, {joinRoomData.Room}) joined.");
 			}
+			catch (Exception ex)
+			{
+				m_Logger.LogError(ex, string.Empty);
 
-			m_Logger.LogInformation($"({packet.SessionId}, {joinRoomData.Room}) joined.");
+				var response = new SendPacket
+				{
+					Subject = "room.join.reply"
+				};
+
+				response.SessionIds.Add(packet.SessionId);
+
+				var responseContent = new JoinRoomReply
+				{
+					Status = JoinRoomStatus.Reject,
+					Reason = "進房失敗"
+				};
+
+				response.Payload = responseContent.ToByteString();
+
+				await m_MessageQueueService.PublishAsync(
+					"connect.send",
+					response.ToByteArray()).ConfigureAwait(false);
+			}
 		}
 	}
 }

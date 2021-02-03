@@ -1002,13 +1002,223 @@
             return PlayerList;
         })();
     
+        chat.Room = (function() {
+    
+            /**
+             * Properties of a Room.
+             * @memberof chat
+             * @interface IRoom
+             * @property {string|null} [name] Room name
+             * @property {boolean|null} [hasPassword] Room hasPassword
+             */
+    
+            /**
+             * Constructs a new Room.
+             * @memberof chat
+             * @classdesc Represents a Room.
+             * @implements IRoom
+             * @constructor
+             * @param {chat.IRoom=} [properties] Properties to set
+             */
+            function Room(properties) {
+                if (properties)
+                    for (var keys = Object.keys(properties), i = 0; i < keys.length; ++i)
+                        if (properties[keys[i]] != null)
+                            this[keys[i]] = properties[keys[i]];
+            }
+    
+            /**
+             * Room name.
+             * @member {string} name
+             * @memberof chat.Room
+             * @instance
+             */
+            Room.prototype.name = "";
+    
+            /**
+             * Room hasPassword.
+             * @member {boolean} hasPassword
+             * @memberof chat.Room
+             * @instance
+             */
+            Room.prototype.hasPassword = false;
+    
+            /**
+             * Creates a new Room instance using the specified properties.
+             * @function create
+             * @memberof chat.Room
+             * @static
+             * @param {chat.IRoom=} [properties] Properties to set
+             * @returns {chat.Room} Room instance
+             */
+            Room.create = function create(properties) {
+                return new Room(properties);
+            };
+    
+            /**
+             * Encodes the specified Room message. Does not implicitly {@link chat.Room.verify|verify} messages.
+             * @function encode
+             * @memberof chat.Room
+             * @static
+             * @param {chat.IRoom} message Room message or plain object to encode
+             * @param {$protobuf.Writer} [writer] Writer to encode to
+             * @returns {$protobuf.Writer} Writer
+             */
+            Room.encode = function encode(message, writer) {
+                if (!writer)
+                    writer = $Writer.create();
+                if (message.name != null && Object.hasOwnProperty.call(message, "name"))
+                    writer.uint32(/* id 1, wireType 2 =*/10).string(message.name);
+                if (message.hasPassword != null && Object.hasOwnProperty.call(message, "hasPassword"))
+                    writer.uint32(/* id 2, wireType 0 =*/16).bool(message.hasPassword);
+                return writer;
+            };
+    
+            /**
+             * Encodes the specified Room message, length delimited. Does not implicitly {@link chat.Room.verify|verify} messages.
+             * @function encodeDelimited
+             * @memberof chat.Room
+             * @static
+             * @param {chat.IRoom} message Room message or plain object to encode
+             * @param {$protobuf.Writer} [writer] Writer to encode to
+             * @returns {$protobuf.Writer} Writer
+             */
+            Room.encodeDelimited = function encodeDelimited(message, writer) {
+                return this.encode(message, writer).ldelim();
+            };
+    
+            /**
+             * Decodes a Room message from the specified reader or buffer.
+             * @function decode
+             * @memberof chat.Room
+             * @static
+             * @param {$protobuf.Reader|Uint8Array} reader Reader or buffer to decode from
+             * @param {number} [length] Message length if known beforehand
+             * @returns {chat.Room} Room
+             * @throws {Error} If the payload is not a reader or valid buffer
+             * @throws {$protobuf.util.ProtocolError} If required fields are missing
+             */
+            Room.decode = function decode(reader, length) {
+                if (!(reader instanceof $Reader))
+                    reader = $Reader.create(reader);
+                var end = length === undefined ? reader.len : reader.pos + length, message = new $root.chat.Room();
+                while (reader.pos < end) {
+                    var tag = reader.uint32();
+                    switch (tag >>> 3) {
+                    case 1:
+                        message.name = reader.string();
+                        break;
+                    case 2:
+                        message.hasPassword = reader.bool();
+                        break;
+                    default:
+                        reader.skipType(tag & 7);
+                        break;
+                    }
+                }
+                return message;
+            };
+    
+            /**
+             * Decodes a Room message from the specified reader or buffer, length delimited.
+             * @function decodeDelimited
+             * @memberof chat.Room
+             * @static
+             * @param {$protobuf.Reader|Uint8Array} reader Reader or buffer to decode from
+             * @returns {chat.Room} Room
+             * @throws {Error} If the payload is not a reader or valid buffer
+             * @throws {$protobuf.util.ProtocolError} If required fields are missing
+             */
+            Room.decodeDelimited = function decodeDelimited(reader) {
+                if (!(reader instanceof $Reader))
+                    reader = new $Reader(reader);
+                return this.decode(reader, reader.uint32());
+            };
+    
+            /**
+             * Verifies a Room message.
+             * @function verify
+             * @memberof chat.Room
+             * @static
+             * @param {Object.<string,*>} message Plain object to verify
+             * @returns {string|null} `null` if valid, otherwise the reason why it is not
+             */
+            Room.verify = function verify(message) {
+                if (typeof message !== "object" || message === null)
+                    return "object expected";
+                if (message.name != null && message.hasOwnProperty("name"))
+                    if (!$util.isString(message.name))
+                        return "name: string expected";
+                if (message.hasPassword != null && message.hasOwnProperty("hasPassword"))
+                    if (typeof message.hasPassword !== "boolean")
+                        return "hasPassword: boolean expected";
+                return null;
+            };
+    
+            /**
+             * Creates a Room message from a plain object. Also converts values to their respective internal types.
+             * @function fromObject
+             * @memberof chat.Room
+             * @static
+             * @param {Object.<string,*>} object Plain object
+             * @returns {chat.Room} Room
+             */
+            Room.fromObject = function fromObject(object) {
+                if (object instanceof $root.chat.Room)
+                    return object;
+                var message = new $root.chat.Room();
+                if (object.name != null)
+                    message.name = String(object.name);
+                if (object.hasPassword != null)
+                    message.hasPassword = Boolean(object.hasPassword);
+                return message;
+            };
+    
+            /**
+             * Creates a plain object from a Room message. Also converts values to other types if specified.
+             * @function toObject
+             * @memberof chat.Room
+             * @static
+             * @param {chat.Room} message Room
+             * @param {$protobuf.IConversionOptions} [options] Conversion options
+             * @returns {Object.<string,*>} Plain object
+             */
+            Room.toObject = function toObject(message, options) {
+                if (!options)
+                    options = {};
+                var object = {};
+                if (options.defaults) {
+                    object.name = "";
+                    object.hasPassword = false;
+                }
+                if (message.name != null && message.hasOwnProperty("name"))
+                    object.name = message.name;
+                if (message.hasPassword != null && message.hasOwnProperty("hasPassword"))
+                    object.hasPassword = message.hasPassword;
+                return object;
+            };
+    
+            /**
+             * Converts this Room to JSON.
+             * @function toJSON
+             * @memberof chat.Room
+             * @instance
+             * @returns {Object.<string,*>} JSON object
+             */
+            Room.prototype.toJSON = function toJSON() {
+                return this.constructor.toObject(this, $protobuf.util.toJSONOptions);
+            };
+    
+            return Room;
+        })();
+    
         chat.RoomList = (function() {
     
             /**
              * Properties of a RoomList.
              * @memberof chat
              * @interface IRoomList
-             * @property {Array.<string>|null} [rooms] RoomList rooms
+             * @property {Array.<chat.IRoom>|null} [rooms] RoomList rooms
              */
     
             /**
@@ -1029,7 +1239,7 @@
     
             /**
              * RoomList rooms.
-             * @member {Array.<string>} rooms
+             * @member {Array.<chat.IRoom>} rooms
              * @memberof chat.RoomList
              * @instance
              */
@@ -1061,7 +1271,7 @@
                     writer = $Writer.create();
                 if (message.rooms != null && message.rooms.length)
                     for (var i = 0; i < message.rooms.length; ++i)
-                        writer.uint32(/* id 1, wireType 2 =*/10).string(message.rooms[i]);
+                        $root.chat.Room.encode(message.rooms[i], writer.uint32(/* id 1, wireType 2 =*/10).fork()).ldelim();
                 return writer;
             };
     
@@ -1099,7 +1309,7 @@
                     case 1:
                         if (!(message.rooms && message.rooms.length))
                             message.rooms = [];
-                        message.rooms.push(reader.string());
+                        message.rooms.push($root.chat.Room.decode(reader, reader.uint32()));
                         break;
                     default:
                         reader.skipType(tag & 7);
@@ -1139,9 +1349,11 @@
                 if (message.rooms != null && message.hasOwnProperty("rooms")) {
                     if (!Array.isArray(message.rooms))
                         return "rooms: array expected";
-                    for (var i = 0; i < message.rooms.length; ++i)
-                        if (!$util.isString(message.rooms[i]))
-                            return "rooms: string[] expected";
+                    for (var i = 0; i < message.rooms.length; ++i) {
+                        var error = $root.chat.Room.verify(message.rooms[i]);
+                        if (error)
+                            return "rooms." + error;
+                    }
                 }
                 return null;
             };
@@ -1162,8 +1374,11 @@
                     if (!Array.isArray(object.rooms))
                         throw TypeError(".chat.RoomList.rooms: array expected");
                     message.rooms = [];
-                    for (var i = 0; i < object.rooms.length; ++i)
-                        message.rooms[i] = String(object.rooms[i]);
+                    for (var i = 0; i < object.rooms.length; ++i) {
+                        if (typeof object.rooms[i] !== "object")
+                            throw TypeError(".chat.RoomList.rooms: object expected");
+                        message.rooms[i] = $root.chat.Room.fromObject(object.rooms[i]);
+                    }
                 }
                 return message;
             };
@@ -1186,7 +1401,7 @@
                 if (message.rooms && message.rooms.length) {
                     object.rooms = [];
                     for (var j = 0; j < message.rooms.length; ++j)
-                        object.rooms[j] = message.rooms[j];
+                        object.rooms[j] = $root.chat.Room.toObject(message.rooms[j], options);
                 }
                 return object;
             };

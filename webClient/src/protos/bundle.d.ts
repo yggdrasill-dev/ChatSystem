@@ -412,11 +412,107 @@ export namespace chat {
         public toJSON(): { [k: string]: any };
     }
 
+    /** Properties of a Room. */
+    interface IRoom {
+
+        /** Room name */
+        name?: (string|null);
+
+        /** Room hasPassword */
+        hasPassword?: (boolean|null);
+    }
+
+    /** Represents a Room. */
+    class Room implements IRoom {
+
+        /**
+         * Constructs a new Room.
+         * @param [properties] Properties to set
+         */
+        constructor(properties?: chat.IRoom);
+
+        /** Room name. */
+        public name: string;
+
+        /** Room hasPassword. */
+        public hasPassword: boolean;
+
+        /**
+         * Creates a new Room instance using the specified properties.
+         * @param [properties] Properties to set
+         * @returns Room instance
+         */
+        public static create(properties?: chat.IRoom): chat.Room;
+
+        /**
+         * Encodes the specified Room message. Does not implicitly {@link chat.Room.verify|verify} messages.
+         * @param message Room message or plain object to encode
+         * @param [writer] Writer to encode to
+         * @returns Writer
+         */
+        public static encode(message: chat.IRoom, writer?: $protobuf.Writer): $protobuf.Writer;
+
+        /**
+         * Encodes the specified Room message, length delimited. Does not implicitly {@link chat.Room.verify|verify} messages.
+         * @param message Room message or plain object to encode
+         * @param [writer] Writer to encode to
+         * @returns Writer
+         */
+        public static encodeDelimited(message: chat.IRoom, writer?: $protobuf.Writer): $protobuf.Writer;
+
+        /**
+         * Decodes a Room message from the specified reader or buffer.
+         * @param reader Reader or buffer to decode from
+         * @param [length] Message length if known beforehand
+         * @returns Room
+         * @throws {Error} If the payload is not a reader or valid buffer
+         * @throws {$protobuf.util.ProtocolError} If required fields are missing
+         */
+        public static decode(reader: ($protobuf.Reader|Uint8Array), length?: number): chat.Room;
+
+        /**
+         * Decodes a Room message from the specified reader or buffer, length delimited.
+         * @param reader Reader or buffer to decode from
+         * @returns Room
+         * @throws {Error} If the payload is not a reader or valid buffer
+         * @throws {$protobuf.util.ProtocolError} If required fields are missing
+         */
+        public static decodeDelimited(reader: ($protobuf.Reader|Uint8Array)): chat.Room;
+
+        /**
+         * Verifies a Room message.
+         * @param message Plain object to verify
+         * @returns `null` if valid, otherwise the reason why it is not
+         */
+        public static verify(message: { [k: string]: any }): (string|null);
+
+        /**
+         * Creates a Room message from a plain object. Also converts values to their respective internal types.
+         * @param object Plain object
+         * @returns Room
+         */
+        public static fromObject(object: { [k: string]: any }): chat.Room;
+
+        /**
+         * Creates a plain object from a Room message. Also converts values to other types if specified.
+         * @param message Room
+         * @param [options] Conversion options
+         * @returns Plain object
+         */
+        public static toObject(message: chat.Room, options?: $protobuf.IConversionOptions): { [k: string]: any };
+
+        /**
+         * Converts this Room to JSON.
+         * @returns JSON object
+         */
+        public toJSON(): { [k: string]: any };
+    }
+
     /** Properties of a RoomList. */
     interface IRoomList {
 
         /** RoomList rooms */
-        rooms?: (string[]|null);
+        rooms?: (chat.IRoom[]|null);
     }
 
     /** Represents a RoomList. */
@@ -429,7 +525,7 @@ export namespace chat {
         constructor(properties?: chat.IRoomList);
 
         /** RoomList rooms. */
-        public rooms: string[];
+        public rooms: chat.IRoom[];
 
         /**
          * Creates a new RoomList instance using the specified properties.
