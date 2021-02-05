@@ -82,7 +82,7 @@ namespace RoomServer.Models.Endpoints
 
 					var chatMessage = new ChatMessage
 					{
-						Scope = Scope.Room,
+						Scope = Scope.System,
 						From = "System",
 						Message = $"New player joined!"
 					};
