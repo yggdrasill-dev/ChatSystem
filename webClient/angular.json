@@ -135,7 +135,6 @@
       }
     }
   },
-  "defaultProject": "webclient",
   "cli": {
     "analytics": false
   }
