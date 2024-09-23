@@ -1,7 +1,6 @@
-﻿namespace ChatServer.Models
+﻿namespace ChatServer.Models;
+
+public struct PlayerInfoQuery
 {
-	public struct PlayerInfoQuery
-	{
-		public string SessionId { get; set; }
-	}
+	public string SessionId { get; set; }
 }

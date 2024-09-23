@@ -2,22 +2,16 @@
 using System.Threading.Tasks;
 using Common;
 
-namespace ChatConnector.Models
+namespace ChatConnector.Models;
+
+public class AddSocketCommandService(WebSocketRepository webSocketRepository) : ICommandService<AddSocketCommand>
 {
-	public class AddSocketCommandService : ICommandService<AddSocketCommand>
+	private readonly WebSocketRepository m_WebSocketRepository = webSocketRepository ?? throw new ArgumentNullException(nameof(webSocketRepository));
+
+	public ValueTask ExecuteAsync(AddSocketCommand command)
 	{
-		private readonly WebSocketRepository m_WebSocketRepository;
+		m_WebSocketRepository.TryAdd(command.SessionId, command.Socket);
 
-		public AddSocketCommandService(WebSocketRepository webSocketRepository)
-		{
-			m_WebSocketRepository = webSocketRepository ?? throw new ArgumentNullException(nameof(webSocketRepository));
-		}
-
-		public ValueTask ExecuteAsync(AddSocketCommand command)
-		{
-			m_WebSocketRepository.TryAdd(command.SessionId, command.Socket);
-
-			return ValueTask.CompletedTask;
-		}
+		return ValueTask.CompletedTask;
 	}
 }

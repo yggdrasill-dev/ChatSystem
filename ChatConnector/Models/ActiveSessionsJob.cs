@@ -1,32 +1,22 @@
-﻿using System;
-using System.Linq;
-using System.Threading.Tasks;
+﻿using System.Threading.Tasks;
 using Chat.Protos;
 using Common;
 using Google.Protobuf;
 using Quartz;
 
-namespace ChatConnector.Models
+namespace ChatConnector.Models;
+
+public class ActiveSessionsJob(
+	WebSocketRepository socketRepository,
+	IMessageQueueService messageQueueService) : IJob
 {
-	public class ActiveSessionsJob : IJob
+	public Task Execute(IJobExecutionContext context)
 	{
-		private readonly WebSocketRepository m_SocketRepository;
-		private readonly IMessageQueueService m_MessageQueueService;
+		var allSessionIds = socketRepository.Keys;
 
-		public ActiveSessionsJob(WebSocketRepository socketRepository, IMessageQueueService messageQueueService)
-		{
-			m_SocketRepository = socketRepository ?? throw new ArgumentNullException(nameof(socketRepository));
-			m_MessageQueueService = messageQueueService ?? throw new ArgumentNullException(nameof(messageQueueService));
-		}
+		var sendData = new ActiveSessionsRequest();
+		sendData.SessionIds.AddRange(allSessionIds);
 
-		public Task Execute(IJobExecutionContext context)
-		{
-			var allSessionIds = m_SocketRepository.Keys;
-
-			var sendData = new ActiveSessionsRequest();
-			sendData.SessionIds.AddRange(allSessionIds);
-
-			return m_MessageQueueService.PublishAsync("session.active", sendData.ToByteArray()).AsTask();
-		}
+		return messageQueueService.PublishAsync("session.active", sendData.ToByteArray()).AsTask();
 	}
 }

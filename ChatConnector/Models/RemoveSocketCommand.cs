@@ -1,7 +1,6 @@
-﻿namespace ChatConnector.Models
+﻿namespace ChatConnector.Models;
+
+public struct RemoveSocketCommand
 {
-	public struct RemoveSocketCommand
-	{
-		public string SessionId { get; set; }
-	}
+	public string SessionId { get; set; }
 }

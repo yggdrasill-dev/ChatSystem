@@ -1,7 +1,7 @@
 version: "3"
 services:
   nats:
-    image: nats-streaming
+    image: nats:2.10.20
     ports:
       - 4222:4222
       - 8222:8222
@@ -10,7 +10,7 @@ services:
     ports:
       - 6379:6379
   db:
-    image: mcr.microsoft.com/mssql/server:2019-latest
+    image: mcr.microsoft.com/mssql/server:2022-latest
     environment:
       ACCEPT_EULA: "Y"
       SA_PASSWORD: 19U*@sYG%~%1O>^t

@@ -1,21 +1,12 @@
-﻿using System;
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using Common;
 
-namespace RoomServer.Models
+namespace RoomServer.Models;
+
+public class RoomSessionsQueryService(IRoomRepository roomRepository) : IQueryService<RoomSessionsQuery, string>
 {
-	public class RoomSessionsQueryService : IQueryService<RoomSessionsQuery, string>
+	public IAsyncEnumerable<string> QueryAsync(RoomSessionsQuery query)
 	{
-		private readonly IRoomRepository m_RoomRepository;
-
-		public RoomSessionsQueryService(IRoomRepository roomRepository)
-		{
-			m_RoomRepository = roomRepository ?? throw new ArgumentNullException(nameof(roomRepository));
-		}
-
-		public IAsyncEnumerable<string> QueryAsync(RoomSessionsQuery query)
-		{
-			return m_RoomRepository.QuerySessionsByRoomAsync(query.Room);
-		}
+		return roomRepository.QuerySessionsByRoomAsync(query.Room);
 	}
 }

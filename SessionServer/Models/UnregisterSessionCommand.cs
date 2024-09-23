@@ -1,7 +1,6 @@
-﻿namespace SessionServer.Models
+﻿namespace SessionServer.Models;
+
+public struct UnregisterSessionCommand
 {
-	public struct UnregisterSessionCommand
-	{
-		public string SessionId { get; set; }
-	}
+	public string SessionId { get; set; }
 }

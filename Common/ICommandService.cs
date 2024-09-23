@@ -1,9 +1,8 @@
 ﻿using System.Threading.Tasks;
 
-namespace Common
+namespace Common;
+
+public interface ICommandService<TCommand>
 {
-	public interface ICommandService<TCommand>
-	{
-		ValueTask ExecuteAsync(TCommand command);
-	}
+	ValueTask ExecuteAsync(TCommand command);
 }

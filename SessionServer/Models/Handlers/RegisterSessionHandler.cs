@@ -1,43 +1,33 @@
-﻿using System;
-using System.Threading;
+﻿using System.Threading;
 using System.Threading.Tasks;
 using Chat.Protos;
 using Common;
 using Microsoft.Extensions.Logging;
 using NATS.Client;
 
-namespace SessionServer.Models.Handlers
+namespace SessionServer.Models.Handlers;
+
+public class RegisterSessionHandler(
+	IMessageQueueService messageQueueService,
+	ICommandService<RegisterCommand> registerService,
+	ILogger<RegisterSessionHandler> logger) : IMessageHandler
 {
-	public class RegisterSessionHandler : IMessageHandler
+	public async ValueTask HandleAsync(Msg msg, CancellationToken cancellationToken)
 	{
-		private readonly IMessageQueueService m_MessageQueueService;
-		private readonly ICommandService<RegisterCommand> m_RegisterService;
-		private readonly ILogger<RegisterSessionHandler> m_Logger;
+		var registration = RegisterRequest.Parser.ParseFrom(msg.Data);
 
-		public RegisterSessionHandler(
-			IMessageQueueService messageQueueService,
-			ICommandService<RegisterCommand> registerService,
-			ILogger<RegisterSessionHandler> logger)
+		await registerService.ExecuteAsync(new RegisterCommand
 		{
-			m_MessageQueueService = messageQueueService ?? throw new ArgumentNullException(nameof(messageQueueService));
-			m_RegisterService = registerService ?? throw new ArgumentNullException(nameof(registerService));
-			m_Logger = logger ?? throw new ArgumentNullException(nameof(logger));
-		}
+			SessionId = registration.SessionId,
+			ConnectorId = registration.ConnectorId,
+			Name = registration.Name
+		}).ConfigureAwait(false);
 
-		public async ValueTask HandleAsync(Msg msg, CancellationToken cancellationToken)
-		{
-			var registration = RegisterRequest.Parser.ParseFrom(msg.Data);
+		await messageQueueService.PublishAsync(msg.Reply, []);
 
-			await m_RegisterService.ExecuteAsync(new RegisterCommand
-			{
-				SessionId = registration.SessionId,
-				ConnectorId = registration.ConnectorId,
-				Name = registration.Name
-			}).ConfigureAwait(false);
-
-			await m_MessageQueueService.PublishAsync(msg.Reply, Array.Empty<byte>());
-
-			m_Logger.LogInformation($"({registration.SessionId}, {registration.Name}) registered.");
-		}
+		logger.LogInformation(
+			"({SessionId}, {Name}) registered.",
+			registration.SessionId,
+			registration.Name);
 	}
 }

@@ -2,10 +2,9 @@
 using System.Threading.Tasks;
 using NATS.Client;
 
-namespace Common
+namespace Common;
+
+public interface IMessageHandler
 {
-	public interface IMessageHandler
-	{
-		ValueTask HandleAsync(Msg msg, CancellationToken cancellationToken);
-	}
+	ValueTask HandleAsync(Msg msg, CancellationToken cancellationToken);
 }

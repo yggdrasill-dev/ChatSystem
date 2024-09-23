@@ -2,43 +2,42 @@
 using System.Collections.Generic;
 using Microsoft.Extensions.DependencyInjection;
 
-namespace Common.Configuration
+namespace Common.Configuration;
+
+public class MessageQueueConfiguration
 {
-	public class MessageQueueConfiguration
+	private readonly List<ISubscribeRegistration> m_SubscribeRegistrations = [];
+
+	public IServiceCollection Services { get; }
+
+	internal Action<MessageQueueOptions, IServiceProvider> OptionsConfigure { get; private set; } =
+		(options, sp) => { };
+
+	public MessageQueueConfiguration(IServiceCollection services)
 	{
-		private List<ISubscribeRegistration> m_SubscribeRegistrations = new List<ISubscribeRegistration>();
+		Services = services;
 
-		public IServiceCollection Services { get; }
+		Services.AddSingleton<IEnumerable<ISubscribeRegistration>>(m_SubscribeRegistrations);
+	}
 
-		internal Action<MessageQueueOptions, IServiceProvider> OptionsConfigure { get; private set; } =
-			(options, sp) => { };
+	public MessageQueueConfiguration AddHandler<THandler>(string subject) where THandler : IMessageHandler
+	{
+		m_SubscribeRegistrations.Add(new SubscribeRegistration<THandler>(subject));
 
-		public MessageQueueConfiguration(IServiceCollection services)
-		{
-			Services = services;
+		return this;
+	}
 
-			Services.AddSingleton<IEnumerable<ISubscribeRegistration>>(m_SubscribeRegistrations);
-		}
+	public MessageQueueConfiguration AddHandler<THandler>(string subject, string group) where THandler : IMessageHandler
+	{
+		m_SubscribeRegistrations.Add(new GroupRegistration<THandler>(subject, group));
 
-		public MessageQueueConfiguration AddHandler<THandler>(string subject) where THandler : IMessageHandler
-		{
-			m_SubscribeRegistrations.Add(new SubscribeRegistration<THandler>(subject));
+		return this;
+	}
 
-			return this;
-		}
+	public MessageQueueConfiguration ConfigQueueOptions(Action<MessageQueueOptions, IServiceProvider> configure)
+	{
+		OptionsConfigure = configure;
 
-		public MessageQueueConfiguration AddHandler<THandler>(string subject, string group) where THandler : IMessageHandler
-		{
-			m_SubscribeRegistrations.Add(new GroupRegistration<THandler>(subject, group));
-
-			return this;
-		}
-
-		public MessageQueueConfiguration ConfigQueueOptions(Action<MessageQueueOptions, IServiceProvider> configure)
-		{
-			OptionsConfigure = configure;
-
-			return this;
-		}
+		return this;
 	}
 }

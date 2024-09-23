@@ -23,6 +23,7 @@
     "promise-cs": "^1.0.2",
     "rxjs": "~6.6.0",
     "tslib": "^2.0.0",
+    "webclient": "file:",
     "xstate": "^4.16.0",
     "zone.js": "~0.10.2"
   },

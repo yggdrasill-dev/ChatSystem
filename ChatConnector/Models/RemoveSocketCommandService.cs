@@ -1,22 +1,14 @@
 ﻿using System.Threading.Tasks;
 using Common;
 
-namespace ChatConnector.Models
+namespace ChatConnector.Models;
+
+public class RemoveSocketCommandService(WebSocketRepository webSocketRepository) : ICommandService<RemoveSocketCommand>
 {
-	public class RemoveSocketCommandService : ICommandService<RemoveSocketCommand>
+	public ValueTask ExecuteAsync(RemoveSocketCommand command)
 	{
-		private readonly WebSocketRepository m_WebSocketRepository;
+		webSocketRepository.TryRemove(command.SessionId, out var _);
 
-		public RemoveSocketCommandService(WebSocketRepository webSocketRepository)
-		{
-			m_WebSocketRepository = webSocketRepository;
-		}
-
-		public ValueTask ExecuteAsync(RemoveSocketCommand command)
-		{
-			m_WebSocketRepository.TryRemove(command.SessionId, out var _);
-
-			return ValueTask.CompletedTask;
-		}
+		return ValueTask.CompletedTask;
 	}
 }

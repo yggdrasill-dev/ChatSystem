@@ -1,6 +1,5 @@
-﻿namespace RoomServer.Models
+﻿namespace RoomServer.Models;
+
+public struct RoomListQuery
 {
-	public struct RoomListQuery
-	{
-	}
 }

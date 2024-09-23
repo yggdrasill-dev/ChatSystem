@@ -1,22 +1,13 @@
-﻿using System;
-using System.Threading.Tasks;
+﻿using System.Threading.Tasks;
 using Common;
 
-namespace SessionServer.Models
+namespace SessionServer.Models;
+
+public class RegisterSessionService(ISessionRepository repository) : ICommandService<RegisterCommand>
 {
-	public class RegisterSessionService : ICommandService<RegisterCommand>
+	public ValueTask ExecuteAsync(RegisterCommand command)
 	{
-		private readonly ISessionRepository m_Repository;
-
-		public RegisterSessionService(ISessionRepository repository)
-		{
-			m_Repository = repository ?? throw new ArgumentNullException(nameof(repository));
-		}
-
-		public ValueTask ExecuteAsync(RegisterCommand command)
-		{
-			return m_Repository.RegisterSessionAsync(
-				new Registration(command.SessionId, command.ConnectorId, command.Name));
-		}
+		return repository.RegisterSessionAsync(
+			new Registration(command.SessionId, command.ConnectorId, command.Name));
 	}
 }

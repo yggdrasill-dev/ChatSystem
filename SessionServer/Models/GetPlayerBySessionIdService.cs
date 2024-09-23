@@ -1,21 +1,12 @@
-﻿using System;
-using System.Threading.Tasks;
+﻿using System.Threading.Tasks;
 using Common;
 
-namespace SessionServer.Models
+namespace SessionServer.Models;
+
+public class GetPlayerBySessionIdService(ISessionRepository sessionRepository) : IGetService<GetPlayerBySessionIdQuery, Registration?>
 {
-	public class GetPlayerBySessionIdService : IGetService<GetPlayerBySessionIdQuery, Registration?>
+	public ValueTask<Registration?> GetAsync(GetPlayerBySessionIdQuery query)
 	{
-		private readonly ISessionRepository m_SessionRepository;
-
-		public GetPlayerBySessionIdService(ISessionRepository sessionRepository)
-		{
-			m_SessionRepository = sessionRepository ?? throw new ArgumentNullException(nameof(sessionRepository));
-		}
-
-		public ValueTask<Registration?> GetAsync(GetPlayerBySessionIdQuery query)
-		{
-			return m_SessionRepository.GetRegistrationAsync(query.SessionId);
-		}
+		return sessionRepository.GetRegistrationAsync(query.SessionId);
 	}
 }

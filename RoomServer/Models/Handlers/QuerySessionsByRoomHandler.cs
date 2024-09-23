@@ -1,5 +1,4 @@
-﻿using System;
-using System.Linq;
+﻿using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Chat.Protos;
@@ -7,53 +6,41 @@ using Common;
 using Google.Protobuf;
 using NATS.Client;
 
-namespace RoomServer.Models.Handlers
+namespace RoomServer.Models.Handlers;
+
+public class QuerySessionsByRoomHandler(
+	IMessageQueueService messageQueueService,
+	IQueryService<RoomSessionsQuery, string> roomSessionsService,
+	IQueryService<PlayerInfoQuery, PlayerInfo> playerInfoService) : IMessageHandler
 {
-	public class QuerySessionsByRoomHandler : IMessageHandler
+	public async ValueTask HandleAsync(Msg msg, CancellationToken cancellationToken)
 	{
-		private readonly IMessageQueueService m_MessageQueueService;
-		private readonly IQueryService<RoomSessionsQuery, string> m_RoomSessionsService;
-		private readonly IQueryService<PlayerInfoQuery, PlayerInfo> m_PlayerInfoService;
+		var request = RoomSessionsRequest.Parser.ParseFrom(msg.Data);
 
-		public QuerySessionsByRoomHandler(
-			IMessageQueueService messageQueueService,
-			IQueryService<RoomSessionsQuery, string> roomSessionsService,
-			IQueryService<PlayerInfoQuery, PlayerInfo> playerInfoService)
-		{
-			m_MessageQueueService = messageQueueService ?? throw new ArgumentNullException(nameof(messageQueueService));
-			m_RoomSessionsService = roomSessionsService ?? throw new ArgumentNullException(nameof(roomSessionsService));
-			m_PlayerInfoService = playerInfoService ?? throw new ArgumentNullException(nameof(playerInfoService));
-		}
-
-		public async ValueTask HandleAsync(Msg msg, CancellationToken cancellationToken)
-		{
-			var request = RoomSessionsRequest.Parser.ParseFrom(msg.Data);
-
-			var sessionIds = m_RoomSessionsService
-				.QueryAsync(new RoomSessionsQuery
-				{
-					Room = request.Room
-				})
-				.ToEnumerable()
-				.ToArray();
-
-			var allPlayers = m_PlayerInfoService.QueryAsync(new PlayerInfoQuery
+		var sessionIds = roomSessionsService
+			.QueryAsync(new RoomSessionsQuery
 			{
-				SessionIds = sessionIds
-			});
+				Room = request.Room
+			})
+			.ToEnumerable()
+			.ToArray();
 
-			var response = new RoomSessionsResponse();
+		var allPlayers = playerInfoService.QueryAsync(new PlayerInfoQuery
+		{
+			SessionIds = sessionIds
+		});
 
-			response.Players.AddRange(allPlayers
-				.Select(player => new Chat.Protos.PlayerInfo
-				{
-					SessionId = player.SessionId,
-					ConnectorId = player.ConnectorId,
-					Name = player.Name
-				})
-				.ToEnumerable());
+		var response = new RoomSessionsResponse();
 
-			await m_MessageQueueService.PublishAsync(msg.Reply, response.ToByteArray());
-		}
+		response.Players.AddRange(allPlayers
+			.Select(player => new Chat.Protos.PlayerInfo
+			{
+				SessionId = player.SessionId,
+				ConnectorId = player.ConnectorId,
+				Name = player.Name
+			})
+			.ToEnumerable());
+
+		await messageQueueService.PublishAsync(msg.Reply, response.ToByteArray());
 	}
 }

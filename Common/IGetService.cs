@@ -1,9 +1,8 @@
 ﻿using System.Threading.Tasks;
 
-namespace Common
+namespace Common;
+
+public interface IGetService<TQuery, TResult>
 {
-	public interface IGetService<TQuery, TResult>
-	{
-		ValueTask<TResult> GetAsync(TQuery query);
-	}
+	ValueTask<TResult> GetAsync(TQuery query);
 }

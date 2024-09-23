@@ -2,20 +2,12 @@
 using System.Threading.Tasks;
 using Common;
 
-namespace SessionServer.Models
+namespace SessionServer.Models;
+
+public class UnregisterSessionCommandService(ISessionRepository sessionRepository) : ICommandService<UnregisterSessionCommand>
 {
-	public class UnregisterSessionCommandService : ICommandService<UnregisterSessionCommand>
+	public ValueTask ExecuteAsync(UnregisterSessionCommand command)
 	{
-		private readonly ISessionRepository m_SessionRepository;
-
-		public UnregisterSessionCommandService(ISessionRepository sessionRepository)
-		{
-			m_SessionRepository = sessionRepository ?? throw new ArgumentNullException(nameof(sessionRepository));
-		}
-
-		public ValueTask ExecuteAsync(UnregisterSessionCommand command)
-		{
-			return m_SessionRepository.UnregisterSessionBySessionIdAsync(command.SessionId);
-		}
+		return sessionRepository.UnregisterSessionBySessionIdAsync(command.SessionId);
 	}
 }

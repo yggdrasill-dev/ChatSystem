@@ -1,32 +1,23 @@
-﻿using System;
-using System.Threading.Tasks;
+﻿using System.Threading.Tasks;
 using Chat.Protos;
 using Common;
 using Google.Protobuf;
 
-namespace ChatConnector.Models
+namespace ChatConnector.Models;
+
+public class RegisterSessionCommandService(IMessageQueueService messageQueueService) : ICommandService<RegisterSessionCommand>
 {
-	public class RegisterSessionCommandService : ICommandService<RegisterSessionCommand>
+	public async ValueTask ExecuteAsync(RegisterSessionCommand command)
 	{
-		private readonly IMessageQueueService m_MessageQueueService;
-
-		public RegisterSessionCommandService(IMessageQueueService messageQueueService)
+		var loginInfo = new RegisterRequest
 		{
-			m_MessageQueueService = messageQueueService ?? throw new ArgumentNullException(nameof(messageQueueService));
-		}
+			SessionId = command.SessionId,
+			ConnectorId = command.ConnectorId,
+			Name = command.Name
+		};
 
-		public async ValueTask ExecuteAsync(RegisterSessionCommand command)
-		{
-			var loginInfo = new RegisterRequest
-			{
-				SessionId = command.SessionId,
-				ConnectorId = command.ConnectorId,
-				Name = command.Name
-			};
-
-			await m_MessageQueueService.RequestAsync(
-				"session.register",
-				loginInfo.ToByteArray()).ConfigureAwait(false);
-		}
+		await messageQueueService.RequestAsync(
+			"session.register",
+			loginInfo.ToByteArray()).ConfigureAwait(false);
 	}
 }

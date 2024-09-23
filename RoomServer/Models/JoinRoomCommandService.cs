@@ -1,21 +1,10 @@
-﻿using System;
-using System.Threading.Tasks;
+﻿using System.Threading.Tasks;
 using Common;
 
-namespace RoomServer.Models
+namespace RoomServer.Models;
+
+public class JoinRoomCommandService(IRoomRepository roomRepository) : ICommandService<JoinRoomCommand>
 {
-	public class JoinRoomCommandService : ICommandService<JoinRoomCommand>
-	{
-		private readonly IRoomRepository m_RoomRepository;
-
-		public JoinRoomCommandService(IRoomRepository roomRepository)
-		{
-			m_RoomRepository = roomRepository ?? throw new ArgumentNullException(nameof(roomRepository));
-		}
-
-		public ValueTask ExecuteAsync(JoinRoomCommand command)
-		{
-			return m_RoomRepository.JoinRoomAsync(command.SessionId, command.Room, command.Password);
-		}
-	}
+	public ValueTask ExecuteAsync(JoinRoomCommand command)
+		=> roomRepository.JoinRoomAsync(command.SessionId, command.Room, command.Password);
 }

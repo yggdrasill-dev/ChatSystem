@@ -6,51 +6,39 @@ using Common;
 using Google.Protobuf;
 using NATS.Client;
 
-namespace SessionServer.Models.Handlers
+namespace SessionServer.Models.Handlers;
+
+public class GetSessionHandler(
+	IMessageQueueService messageQueueService,
+	IGetService<GetPlayerBySessionIdQuery, Registration> playerService) : IMessageHandler
 {
-	public class GetSessionHandler : IMessageHandler
+	public async ValueTask HandleAsync(Msg msg, CancellationToken cancellationToken)
 	{
-		private readonly IMessageQueueService m_MessageQueueService;
-		private readonly IGetService<GetPlayerBySessionIdQuery, Registration> m_PlayerService;
+		var query = GetPlayerRequest.Parser.ParseFrom(msg.Data);
 
-		public GetSessionHandler(
-			IMessageQueueService messageQueueService,
-			IGetService<GetPlayerBySessionIdQuery, Registration> playerService)
+		var playerReg = await playerService.GetAsync(new GetPlayerBySessionIdQuery
 		{
-			m_MessageQueueService = messageQueueService ?? throw new ArgumentNullException(nameof(messageQueueService));
-			m_PlayerService = playerService ?? throw new ArgumentNullException(nameof(playerService));
+			SessionId = query.SessionId
+		}).ConfigureAwait(false);
+
+		var reply = new GetPlayerResponse();
+
+		if (playerReg != null)
+		{
+			reply.Player = new PlayerInfo
+			{
+				SessionId = playerReg.SessionId,
+				ConnectorId = playerReg.ConnectorId,
+				Name = playerReg.Name
+			};
+
+			await messageQueueService.PublishAsync(msg.Reply, reply.ToByteArray()).ConfigureAwait(false);
 		}
-
-		public async ValueTask HandleAsync(Msg msg, CancellationToken cancellationToken)
+		else
 		{
-			var query = GetPlayerRequest.Parser.ParseFrom(msg.Data);
+			reply.Player = null;
 
-			var playerReg = await m_PlayerService.GetAsync(new GetPlayerBySessionIdQuery
-			{
-				SessionId = query.SessionId
-			}).ConfigureAwait(false);
-
-
-			var reply = new GetPlayerResponse();
-
-			if (playerReg != null)
-			{
-
-				reply.Player = new PlayerInfo
-				{
-					SessionId = playerReg.SessionId,
-					ConnectorId = playerReg.ConnectorId,
-					Name = playerReg.Name
-				};
-
-				await m_MessageQueueService.PublishAsync(msg.Reply, reply.ToByteArray()).ConfigureAwait(false);
-			}
-			else
-			{
-				reply.Player = null;
-
-				await m_MessageQueueService.PublishAsync(msg.Reply, reply.ToByteArray()).ConfigureAwait(false);
-			}
+			await messageQueueService.PublishAsync(msg.Reply, reply.ToByteArray()).ConfigureAwait(false);
 		}
 	}
 }

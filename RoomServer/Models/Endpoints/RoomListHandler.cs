@@ -8,52 +8,40 @@ using Google.Protobuf;
 using Microsoft.Extensions.Logging;
 using NATS.Client;
 
-namespace RoomServer.Models.Endpoints
+namespace RoomServer.Models.Endpoints;
+
+public class RoomListHandler(
+	IMessageQueueService messageQueueService,
+	IQueryService<RoomListQuery, RoomInfo> listRoomService,
+	ILogger<RoomListHandler> logger) : IMessageHandler
 {
-	public class RoomListHandler : IMessageHandler
+	public async ValueTask HandleAsync(Msg msg, CancellationToken cancellationToken)
 	{
-		private readonly IMessageQueueService m_MessageQueueService;
-		private readonly IQueryService<RoomListQuery, RoomInfo> m_ListRoomService;
-		private readonly ILogger<RoomListHandler> m_Logger;
+		logger.LogInformation($"RoomList received.");
 
-		public RoomListHandler(
-			IMessageQueueService messageQueueService,
-			IQueryService<RoomListQuery, RoomInfo> listRoomService,
-			ILogger<RoomListHandler> logger)
-		{
-			m_MessageQueueService = messageQueueService ?? throw new ArgumentNullException(nameof(messageQueueService));
-			m_ListRoomService = listRoomService ?? throw new ArgumentNullException(nameof(listRoomService));
-			m_Logger = logger ?? throw new ArgumentNullException(nameof(logger));
-		}
+		var packet = QueuePacket.Parser.ParseFrom(msg.Data);
 
-		public async ValueTask HandleAsync(Msg msg, CancellationToken cancellationToken)
-		{
-			m_Logger.LogInformation($"RoomList received.");
+		var rooms = listRoomService.QueryAsync(new RoomListQuery());
 
-			var packet = QueuePacket.Parser.ParseFrom(msg.Data);
+		var response = new RoomList();
 
-			var rooms = m_ListRoomService.QueryAsync(new RoomListQuery());
-
-			var response = new RoomList();
-
-			response.Rooms.AddRange(rooms
-				.Select(info => new Room
-				{
-					Name = info.Name,
-					HasPassword = info.HasPassword
-				}).ToEnumerable());
-
-			var sendMsg = new SendPacket
+		response.Rooms.AddRange(rooms
+			.Select(info => new Room
 			{
-				Subject = "chat.room.list"
-			};
+				Name = info.Name,
+				HasPassword = info.HasPassword
+			}).ToEnumerable());
 
-			sendMsg.SessionIds.Add(packet.SessionId);
-			sendMsg.Payload = response.ToByteString();
+		var sendMsg = new SendPacket
+		{
+			Subject = "chat.room.list"
+		};
 
-			await m_MessageQueueService
-				.PublishAsync("connect.send", sendMsg.ToByteArray())
-				.ConfigureAwait(false);
-		}
+		sendMsg.SessionIds.Add(packet.SessionId);
+		sendMsg.Payload = response.ToByteString();
+
+		await messageQueueService
+			.PublishAsync("connect.send", sendMsg.ToByteArray())
+			.ConfigureAwait(false);
 	}
 }

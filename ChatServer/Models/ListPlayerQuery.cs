@@ -1,7 +1,6 @@
-﻿namespace ChatServer.Models
+﻿namespace ChatServer.Models;
+
+public struct ListPlayerQuery
 {
-	public struct ListPlayerQuery
-	{
-		public string Room { get; set; }
-	}
+	public string Room { get; set; }
 }

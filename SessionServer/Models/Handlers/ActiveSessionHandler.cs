@@ -5,27 +5,19 @@ using Chat.Protos;
 using Common;
 using NATS.Client;
 
-namespace SessionServer.Models.Handlers
+namespace SessionServer.Models.Handlers;
+
+public class ActiveSessionHandler(ISessionRepository sessionRepository) : IMessageHandler
 {
-	public class ActiveSessionHandler : IMessageHandler
+	public async ValueTask HandleAsync(Msg msg, CancellationToken cancellationToken)
 	{
-		private readonly ISessionRepository m_SessionRepository;
+		var request = ActiveSessionsRequest.Parser.ParseFrom(msg.Data);
 
-		public ActiveSessionHandler(ISessionRepository sessionRepository)
-		{
-			m_SessionRepository = sessionRepository;
-		}
-
-		public async ValueTask HandleAsync(Msg msg, CancellationToken cancellationToken)
-		{
-			var request = ActiveSessionsRequest.Parser.ParseFrom(msg.Data);
-
-			await Task.WhenAll(
-				request.SessionIds.Select(
-					sessionId => m_SessionRepository
-						.ActiveSessionAsync(sessionId)
-						.AsTask()))
-				.ConfigureAwait(false);
-		}
+		await Task.WhenAll(
+			request.SessionIds.Select(
+				sessionId => sessionRepository
+					.ActiveSessionAsync(sessionId)
+					.AsTask()))
+			.ConfigureAwait(false);
 	}
 }

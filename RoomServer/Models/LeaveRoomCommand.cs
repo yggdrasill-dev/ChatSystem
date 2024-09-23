@@ -1,9 +1,8 @@
-﻿namespace RoomServer.Models
-{
-	public struct LeaveRoomCommand
-	{
-		public string SessionId { get; set; }
+﻿namespace RoomServer.Models;
 
-		public string Room { get; set; }
-	}
+public struct LeaveRoomCommand
+{
+	public string SessionId { get; set; }
+
+	public string Room { get; set; }
 }

@@ -3,14 +3,13 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 
-namespace Common.Configuration
+namespace Common.Configuration;
+
+internal interface ISubscribeRegistration
 {
-	internal interface ISubscribeRegistration
-	{
-		ValueTask<IDisposable> SubscribeAsync(
-		   IMessageQueueService messageQueueService,
-		   IServiceProvider serviceProvider,
-		   ILogger logger,
-		   CancellationToken cancellationToken);
-	}
+	ValueTask<IDisposable> SubscribeAsync(
+	   IMessageQueueService messageQueueService,
+	   IServiceProvider serviceProvider,
+	   ILogger logger,
+	   CancellationToken cancellationToken);
 }

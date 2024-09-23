@@ -1,7 +1,6 @@
-﻿namespace RoomServer.Models
+﻿namespace RoomServer.Models;
+
+public struct PlayerInfoQuery
 {
-	public struct PlayerInfoQuery
-	{
-		public string[] SessionIds { get; set; }
-	}
+	public string[] SessionIds { get; set; }
 }

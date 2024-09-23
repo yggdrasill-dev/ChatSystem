@@ -6,44 +6,30 @@ using Common.Configuration;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
-namespace Common
+namespace Common;
+
+internal class MessageQueueBackground(
+	IMessageQueueService messageQueueService,
+	IServiceProvider serviceProvider,
+	IEnumerable<ISubscribeRegistration> subscribes,
+	ILogger<MessageQueueBackground> logger) : BackgroundService
 {
-	internal class MessageQueueBackground : BackgroundService
+	protected override async Task ExecuteAsync(CancellationToken stoppingToken)
 	{
-		private readonly IMessageQueueService m_MessageQueueService;
-		private readonly IServiceProvider m_ServiceProvider;
-		private readonly IEnumerable<ISubscribeRegistration> m_Subscribes;
-		private readonly ILogger<MessageQueueBackground> m_Logger;
+		var subscriptions = new List<IDisposable>();
 
-		public MessageQueueBackground(
-			IMessageQueueService messageQueueService,
-			IServiceProvider serviceProvider,
-			IEnumerable<ISubscribeRegistration> subscribes,
-			ILogger<MessageQueueBackground> logger)
+		foreach (var registration in subscribes)
+			subscriptions.Add(
+				await registration.SubscribeAsync(
+					messageQueueService,
+					serviceProvider,
+					logger,
+					stoppingToken).ConfigureAwait(false));
+
+		stoppingToken.Register(() =>
 		{
-			m_MessageQueueService = messageQueueService ?? throw new ArgumentNullException(nameof(messageQueueService));
-			m_ServiceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
-			m_Subscribes = subscribes ?? throw new ArgumentNullException(nameof(subscribes));
-			m_Logger = logger ?? throw new ArgumentNullException(nameof(logger));
-		}
-
-		protected override async Task ExecuteAsync(CancellationToken stoppingToken)
-		{
-			var subscriptions = new List<IDisposable>();
-
-			foreach (var registration in m_Subscribes)
-				subscriptions.Add(
-					await registration.SubscribeAsync(
-						m_MessageQueueService,
-						m_ServiceProvider,
-						m_Logger,
-						stoppingToken).ConfigureAwait(false));
-
-			stoppingToken.Register(() =>
-			{
-				foreach (var sub in subscriptions)
-					sub.Dispose();
-			});
-		}
+			foreach (var sub in subscriptions)
+				sub.Dispose();
+		});
 	}
 }

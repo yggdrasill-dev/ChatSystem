@@ -6,50 +6,46 @@ using RoomServer.Models;
 using RoomServer.Models.Endpoints;
 using RoomServer.Models.Handlers;
 
-namespace RoomServer
+namespace RoomServer;
+
+internal class Program
 {
-	internal class Program
-	{
-		public static IHostBuilder CreateHostBuilder(string[] args) =>
-			Host.CreateDefaultBuilder(args)
-				.ConfigureServices(services =>
+	public static IHostBuilder CreateHostBuilder(string[] args) =>
+		Host.CreateDefaultBuilder(args)
+			.ConfigureServices(services => services
+				.AddMessageQueue(config =>
 				{
-					services
-						.AddMessageQueue(config =>
-						{
-							config
-								.AddHandler<JoinRoomHandler>("room.join", "room.join")
-								.AddHandler<LeaveRoomHandler>("room.leave", "room.leave")
-								.AddHandler<QuerySessionsByRoomHandler>("room.query", "room.query")
-								.AddHandler<PlayerListHandler>("room.player.list", "room.player.list")
-								.AddHandler<RoomListHandler>("room.list", "room.list")
-								.AddHandler<GetRoomBySessionIdHandler>("room.session.get", "room.session.get");
+					config
+						.AddHandler<JoinRoomHandler>("room.join", "room.join")
+						.AddHandler<LeaveRoomHandler>("room.leave", "room.leave")
+						.AddHandler<QuerySessionsByRoomHandler>("room.query", "room.query")
+						.AddHandler<PlayerListHandler>("room.player.list", "room.player.list")
+						.AddHandler<RoomListHandler>("room.list", "room.list")
+						.AddHandler<GetRoomBySessionIdHandler>("room.session.get", "room.session.get");
 
-							config.ConfigQueueOptions((options, sp) =>
-							{
-								var configuration = sp.GetRequiredService<IConfiguration>();
+					config.ConfigQueueOptions((options, sp) =>
+					{
+						var configuration = sp.GetRequiredService<IConfiguration>();
 
-								configuration.GetSection("MessageQueue").Bind(options);
-							});
-						})
-						.AddSingleton<RedisConnectionFactory>(sp =>
-						{
-							var config = sp.GetRequiredService<IConfiguration>();
+						configuration.GetSection("MessageQueue").Bind(options);
+					});
+				})
+				.AddSingleton(sp =>
+				{
+					var config = sp.GetRequiredService<IConfiguration>();
 
-							return new RedisConnectionFactory(config.GetValue<string>("Redis:ConnectionString"));
-						})
-						.AddSingleton<IRoomRepository, RoomRepository>()
-						.AddTransient<ICommandService<JoinRoomCommand>, JoinRoomCommandService>()
-						.AddTransient<ICommandService<LeaveRoomCommand>, LeaveRoomCommandService>()
-						.AddTransient<IQueryService<RoomSessionsQuery, string>, RoomSessionsQueryService>()
-						.AddTransient<IQueryService<RoomListQuery, RoomInfo>, RoomListQueryService>()
-						.AddTransient<IQueryService<PlayerInfoQuery, PlayerInfo>, PlayerInfoQueryService>()
-						.AddTransient<IGetService<GetRoomBySessionIdQuery, string?>, GetRoomBySessionIdQueryService>();
-				});
+					return new RedisConnectionFactory(config.GetValue<string>("Redis:ConnectionString")!);
+				})
+				.AddSingleton<IRoomRepository, RoomRepository>()
+				.AddTransient<ICommandService<JoinRoomCommand>, JoinRoomCommandService>()
+				.AddTransient<ICommandService<LeaveRoomCommand>, LeaveRoomCommandService>()
+				.AddTransient<IQueryService<RoomSessionsQuery, string>, RoomSessionsQueryService>()
+				.AddTransient<IQueryService<RoomListQuery, RoomInfo>, RoomListQueryService>()
+				.AddTransient<IQueryService<PlayerInfoQuery, PlayerInfo>, PlayerInfoQueryService>()
+				.AddTransient<IGetService<GetRoomBySessionIdQuery, string?>, GetRoomBySessionIdQueryService>());
 
-		private static void Main(string[] args)
-		{
-			CreateHostBuilder(args).Build().Run();
-		}
+	private static void Main(string[] args)
+	{
+		CreateHostBuilder(args).Build().Run();
 	}
 }

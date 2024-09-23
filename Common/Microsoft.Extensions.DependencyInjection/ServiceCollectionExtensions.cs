@@ -4,35 +4,34 @@ using Common.Configuration;
 using Microsoft.Extensions.Options;
 using NATS.Client;
 
-namespace Microsoft.Extensions.DependencyInjection
+namespace Microsoft.Extensions.DependencyInjection;
+
+public static class ServiceCollectionExtensions
 {
-	public static class ServiceCollectionExtensions
+	public static IServiceCollection AddMessageQueue(
+		this IServiceCollection services,
+		Action<MessageQueueConfiguration> configure)
 	{
-		public static IServiceCollection AddMessageQueue(
-			this IServiceCollection services,
-			Action<MessageQueueConfiguration> configure)
-		{
-			var configuration = new MessageQueueConfiguration(services);
+		var configuration = new MessageQueueConfiguration(services);
 
-			configure(configuration);
+		configure(configuration);
 
-			return services
-				.AddSingleton<ConnectionFactory>()
-				.AddSingleton<IMessageQueueService>(sp =>
-				{
-					var connectionFactory = sp.GetRequiredService<ConnectionFactory>();
-					var queueOptions = sp.GetRequiredService<IOptions<MessageQueueOptions>>().Value;
+		return services
+			.AddSingleton<ConnectionFactory>()
+			.AddSingleton<IMessageQueueService>(sp =>
+			{
+				var connectionFactory = sp.GetRequiredService<ConnectionFactory>();
+				var queueOptions = sp.GetRequiredService<IOptions<MessageQueueOptions>>().Value;
 
-					var options = ConnectionFactory.GetDefaultOptions();
+				var options = ConnectionFactory.GetDefaultOptions();
 
-					options.Url = queueOptions.Url;
+				options.Url = queueOptions.Url;
 
-					return ActivatorUtilities.CreateInstance<MessageQueueService>(sp, connectionFactory.CreateConnection(options));
-				})
-				.AddHostedService<MessageQueueBackground>()
-				.AddOptions<MessageQueueOptions>()
-				.Configure(configuration.OptionsConfigure)
-				.Services;
-		}
+				return ActivatorUtilities.CreateInstance<MessageQueueService>(sp, connectionFactory.CreateConnection(options));
+			})
+			.AddHostedService<MessageQueueBackground>()
+			.AddOptions<MessageQueueOptions>()
+			.Configure(configuration.OptionsConfigure)
+			.Services;
 	}
 }

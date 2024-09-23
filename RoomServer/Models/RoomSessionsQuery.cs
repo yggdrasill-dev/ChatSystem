@@ -1,7 +1,6 @@
-﻿namespace RoomServer.Models
+﻿namespace RoomServer.Models;
+
+public struct RoomSessionsQuery
 {
-	public struct RoomSessionsQuery
-	{
-		public string Room { get; set; }
-	}
+	public string Room { get; set; }
 }

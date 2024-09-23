@@ -1,15 +1,14 @@
 ﻿using System.Threading.Tasks;
 
-namespace SessionServer.Models
+namespace SessionServer.Models;
+
+public interface ISessionRepository
 {
-	public interface ISessionRepository
-	{
-		ValueTask<Registration?> GetRegistrationAsync(string sessionId);
+	ValueTask<Registration?> GetRegistrationAsync(string sessionId);
 
-		ValueTask RegisterSessionAsync(Registration reg);
+	ValueTask RegisterSessionAsync(Registration reg);
 
-		ValueTask ActiveSessionAsync(string sessionId);
+	ValueTask ActiveSessionAsync(string sessionId);
 
-		ValueTask UnregisterSessionBySessionIdAsync(string sessionId);
-	}
+	ValueTask UnregisterSessionBySessionIdAsync(string sessionId);
 }

@@ -1,31 +1,22 @@
-﻿using System;
-using System.Threading.Tasks;
-using Common;
+﻿using System.Threading.Tasks;
 using Chat.Protos;
+using Common;
 using Google.Protobuf;
 
-namespace ChatConnector.Models
+namespace ChatConnector.Models;
+
+public class LeaveRoomCommandService(IMessageQueueService messageQueueService) : ICommandService<LeaveRoomCommand>
 {
-	public class LeaveRoomCommandService : ICommandService<LeaveRoomCommand>
+	public async ValueTask ExecuteAsync(LeaveRoomCommand command)
 	{
-		private readonly IMessageQueueService m_MessageQueueService;
-
-		public LeaveRoomCommandService(IMessageQueueService messageQueueService)
+		var request = new LeaveRoomRequest
 		{
-			m_MessageQueueService = messageQueueService ?? throw new ArgumentNullException(nameof(messageQueueService));
-		}
+			SessionId = command.SessionId,
+			Room = command.Room ?? string.Empty
+		};
 
-		public async ValueTask ExecuteAsync(LeaveRoomCommand command)
-		{
-			var request = new LeaveRoomRequest
-			{
-				SessionId = command.SessionId,
-				Room = command.Room ?? string.Empty
-			};
-
-			await m_MessageQueueService
-				.RequestAsync("room.leave", request.ToByteArray())
-				.ConfigureAwait(false);
-		}
+		await messageQueueService
+			.RequestAsync("room.leave", request.ToByteArray())
+			.ConfigureAwait(false);
 	}
 }

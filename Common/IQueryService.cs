@@ -1,9 +1,8 @@
 ﻿using System.Collections.Generic;
 
-namespace Common
+namespace Common;
+
+public interface IQueryService<TQuery, TResult>
 {
-	public interface IQueryService<TQuery, TResult>
-	{
-		IAsyncEnumerable<TResult> QueryAsync(TQuery query);
-	}
+	IAsyncEnumerable<TResult> QueryAsync(TQuery query);
 }

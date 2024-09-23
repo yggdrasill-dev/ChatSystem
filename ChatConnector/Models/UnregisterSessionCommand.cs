@@ -3,10 +3,9 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 
-namespace ChatConnector.Models
+namespace ChatConnector.Models;
+
+public struct UnregisterSessionCommand
 {
-	public struct UnregisterSessionCommand
-	{
-		public string SessionId { get; set; }
-	}
+	public string SessionId { get; set; }
 }

@@ -8,58 +8,44 @@ using Google.Protobuf;
 using Microsoft.Extensions.Logging;
 using NATS.Client;
 
-namespace RoomServer.Models.Handlers
+namespace RoomServer.Models.Handlers;
+
+public class LeaveRoomHandler(
+	IMessageQueueService messageQueueService,
+	ICommandService<LeaveRoomCommand> leaveRoomService,
+	IQueryService<RoomSessionsQuery, string> listRoomSessionsService,
+	ILogger<LeaveRoomHandler> logger) : IMessageHandler
 {
-	public class LeaveRoomHandler : IMessageHandler
+	public async ValueTask HandleAsync(Msg msg, CancellationToken cancellationToken)
 	{
-		private readonly IMessageQueueService m_MessageQueueService;
-		private readonly ICommandService<LeaveRoomCommand> m_LeaveRoomService;
-		private readonly IQueryService<RoomSessionsQuery, string> m_ListRoomSessionsService;
-		private readonly ILogger<LeaveRoomHandler> m_Logger;
+		var request = LeaveRoomRequest.Parser.ParseFrom(msg.Data);
 
-		public LeaveRoomHandler(
-			IMessageQueueService messageQueueService,
-			ICommandService<LeaveRoomCommand> leaveRoomService,
-			IQueryService<RoomSessionsQuery, string> listRoomSessionsService,
-			ILogger<LeaveRoomHandler> logger)
+		await leaveRoomService.ExecuteAsync(new LeaveRoomCommand
 		{
-			m_MessageQueueService = messageQueueService ?? throw new ArgumentNullException(nameof(messageQueueService));
-			m_LeaveRoomService = leaveRoomService ?? throw new ArgumentNullException(nameof(leaveRoomService));
-			m_ListRoomSessionsService = listRoomSessionsService ?? throw new ArgumentNullException(nameof(listRoomSessionsService));
-			m_Logger = logger ?? throw new ArgumentNullException(nameof(logger));
-		}
+			SessionId = request.SessionId,
+			Room = request.Room
+		}).ConfigureAwait(false);
 
-		public async ValueTask HandleAsync(Msg msg, CancellationToken cancellationToken)
-		{
-			var request = LeaveRoomRequest.Parser.ParseFrom(msg.Data);
-
-			await m_LeaveRoomService.ExecuteAsync(new LeaveRoomCommand
+		var roomSessionIds = listRoomSessionsService
+			.QueryAsync(new RoomSessionsQuery
 			{
-				SessionId = request.SessionId,
 				Room = request.Room
-			}).ConfigureAwait(false);
+			})
+			.ToEnumerable();
 
-			var roomSessionIds = m_ListRoomSessionsService
-				.QueryAsync(new RoomSessionsQuery
-				{
-					Room = request.Room
-				})
-				.ToEnumerable();
+		var refrashPacket = new SendPacket
+		{
+			Subject = "room.player.refrash"
+		};
 
-			var refrashPacket = new SendPacket
-			{
-				Subject = "room.player.refrash"
-			};
+		refrashPacket.SessionIds.AddRange(roomSessionIds);
 
-			refrashPacket.SessionIds.AddRange(roomSessionIds);
+		await messageQueueService.PublishAsync(
+			"connect.send",
+			refrashPacket.ToByteArray()).ConfigureAwait(false);
 
-			await m_MessageQueueService.PublishAsync(
-				"connect.send",
-				refrashPacket.ToByteArray()).ConfigureAwait(false);
+		await messageQueueService.PublishAsync(msg.Reply, []).ConfigureAwait(false);
 
-			await m_MessageQueueService.PublishAsync(msg.Reply, Array.Empty<byte>()).ConfigureAwait(false);
-
-			m_Logger.LogInformation($"({request.SessionId}, {request.Room}) leaved.");
-		}
+		logger.LogInformation("({SessionId}, {Room}) leaved.", request.SessionId, request.Room);
 	}
 }

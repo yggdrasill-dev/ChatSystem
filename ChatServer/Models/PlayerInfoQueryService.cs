@@ -1,38 +1,29 @@
-﻿using System;
-using System.Threading.Tasks;
+﻿using System.Threading.Tasks;
 using Chat.Protos;
 using Common;
 using Google.Protobuf;
 
-namespace ChatServer.Models
+namespace ChatServer.Models;
+
+public class PlayerInfoQueryService(
+	IMessageQueueService messageQueueService)
+	: IGetService<PlayerInfoQuery, PlayerInfo?>
 {
-	public class PlayerInfoQueryService : IGetService<PlayerInfoQuery, PlayerInfo?>
+	public async ValueTask<PlayerInfo?> GetAsync(PlayerInfoQuery query)
 	{
-		private readonly IMessageQueueService m_MessageQueueService;
-
-		public PlayerInfoQueryService(
-			IMessageQueueService messageQueueService)
+		var getPlayerQuery = new GetPlayerRequest
 		{
-			m_MessageQueueService = messageQueueService ?? throw new ArgumentNullException(nameof(messageQueueService));
-		}
+			SessionId = query.SessionId
+		};
 
-		public async ValueTask<PlayerInfo?> GetAsync(PlayerInfoQuery query)
-		{
-			var getPlayerQuery = new GetPlayerRequest
-			{
-				SessionId = query.SessionId
-			};
+		var queryReply = await messageQueueService
+			.RequestAsync("session.get", getPlayerQuery.ToByteArray())
+			.ConfigureAwait(false);
 
-			var queryReply = await m_MessageQueueService
-				.RequestAsync("session.get", getPlayerQuery.ToByteArray())
-				.ConfigureAwait(false);
+		var data = GetPlayerResponse.Parser.ParseFrom(queryReply.Data);
 
-			var data = GetPlayerResponse.Parser.ParseFrom(queryReply.Data);
-
-			if (data.Player != null)
-				return new PlayerInfo(data.Player.SessionId, data.Player.ConnectorId, data.Player.Name);
-			else
-				return null;
-		}
+		return data.Player != null
+			? new PlayerInfo(data.Player.SessionId, data.Player.ConnectorId, data.Player.Name)
+			: null;
 	}
 }

@@ -1,30 +1,21 @@
-﻿using System;
-using System.Threading.Tasks;
+﻿using System.Threading.Tasks;
 using Chat.Protos;
 using Common;
 using Google.Protobuf;
 
-namespace ChatConnector.Models
+namespace ChatConnector.Models;
+
+public class UnregisterSessionCommandService(IMessageQueueService messageQueueService) : ICommandService<UnregisterSessionCommand>
 {
-	public class UnregisterSessionCommandService : ICommandService<UnregisterSessionCommand>
+	public async ValueTask ExecuteAsync(UnregisterSessionCommand command)
 	{
-		private readonly IMessageQueueService m_MessageQueueService;
-
-		public UnregisterSessionCommandService(IMessageQueueService messageQueueService)
+		var loginInfo = new UnregisterRequest
 		{
-			m_MessageQueueService = messageQueueService ?? throw new ArgumentNullException(nameof(messageQueueService));
-		}
+			SessionId = command.SessionId
+		};
 
-		public async ValueTask ExecuteAsync(UnregisterSessionCommand command)
-		{
-			var loginInfo = new UnregisterRequest
-			{
-				SessionId = command.SessionId
-			};
-
-			await m_MessageQueueService.RequestAsync(
-				"session.unregister",
-				loginInfo.ToByteArray()).ConfigureAwait(false);
-		}
+		await messageQueueService.RequestAsync(
+			"session.unregister",
+			loginInfo.ToByteArray()).ConfigureAwait(false);
 	}
 }

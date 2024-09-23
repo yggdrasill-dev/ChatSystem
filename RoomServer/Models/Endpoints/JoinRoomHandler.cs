@@ -8,128 +8,113 @@ using Google.Protobuf;
 using Microsoft.Extensions.Logging;
 using NATS.Client;
 
-namespace RoomServer.Models.Endpoints
+namespace RoomServer.Models.Endpoints;
 
+public class JoinRoomHandler(
+	IMessageQueueService messageQueueService,
+	ICommandService<JoinRoomCommand> joinRoomService,
+	IQueryService<RoomSessionsQuery, string> listRoomSessionsService,
+	ILogger<JoinRoomHandler> logger) : IMessageHandler
 {
-	public class JoinRoomHandler : IMessageHandler
+	public async ValueTask HandleAsync(Msg msg, CancellationToken cancellationToken)
 	{
-		private readonly IMessageQueueService m_MessageQueueService;
-		private readonly ICommandService<JoinRoomCommand> m_JoinRoomService;
-		private readonly IQueryService<RoomSessionsQuery, string> m_ListRoomSessionsService;
-		private readonly ILogger<JoinRoomHandler> m_Logger;
+		var packet = QueuePacket.Parser.ParseFrom(msg.Data);
 
-		public JoinRoomHandler(
-			IMessageQueueService messageQueueService,
-			ICommandService<JoinRoomCommand> joinRoomService,
-			IQueryService<RoomSessionsQuery, string> listRoomSessionsService,
-			ILogger<JoinRoomHandler> logger)
+		var joinRoomData = JoinRoom.Parser.ParseFrom(packet.Payload);
+
+		var roomSessionIds = listRoomSessionsService
+			.QueryAsync(new RoomSessionsQuery
+			{
+				Room = joinRoomData.Room
+			})
+			.ToEnumerable()
+			.ToArray();
+
+		try
 		{
-			m_MessageQueueService = messageQueueService ?? throw new ArgumentNullException(nameof(messageQueueService));
-			m_JoinRoomService = joinRoomService ?? throw new ArgumentNullException(nameof(joinRoomService));
-			m_ListRoomSessionsService = listRoomSessionsService ?? throw new ArgumentNullException(nameof(listRoomSessionsService));
-			m_Logger = logger ?? throw new ArgumentNullException(nameof(logger));
+			await joinRoomService.ExecuteAsync(new JoinRoomCommand
+			{
+				SessionId = packet.SessionId,
+				Room = joinRoomData.Room,
+				Password = joinRoomData.Password
+			}).ConfigureAwait(false);
+
+			var response = new SendPacket
+			{
+				Subject = "room.join.reply"
+			};
+
+			response.SessionIds.Add(packet.SessionId);
+
+			var responseContent = new JoinRoomReply
+			{
+				Status = JoinRoomStatus.Accpet
+			};
+
+			response.Payload = responseContent.ToByteString();
+
+			await messageQueueService.PublishAsync(
+				"connect.send",
+				response.ToByteArray()).ConfigureAwait(false);
+
+			if (roomSessionIds.Length > 0)
+			{
+				var broadcast = new SendPacket
+				{
+					Subject = "chat.receive"
+				};
+
+				broadcast.SessionIds.AddRange(roomSessionIds);
+
+				var chatMessage = new ChatMessage
+				{
+					Scope = Scope.System,
+					From = "System",
+					Message = $"New player joined!"
+				};
+
+				broadcast.Payload = chatMessage.ToByteString();
+
+				await messageQueueService.PublishAsync(
+					"connect.send",
+					broadcast.ToByteArray()).ConfigureAwait(false);
+
+				var refrashPacket = new SendPacket
+				{
+					Subject = "room.player.refrash"
+				};
+
+				refrashPacket.SessionIds.AddRange(roomSessionIds);
+
+				await messageQueueService.PublishAsync(
+					"connect.send",
+					refrashPacket.ToByteArray()).ConfigureAwait(false);
+			}
+
+			logger.LogInformation("({SessionId}, {Room}) joined.", packet.SessionId, joinRoomData.Room);
 		}
-
-		public async ValueTask HandleAsync(Msg msg, CancellationToken cancellationToken)
+		catch (Exception ex)
 		{
-			var packet = QueuePacket.Parser.ParseFrom(msg.Data);
+			logger.LogError(ex, "");
 
-			var joinRoomData = JoinRoom.Parser.ParseFrom(packet.Payload);
-
-			var roomSessionIds = m_ListRoomSessionsService
-				.QueryAsync(new RoomSessionsQuery
-				{
-					Room = joinRoomData.Room
-				})
-				.ToEnumerable()
-				.ToArray();
-
-			try
+			var response = new SendPacket
 			{
-				await m_JoinRoomService.ExecuteAsync(new JoinRoomCommand
-				{
-					SessionId = packet.SessionId,
-					Room = joinRoomData.Room,
-					Password = joinRoomData.Password
-				}).ConfigureAwait(false);
+				Subject = "room.join.reply"
+			};
 
-				var response = new SendPacket
-				{
-					Subject = "room.join.reply"
-				};
+			response.SessionIds.Add(packet.SessionId);
 
-				response.SessionIds.Add(packet.SessionId);
-
-				var responseContent = new JoinRoomReply
-				{
-					Status = JoinRoomStatus.Accpet
-				};
-
-				response.Payload = responseContent.ToByteString();
-
-				await m_MessageQueueService.PublishAsync(
-					"connect.send",
-					response.ToByteArray()).ConfigureAwait(false);
-
-				if (roomSessionIds.Length > 0)
-				{
-					var broadcast = new SendPacket
-					{
-						Subject = "chat.receive"
-					};
-
-					broadcast.SessionIds.AddRange(roomSessionIds);
-
-					var chatMessage = new ChatMessage
-					{
-						Scope = Scope.System,
-						From = "System",
-						Message = $"New player joined!"
-					};
-
-					broadcast.Payload = chatMessage.ToByteString();
-
-					await m_MessageQueueService.PublishAsync(
-						"connect.send",
-						broadcast.ToByteArray()).ConfigureAwait(false);
-
-					var refrashPacket = new SendPacket
-					{
-						Subject = "room.player.refrash"
-					};
-
-					refrashPacket.SessionIds.AddRange(roomSessionIds);
-
-					await m_MessageQueueService.PublishAsync(
-						"connect.send",
-						refrashPacket.ToByteArray()).ConfigureAwait(false);
-				}
-
-				m_Logger.LogInformation($"({packet.SessionId}, {joinRoomData.Room}) joined.");
-			}
-			catch (Exception ex)
+			var responseContent = new JoinRoomReply
 			{
-				m_Logger.LogError(ex, string.Empty);
+				Status = JoinRoomStatus.Reject,
+				Reason = "進房失敗"
+			};
 
-				var response = new SendPacket
-				{
-					Subject = "room.join.reply"
-				};
+			response.Payload = responseContent.ToByteString();
 
-				response.SessionIds.Add(packet.SessionId);
-
-				var responseContent = new JoinRoomReply
-				{
-					Status = JoinRoomStatus.Reject,
-					Reason = "進房失敗"
-				};
-
-				response.Payload = responseContent.ToByteString();
-
-				await m_MessageQueueService.PublishAsync(
-					"connect.send",
-					response.ToByteArray()).ConfigureAwait(false);
-			}
+			await messageQueueService.PublishAsync(
+				"connect.send",
+				response.ToByteArray()).ConfigureAwait(false);
 		}
 	}
 }

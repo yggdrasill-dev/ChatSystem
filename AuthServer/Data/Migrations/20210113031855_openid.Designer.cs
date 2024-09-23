@@ -11,7 +11,7 @@ namespace AuthServer.Data.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
     [Migration("20210113031855_openid")]
-    partial class openid
+    partial class OpenId
     {
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {

@@ -4,26 +4,18 @@ using Chat.Protos;
 using Common;
 using Google.Protobuf;
 
-namespace ChatConnector.Models
+namespace ChatConnector.Models;
+
+public class SendQueueCommandService(IMessageQueueService messageQueueService) : ICommandService<SendQueueCommand>
 {
-	public class SendQueueCommandService : ICommandService<SendQueueCommand>
+	public ValueTask ExecuteAsync(SendQueueCommand command)
 	{
-		private readonly IMessageQueueService m_MessageQueueService;
-
-		public SendQueueCommandService(IMessageQueueService messageQueueService)
+		var packet = new QueuePacket
 		{
-			m_MessageQueueService = messageQueueService ?? throw new ArgumentNullException(nameof(messageQueueService));
-		}
+			SessionId = command.SessionId,
+			Payload = command.Payload
+		};
 
-		public ValueTask ExecuteAsync(SendQueueCommand command)
-		{
-			var packet = new QueuePacket
-			{
-				SessionId = command.SessionId,
-				Payload = command.Payload
-			};
-
-			return m_MessageQueueService.PublishAsync(command.Subject, packet.ToByteArray());
-		}
+		return messageQueueService.PublishAsync(command.Subject, packet.ToByteArray());
 	}
 }
