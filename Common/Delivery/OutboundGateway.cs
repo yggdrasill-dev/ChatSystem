@@ -1,10 +1,10 @@
+using Adaptare;
 using Chat.Protos;
 using Google.Protobuf;
-using NATS.Client.Core;
 
 namespace Common.Delivery;
 
-internal sealed class OutboundGateway(INatsConnection connection) : IOutboundGateway
+internal sealed class OutboundGateway(IMessageSender messageSender) : IOutboundGateway
 {
 	private const string DispatchSubject = "dispatch.deliver";
 
@@ -17,6 +17,6 @@ internal sealed class OutboundGateway(INatsConnection connection) : IOutboundGat
 		var request = new DeliverRequest { Subject = subject, Payload = payload };
 		request.ConnectionIds.AddRange(connectionIds);
 
-		return connection.PublishAsync(DispatchSubject, request.ToByteArray(), cancellationToken: cancellationToken);
+		return messageSender.PublishAsync(DispatchSubject, request.ToByteArray(), cancellationToken);
 	}
 }

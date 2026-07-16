@@ -8,7 +8,8 @@ public sealed class ConnectionHeartbeatService(
 	GatewayNodeId nodeId,
 	ConnectionRegistry registry,
 	IConnectionDirectory connectionDirectory,
-	ILogger<ConnectionHeartbeatService> logger) : BackgroundService
+	ILogger<ConnectionHeartbeatService> logger) 
+	: BackgroundService
 {
 	private static readonly TimeSpan _Interval = TimeSpan.FromSeconds(10);
 

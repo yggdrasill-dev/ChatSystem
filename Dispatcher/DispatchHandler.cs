@@ -1,43 +1,22 @@
+using Adaptare;
 using Chat.Protos;
 using Common.Connections;
 using Google.Protobuf;
-using NATS.Client.Core;
 
 namespace Dispatcher;
 
 // 訂閱 dispatch.deliver（掛 queue group，多複本互相分攤負載），
 // 查 ConnectionDirectory 依 NodeId 分組後，投遞到各 Gateway 節點專屬的 connect.deliver.{nodeId}。
-public sealed class DispatchWorker(
-	INatsConnection connection,
+public sealed class DispatchHandler(
 	IConnectionDirectory connectionDirectory,
-	ILogger<DispatchWorker> logger) : BackgroundService
+	IMessageSender messageSender,
+	ILogger<DispatchHandler> logger) : IMessageHandler<byte[]>
 {
-	private const string DispatchSubject = "dispatch.deliver";
-
-	protected override async Task ExecuteAsync(CancellationToken stoppingToken)
-	{
-		logger.LogInformation("Subscribing to {Subject} (queue group: {Group}).", DispatchSubject, DispatchSubject);
-
-		await foreach (var msg in connection.SubscribeAsync<byte[]>(
-			DispatchSubject,
-			queueGroup: DispatchSubject,
-			cancellationToken: stoppingToken))
-		{
-			if (msg.Data is null)
-				continue;
-
-			try
-			{
-				await HandleAsync(msg.Data, stoppingToken).ConfigureAwait(false);
-			}
-			catch (Exception ex)
-			{
-				logger.LogError(ex, "Failed to handle {Subject}.", DispatchSubject);
-			}
-		}
-	}
-
-	private async Task HandleAsync(byte[] data, CancellationToken cancellationToken)
+	public async ValueTask HandleAsync(
+		string subject,
+		byte[] data,
+		IEnumerable<MessageHeaderValue>? headerValues,
+		CancellationToken cancellationToken = default)
 	{
 		var request = DeliverRequest.Parser.ParseFrom(data);
 
@@ -51,8 +30,8 @@ public sealed class DispatchWorker(
 			var packet = new DeliverPacket { Subject = request.Subject, Payload = request.Payload };
 			packet.ConnectionIds.AddRange(group);
 
-			await connection
-				.PublishAsync($"connect.deliver.{group.Key}", packet.ToByteArray(), cancellationToken: cancellationToken)
+			await messageSender
+				.PublishAsync($"connect.deliver.{group.Key}", packet.ToByteArray(), cancellationToken)
 				.ConfigureAwait(false);
 		}
 
