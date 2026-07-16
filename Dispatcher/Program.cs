@@ -6,11 +6,12 @@ builder.AddServiceDefaults();
 
 // ConnectionDirectory（Redis）：批次查詢 ConnectionId -> NodeId
 builder.AddRedisClient("connection-directory");
+builder.Services.AddConnectionDirectory();
 
 // 訊息匯流排：訂閱 dispatch.deliver，投遞到 connect.deliver.{nodeId}
 builder.AddNatsClient("message-bus");
 
-builder.Services.AddHostedService<Worker>();
+builder.Services.AddHostedService<DispatchWorker>();
 
 var host = builder.Build();
 host.Run();

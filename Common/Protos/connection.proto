@@ -1,0 +1,24 @@
+syntax = "proto3";
+
+option csharp_namespace = "Chat.Protos";
+package chat;
+
+// Client <-> Gateway 的 wire 封包格式：連線本身的信封，不含業務語意。
+message Packet {
+	string subject = 1;
+	bytes payload = 2;
+}
+
+// 上層 -> OutboundGateway -> Dispatcher：未分組的投遞請求。
+message DeliverRequest {
+	string subject = 1;
+	repeated string connection_ids = 2;
+	bytes payload = 3;
+}
+
+// Dispatcher -> Gateway：已依 NodeId 分組後的投遞封包。
+message DeliverPacket {
+	string subject = 1;
+	repeated string connection_ids = 2;
+	bytes payload = 3;
+}
