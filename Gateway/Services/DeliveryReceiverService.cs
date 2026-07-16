@@ -7,7 +7,6 @@ using NATS.Client.Core;
 namespace Gateway.Services;
 
 // 訂閱這個節點專屬的投遞 subject，把 Dispatcher 分好組的封包送給本地連線。
-// 見 docs/architecture/connection-layer.md 第 4 節元件關係圖。
 public sealed class DeliveryReceiverService(
 	GatewayNodeId nodeId,
 	INatsConnection connection,

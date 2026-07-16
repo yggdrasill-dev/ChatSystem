@@ -9,7 +9,6 @@ namespace Dispatcher;
 
 // 訂閱 dispatch.deliver（掛 queue group，多複本互相分攤負載），
 // 查 ConnectionDirectory 依 NodeId 分組後，投遞到各 Gateway 節點專屬的 connect.deliver.{nodeId}。
-// 見 docs/architecture/connection-layer.md 第 6.4 節。
 public sealed class DispatchWorker(
 	INatsConnection connection,
 	IConnectionDirectory connectionDirectory,

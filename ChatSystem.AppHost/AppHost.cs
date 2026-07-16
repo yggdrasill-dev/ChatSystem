@@ -1,6 +1,6 @@
 var builder = DistributedApplication.CreateBuilder(args);
 
-// ConnectionDirectory：連線層自己擁有的 ConnectionId -> NodeId 對照表（見 docs/architecture/connection-layer.md 第 6.2 節）
+// ConnectionDirectory：連線層自己擁有的 ConnectionId -> NodeId 對照表
 var connectionDirectory = builder.AddRedis("connection-directory");
 
 // 訊息匯流排：Gateway <-> Dispatcher 之間的 NATS pub/sub（dispatch.deliver / connect.deliver.{nodeId}）
