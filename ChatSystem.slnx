@@ -1,7 +1,10 @@
 <Solution>
   <Project Path="ChatSystem.AppHost/ChatSystem.AppHost.csproj" />
   <Project Path="ChatSystem.ServiceDefaults/ChatSystem.ServiceDefaults.csproj" />
+  <Project Path="Common.Tests/Common.Tests.csproj" />
   <Project Path="Common/Common.csproj" />
+  <Project Path="Dispatcher.Tests/Dispatcher.Tests.csproj" />
   <Project Path="Dispatcher/Dispatcher.csproj" />
+  <Project Path="Gateway.Tests/Gateway.Tests.csproj" />
   <Project Path="Gateway/Gateway.csproj" />
 </Solution>

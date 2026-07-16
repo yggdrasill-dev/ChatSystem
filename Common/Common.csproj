@@ -11,6 +11,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="Common.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Adaptare" Version="2.2.1" />
     <PackageReference Include="Adaptare.Nats" Version="2.2.1" />
     <PackageReference Include="Google.Protobuf" Version="3.35.1" />
