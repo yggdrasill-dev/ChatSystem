@@ -2,9 +2,6 @@ using System.Net.WebSockets;
 using Chat.Protos;
 using Common;
 using Gateway.Models;
-using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.Logging;
 
 namespace Gateway.Services;
 

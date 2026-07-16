@@ -1,8 +1,6 @@
 using Chat.Protos;
 using Common.Connections;
 using Google.Protobuf;
-using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
 using NATS.Client.Core;
 
 namespace Dispatcher;

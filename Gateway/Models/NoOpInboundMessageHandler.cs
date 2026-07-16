@@ -1,6 +1,5 @@
 using Common;
 using Google.Protobuf;
-using Microsoft.Extensions.Logging;
 
 namespace Gateway.Models;
 

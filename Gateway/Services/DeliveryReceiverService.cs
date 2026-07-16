@@ -1,7 +1,5 @@
 using Chat.Protos;
 using Gateway.Models;
-using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
 using NATS.Client.Core;
 
 namespace Gateway.Services;
