@@ -1,0 +1,34 @@
+# Build results
+[Dd]ebug/
+[Dd]ebugPublic/
+[Rr]elease/
+[Rr]eleases/
+bin/
+obj/
+[Ll]og/
+[Ll]ogs/
+
+# Visual Studio / Rider / VS Code local state
+.vs/
+.vscode/
+.idea/
+*.user
+*.userosscache
+*.suo
+
+# .NET Aspire
+*.dcproj
+apphost/
+
+# NuGet
+*.nupkg
+*.snupkg
+**/[Pp]ackages/*
+!**/[Pp]ackages/build/
+
+# User-specific / local tool state
+.cr/
+
+# Misc
+*.log
+*.tmp

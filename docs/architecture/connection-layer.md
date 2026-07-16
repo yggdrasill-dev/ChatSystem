@@ -340,6 +340,15 @@ public class ConnectionLifecycle(
 - **Decision（暫緩）**：屆時才考慮讓 Dispatcher 依某種 key 做一致性雜湊分片，記憶體快取部分路由狀態。
 - **觸發條件**：需要先有實測數據證明 ADR-4 的無狀態方案不足，才啟動這個 ADR。
 
+### ADR-6：採用 .NET Aspire 建立專案骨架與本地開發編排
+
+- **Context**：Gateway/Dispatcher/Redis/NATS 這種多服務 + 資源的組合，需要一致的方式做本地啟動編排、服務發現、觀測性（trace/log/metrics），手動兜 `docker-compose` 或各專案自己的 `launchSettings.json` 維護成本高。
+- **Decision**：用 `ChatSystem.AppHost` 定義資源拓樸——`connection-directory`（Redis）、`message-bus`（NATS）、`gateway`（可 `WithReplicas` 開多份模擬多節點）、`dispatcher`；每個服務專案透過 `ChatSystem.ServiceDefaults` 取得統一的 OpenTelemetry/health check/resilience 設定，透過 `Aspire.StackExchange.Redis`/`Aspire.NATS.Net` 的 `AddRedisClient`/`AddNatsClient` 拿到由 AppHost 注入的連線字串，不用自己管設定檔。
+- **Consequences**：
+  - 本地開發時可以直接 `dotnet run` AppHost 啟動整套拓樸（含 Redis/NATS 容器）並在 Aspire Dashboard 看到 trace/log。
+  - `Aspire.NATS.Net` 底層是新版 `NATS.Net`（`NATS.Client.Core`）非同步用戶端，跟舊 `main` 分支用的 `NATS.Client`（classic 同步用戶端）不是同一套 API；`Common` 裡 `IMessageQueueService`/`IMessageHandler` 這類抽象要對著新用戶端重新設計，不能直接照搬舊程式碼。
+  - 部署到正式環境時，Aspire 的資源定義可以轉成 manifest 餵給對應的部署工具，但這次先只處理本地開發編排，正式環境的部署方式待後續另立 ADR。
+
 ## 8. 明確排除於本階段（留給使用者管理層決定）
 
 - 連線要不要驗證身分、什麼時候驗證（handshake 時？連線後第一則訊息？）。

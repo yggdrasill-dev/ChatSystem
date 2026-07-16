@@ -1,0 +1,7 @@
+<Solution>
+  <Project Path="ChatSystem.AppHost/ChatSystem.AppHost.csproj" />
+  <Project Path="ChatSystem.ServiceDefaults/ChatSystem.ServiceDefaults.csproj" />
+  <Project Path="Common/Common.csproj" />
+  <Project Path="Dispatcher/Dispatcher.csproj" />
+  <Project Path="Gateway/Gateway.csproj" />
+</Solution>
