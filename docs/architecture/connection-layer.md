@@ -2,51 +2,45 @@
 
 狀態：討論中 draft，尚未實作
 技術棧：延續現有 .NET + NATS + 自製 WebSocket handler
-範圍：Gateway（現有 ChatConnector）+ 新增的 Dispatcher 層，不涉及房間/聊天業務規則本身
+範圍：**只做連線層本身**（Gateway + Dispatcher + 連線的路由/投遞），不含使用者身分、Session、房間、聊天等業務語意
 
-> 更新：新增 Gateway → Dispatcher 兩層架構，用來讓「連線數」與「路由/fan-out 吞吐」各自獨立擴展，對應大量 user 場景。細節見第 7 節。
+> 修正記錄：前一版把 Dispatcher 的路由查詢綁到了假設中的 SessionServer/PlayerInfo，這其實是把「使用者管理層」的概念提前混進「連線層」。本版重新界定範圍：連線層只認得 `ConnectionId`，不認得使用者身分；使用者管理層（Session、身分、房間、聊天）是連線層之上、**尚未開始設計**的下一階段。
 
-## 1. 背景：現有實作的模型問題
+## 1. 範圍界定
 
-盤點 `main` 分支現有程式碼後，觀察到以下模型不夠俐落之處：
+- 連線層要解決的問題只有一個：**一條 WebSocket 連線，怎麼被持有、怎麼被跨節點定址、怎麼被投遞訊息**。
+- 連線層唯一的識別碼是 `ConnectionId`——代表一條 transport 連線本身，**不代表任何使用者身分**。一條連線是否經過驗證、背後是哪個帳號、屬於哪個房間，都是連線層看不到、也不需要看到的事。
+- 「上層」（使用者管理層/業務層）目前還沒有設計，本文件裡凡是需要提到它的地方，都當作一個尚未定義的黑盒子：它會拿到某條連線的 `ConnectionId`，然後呼叫連線層提供的投遞能力；它怎麼知道該用哪個 `ConnectionId`（例如 userId → ConnectionId 的對照），不屬於這裡要解決的問題。
 
-1. **Session 與 Connection 沒有分開**：`SessionId` 直接沿用 ASP.NET 的 `TraceIdentifier`，等同「連線=身分」，重新連線＝全新身分，沒有讓業務層決定重連語意的空間。
-2. **定址慣例外洩到業務層**：`connect.send.{connectorId}` 這個 NATS subject 命名規則，被 `ChatServer.ChatSendHandler` 直接字串內插使用；連線層本身沒有把這個能力包裝成 API 對外提供。
-3. **Fan-out 邏輯混在業務 handler 裡**：依 `ConnectorId` 分組、組 `SendPacket`、逐一 publish 的邏輯寫在 `ChatSendHandler`，未來每個新功能都要重寫一次。
-4. **`WebSocketRepository` 是貧血物件**：`class WebSocketRepository : ConcurrentDictionary<string, WebSocket> {}`，沒有承載任何「連線」行為；封包框裝（Binary / EndOfMessage）在 `ClientConnectHandler` 和 `ConnectSendHandler` 各寫一次。
-5. **連線生命週期用手動串接的 Command 表達**：`OnConnectedAsync` / `OnDisconnectedAsync` 手動依序呼叫 4~5 個獨立的 `ICommandService<T>`，沒有一個聚合物件描述整體流程與失敗處理。
-6. **同一身分重複登入未處理**：目前程式碼沒有檢查「這個身分是否已經有一條活躍連線」，新連線進來時不會主動關閉舊連線，可能產生殭屍 socket。
+## 2. 現有實作對照
 
-值得保留的優點：`ConnectorId` 已經隨玩家資料（`PlayerInfo.ConnectorId`）流到 RoomServer / ChatServer，避免每次送訊息都要回頭查 SessionServer——這個「把定位資訊 denormalize 到業務資料上」的思路是對的，新模型延續它。
+盤點 `main` 分支現有 `ChatConnector` 程式碼，跟「純連線層」這個範圍對照，問題分兩類：
 
-## 2. 核心概念
+**屬於連線層本身、這次要解決的**：
+
+1. **定址慣例外洩**：`connect.send.{connectorId}` 這個 NATS subject 命名規則，被業務層直接字串內插使用，連線層沒有把這個能力包裝成 API 對外提供。
+2. **Fan-out 邏輯沒有集中**：依節點分組、批次投遞的邏輯應該是連線層的能力，不該讓每個呼叫端各自重寫一次。
+3. **`WebSocketRepository` 是貧血物件**：`class WebSocketRepository : ConcurrentDictionary<string, WebSocket> {}`，沒有承載任何「連線」行為；封包框裝邏輯在多處各寫一次。
+4. **連線生命週期用手動串接的 Command 表達**：`OnConnectedAsync` / `OnDisconnectedAsync` 手動依序呼叫多個獨立的 `ICommandService<T>`，沒有一個聚合物件描述整體流程。
+
+**其實是使用者管理層的問題、本階段不處理、記錄下來留給下一階段**：
+
+5. 現有 `SessionId` 直接沿用 ASP.NET 的 `TraceIdentifier`，且連線建立時直接綁定 `httpContext.User.Identity`、直接呼叫 `RegisterSessionCommand` 註冊到 SessionServer——這把「接受一條連線」和「這個使用者上線了」揉在一起，正是本次要拆開的耦合。
+6. 同一身分重複登入時要不要關閉舊連線（Supersede），需要比較「身分」是否相同，這是身分/使用者的概念，連線層本身無法回答，留給使用者管理層。
+
+## 3. 核心概念（連線層）
 
 | 概念 | 對應/取代現有元件 | 職責 |
 |---|---|---|
-| `Connection` | 散落在各 handler 的 `socket.SendAsync` | 封裝單一 socket 的生命週期與送封包行為，框裝邏輯只寫一次 |
-| `ConnectionRegistry` | `WebSocketRepository` | 單一 ChatConnector instance 內的本地連線表，明確方法（Add/Remove/TryDeliver），不繼承 Dictionary |
-| `Session`（身分/在場狀態） | `SessionServer` 現有概念正名 | 代表已驗證身分的在場狀態，生命週期獨立於單次 Connection |
-| `SessionDirectory` | `SessionServer` + Redis | 全域 `sessionId → (connectorId, identity)` 對照表，跨 service 可查詢 |
-| `OutboundGateway` | 業務層裡手寫的 `connect.send.{connectorId}` | 業務服務呼叫的介面 `DeliverAsync(subject, targets, payload)`；內部實作改為送出 `DispatchRequest` 給 Dispatcher（見第 7 節），呼叫端契約不變 |
-| `ConnectionLifecycle` | handler 裡手動串接的多個 Command | 聚合 OnConnect / OnDisconnect 該發生的步驟順序與失敗處理 |
-| `Dispatcher`（第 7 節新增） | 無 | 獨立部署單元，接收 `DispatchRequest`，批次查 `SessionDirectory`、依 `ConnectorId` 分組後投遞給對應 Gateway node |
+| `Connection` | 散落在各 handler 的 `socket.SendAsync` | 封裝單一 socket 的生命週期與送封包行為，框裝邏輯只寫一次。識別碼是 `ConnectionId`（連線建立時由 Gateway 產生，例如 GUID，不依賴 ASP.NET `TraceIdentifier`，也不依賴任何身分資訊） |
+| `ConnectionRegistry` | `WebSocketRepository` | 單一 Gateway 節點內的本地連線表：`ConnectionId → Connection`，明確方法（Add/Remove/TryDeliver），不繼承 Dictionary |
+| `ConnectionDirectory`（新） | 無（現有實作沒有這個概念，直接用 SessionServer 代替，這正是耦合來源） | 跨節點的 `ConnectionId → NodeId` 對照表。**由連線層自己擁有**，只回答「這條連線在哪個節點」，不知道也不需要知道使用者是誰 |
+| `Gateway` | `ChatConnector` | 持有 `ConnectionRegistry`，負責 accept / 驗證前置（如果有）/ 框裝 / 本地投遞；連線建立與關閉時维护 `ConnectionDirectory` |
+| `Dispatcher`（新） | 無 | 無狀態部署單元，接收「投遞請求」（`subject` + 一批 `ConnectionId` + `payload`），查 `ConnectionDirectory` 依 `NodeId` 分組後投遞給對應 Gateway 節點 |
+| `OutboundGateway` | 業務層裡手寫的 `connect.send.{connectorId}` | 上層呼叫連線層的**唯一入口**：`DeliverAsync(subject, connectionIds, payload)`。參數只接受 `ConnectionId`，不接受 userId/sessionId——那個轉換是上層自己的事 |
+| `ConnectionLifecycle` | handler 裡手動串接的多個 Command | 聚合 OnConnect / OnDisconnect 該發生的步驟順序與失敗處理（目前只有：註冊/移除 `ConnectionRegistry`、註冊/移除 `ConnectionDirectory`） |
 
-### 2.1 Session 與 Connection 的關係
-
-- **結構上分離，但目前業務規則是 1:1**：一個 `Session` 在任何時刻最多對應一個 `Connection`（已確認不支援多裝置同時在線）。
-- 分離的意義不是現在就要做「斷線保留房間」，而是讓這個決定成為**未來可以插上去的 policy**，不用重新設計 Connection/Registry/Transport。連線層現在只需要保證：
-  - `Connection` 的生命週期 = 底層 socket 的生命週期，斷了就是斷了，連線層不做恢復邏輯。
-  - `Session` 的生命週期由 `SessionDirectory`（現有 Redis TTL 機制）決定，是否在 Connection 斷開後短暫保留、要不要恢復房間身分，交給業務層（RoomServer/ChatServer）在未來另立 ADR 決定。
-
-### 2.2 單一連線 + Supersede 策略
-
-因為確認不支援多裝置，新模型需要明確定義「同一身分第二次連進來」時的行為（現有程式碼未處理）：
-
-- `ConnectionLifecycle.OnConnected` 驗證身分後，先向 `SessionDirectory` 查詢該身分是否已有活躍 `Session`。
-- 若有，視為 **Supersede**：對舊連線所在的 ChatConnector instance 送出「強制關閉」訊號（透過 `OutboundGateway` 送到舊 `connectorId`），舊連線關閉後才註冊新連線；避免同一身分同時存在兩條活躍連線與殭屍 socket。
-- 這個決策獨立於「Session/Connection 是否分離」——即使日後開放多裝置，Supersede 邏輯也只是換成「允許 N 條」而不需重推翻整體模型。
-
-## 3. 元件關係圖（含 Gateway / Dispatcher 分層，見第 7 節）
+## 4. 元件關係圖
 
 ```mermaid
 graph TB
@@ -54,11 +48,15 @@ graph TB
         WC[WebClient]
     end
 
-    subgraph "Gateway：ChatConnector (Node A / Node B ...)"
+    subgraph "Gateway (Node A / Node B ...)"
         CH[ClientConnectHandler]
         CR[ConnectionRegistry]
         CL[ConnectionLifecycle]
         DH[DeliveryHandler]
+    end
+
+    subgraph "連線層共用基礎設施"
+        CD[("ConnectionDirectory\n(Redis / Redis Cluster)")]
     end
 
     subgraph Common
@@ -71,164 +69,286 @@ graph TB
     end
 
     subgraph "NATS"
-        SUB1[("subject: chat.send / room.* ...")]
         SUB3[("subject: dispatch.deliver")]
         SUB2[("subject: connect.deliver.{nodeId}")]
     end
 
-    subgraph Backend Services
-        SS[SessionServer\n+ Redis Cluster\n(SessionDirectory)]
-        RS[RoomServer]
-        CS[ChatServer]
+    subgraph "上層（使用者管理層 / 業務層，尚未設計）"
+        UP["??? — 已知某條連線的 ConnectionId"]
     end
 
     WC <-- WebSocket --> CH
     CH --> CL
     CL --> CR
-    CL -- register/unregister --> SS
-    CH -- inbound packet --> MQ --> SUB1
-    SUB1 --> CS
-    SUB1 --> RS
-    CS -- "DeliverAsync(subject, sessionIds, payload)" --> OG
-    RS -- "DeliverAsync(subject, sessionIds, payload)" --> OG
-    OG -- publish DispatchRequest --> SUB3
+    CL -- 連線建立/關閉時註冊或移除 --> CD
+    UP -- "DeliverAsync(subject, connectionIds, payload)" --> OG
+    OG -- publish 投遞請求 --> SUB3
     SUB3 --> DP
-    DP -- 批次查詢 ConnectorId --> SS
-    DP -- 依 ConnectorId 分組後 publish --> SUB2
+    DP -- 批次查詢 NodeId --> CD
+    DP -- 依 NodeId 分組後 publish --> SUB2
     SUB2 --> DH
     DH -- TryDeliver --> CR
     CR -- send --> CH
 ```
 
-## 4. 訊息序列：聊天訊息送達
+## 5. 訊息序列
 
-```mermaid
-sequenceDiagram
-    participant C as Client
-    participant Conn as ChatConnector (Node A)
-    participant Bus as NATS
-    participant Chat as ChatServer
-    participant OG as OutboundGateway (Common)
-    participant ConnB as ChatConnector (Node B)
-
-    C->>Conn: WS Binary Packet{subject="chat.send", payload}
-    Conn->>Bus: publish("chat.send", QueuePacket{sessionId, payload})
-    Bus->>Chat: ChatSendHandler.HandleAsync
-    Chat->>Chat: 查詢房間內玩家 (含各自 ConnectorId)
-    Chat->>OG: DeliverAsync("chat.receive", targets, payload)
-    OG->>OG: 依 ConnectorId 分組
-    OG->>Bus: publish("connect.deliver.{NodeA}", SendPacket)
-    OG->>Bus: publish("connect.deliver.{NodeB}", SendPacket)
-    Bus->>Conn: DeliveryHandler.HandleAsync (Node A 收到自己那份)
-    Conn->>Conn: ConnectionRegistry.TryDeliver(sessionId)
-    Conn->>C: WS Binary Packet{subject="chat.receive", payload}
-    Bus->>ConnB: DeliveryHandler.HandleAsync (Node B 收到自己那份)
-```
-
-## 5. 架構決策記錄（ADR）
-
-### ADR-1：Session 與 Connection 分離建模
-
-- **Context**：現有 `SessionId` = `TraceIdentifier`，等同連線=身分，重連即新身分。
-- **Decision**：結構上把 `Session`（身分/在場）與 `Connection`（單次 socket 生命週期）拆成兩個概念，即使目前業務規則是嚴格 1:1。
-- **Consequences**：
-  - 好處：未來若要支援「斷線重連保留房間」，只需在 `SessionDirectory` 加 policy，不需重新設計 Connection/Registry。
-  - 代價：多一層抽象，`ConnectionLifecycle` 需要同時操作 `Connection`（本地）與 `Session`（跨服務）兩個生命週期，複雜度略增。
-  - 本次**不**決定重連是否保留房間身分——留給業務層（RoomServer）未來另立 ADR。
-
-### ADR-2：單一連線 + Supersede 策略
-
-- **Context**：確認不支援多裝置同時在線；現有程式碼未處理同一身分重複登入的情境。
-- **Decision**：`SessionDirectory` 保證同一身分最多一個活躍 `Connection`；新連線登入時若偵測到舊連線存在，透過 `OutboundGateway` 通知舊連線所在 node 強制關閉，再完成新連線註冊。
-- **Consequences**：需要在 `ConnectionLifecycle.OnConnected` 加入「查詢並清除舊連線」的步驟，跨 node 的強制關閉走既有的 deliver 通道即可，不需新機制。
-
-### ADR-3：OutboundGateway 集中在 Common
-
-- **Context**：現行 `ChatServer` 直接字串組 `connect.send.{connectorId}`，NATS 定址慣例耦合在業務層，多處重複。
-- **Decision**：在 `Common` 提供 `IOutboundGateway.DeliverAsync(subject, IEnumerable<RoutingTarget>, payload)`，內部負責依 `ConnectorId` 分組、組裝 `SendPacket`、決定實際 publish 的 subject 命名規則（如 `connect.deliver.{nodeId}`）。所有 backend service 只依賴這個介面。
-- **Consequences**：
-  - 需要一個共用型別 `RoutingTarget { SessionId, ConnectorId }`，現有 `PlayerInfo` 已具備對應欄位，可直接轉換。
-  - Subject 命名規則、序列化格式集中在一處，未來要換訊息匯流排（例如 NATS → Redis Streams）只需改 `OutboundGateway` 實作。
-
-## 6. 待確認 / 後續事項
-
-- 重連是否保留房間身分：留給 RoomServer/ChatServer 側未來另立 ADR，本次連線層設計不預先鎖定。
-- `ConnectionRegistry` 與 `Connection` 的具體介面（方法簽章）尚未定案，留待進入實作階段時再細化。
-- `OutboundGateway` 的 subject 命名規則（沿用 `connect.send.*` 或改為 `connect.deliver.*`）待與現有其他服務命名慣例對齊後決定。
-
-## 7. 擴展方向：Gateway → Dispatcher 兩層架構
-
-### 7.1 動機
-
-「大量 user」同時牽涉兩個獨立的瓶頸，需要能各自獨立擴展：
-
-1. **連線數瓶頸**：單一 Gateway process 的 socket/fd/記憶體上限。
-2. **路由與 fan-out 吞吐瓶頸**：訊息送達前要查 `SessionDirectory` 找 `ConnectorId`，且大房間廣播時 fan-out 量隨人數增加。
-
-單純把 fan-out 邏輯包成 `Common` 裡的 library（ADR-3）並不足夠——那段邏輯仍在 `ChatServer` process 內執行，沒辦法獨立於業務邏輯本身擴展。因此把它拆成獨立部署單元：**Dispatcher**。
-
-### 7.2 兩個瓶頸，兩種對策（討論結論）
-
-| 瓶頸 | 對策 | 為什麼不需要更複雜的方案 |
-|---|---|---|
-| SessionDirectory 查詢吞吐 | Redis Cluster 分片 | 純 KV 查詢的吞吐/資料量可以靠 Redis 原生分片線性擴展，不需要 Dispatcher 自己做一致性雜湊 |
-| 大房間 fan-out 放大 | Dispatcher 依 `ConnectorId` **批次分組**後投遞 | 投遞成本正比於 Gateway 節點數（M），而非使用者數（N）；跟查詢速度無關，是投遞策略問題 |
-| 每則訊息的網路來回延遲 | 目前不處理，先觀察 | 有狀態 + sharded 的 Dispatcher 能把這個延遲換成記憶體存取，但複雜度高（shard rebalance、cache 失效），先不預付這個成本 |
-
-### 7.3 三層各自的擴展依據
-
-| 層 | 元件 | 擴展依據 | 狀態 |
-|---|---|---|---|
-| Gateway | 現有 ChatConnector | 併發連線數（fd / 記憶體） | 無狀態，僅本地 `ConnectionRegistry` |
-| Dispatcher | 新增服務 | 路由查詢 + fan-out 投遞吞吐 | 無狀態，任意增減複本 |
-| SessionDirectory | SessionServer + **Redis Cluster** | 查詢 QPS + 資料量 | 有狀態，靠 Redis 原生分片擴展 |
-| 業務服務 | ChatServer / RoomServer | 業務邏輯運算量 | 依現有設計，不變 |
-
-### 7.4 職責重新分配
-
-- **Gateway**：只做 `Connection` / `ConnectionRegistry` / `ConnectionLifecycle`（第 2 節定義）。不知道房間、不知道 fan-out，只知道「我這台有哪些 sessionId 對應哪個 socket」。
-- **業務服務（ChatServer/RoomServer）**：決定「誰是這則訊息的目標」（例如房間內所有 sessionId），透過 `OutboundGateway`（`Common` 裡的介面，維持 ADR-3 的呼叫端契約不變）送出一個 `DispatchRequest{subject, sessionIds, payload}`。**不再自己查 ConnectorId、不再自己分組**。
-- **Dispatcher**（新）：收到 `DispatchRequest` 後，對 `sessionIds` 批次查詢 `SessionDirectory`（Redis Cluster，用 `MGET`/pipeline），依查到的 `ConnectorId` 分組，組成 `SendPacket` 後批次 publish 到各 Gateway 專屬的 `connect.deliver.{nodeId}`。
-
-副作用（值得注意但本次不強制執行）：一旦 Dispatcher 統一負責查 `ConnectorId`，`RoomServer.PlayerInfo` 上目前 denormalize 的 `ConnectorId` 欄位就不再是必需的——單一真實來源回到 `SessionDirectory`。這是後續可以做的簡化，本次先不動現有資料結構。
-
-### 7.5 訊息序列（更新版）
+### 5.1 連線建立 / 關閉（維護 ConnectionDirectory）
 
 ```mermaid
 sequenceDiagram
     participant C as Client
     participant GW as Gateway (Node A)
+    participant CD as ConnectionDirectory (Redis)
+
+    C->>GW: WebSocket 連線建立
+    GW->>GW: 產生 ConnectionId，ConnectionRegistry.Add
+    GW->>CD: Register(connectionId, nodeId=NodeA)
+    Note over C,GW: ... 連線存續期間 ...
+    C->>GW: 連線中斷
+    GW->>GW: ConnectionRegistry.Remove
+    GW->>CD: Unregister(connectionId)
+```
+
+### 5.2 上層投遞一則訊息到多條連線
+
+```mermaid
+sequenceDiagram
+    participant Up as 上層（未來業務層）
+    participant OG as OutboundGateway (Common)
     participant Bus as NATS
-    participant Chat as ChatServer
     participant Disp as Dispatcher
-    participant Redis as SessionDirectory (Redis Cluster)
+    participant CD as ConnectionDirectory (Redis)
+    participant GWA as Gateway (Node A)
     participant GWB as Gateway (Node B)
 
-    C->>GW: WS Binary Packet{subject="chat.send", payload}
-    GW->>Bus: publish("chat.send", QueuePacket{sessionId, payload})
-    Bus->>Chat: ChatSendHandler.HandleAsync
-    Chat->>Chat: 查詢房間內所有 sessionId（RoomServer）
-    Chat->>Bus: publish("dispatch.deliver", DispatchRequest{subject, sessionIds:[...], payload})
+    Up->>OG: DeliverAsync(subject, [connIdX, connIdY, ...], payload)
+    OG->>Bus: publish("dispatch.deliver", DeliverRequest)
     Bus->>Disp: DispatchHandler.HandleAsync
-    Disp->>Redis: MGET ConnectorId for sessionIds（批次查詢一次）
-    Disp->>Disp: 依 ConnectorId 分組
-    Disp->>Bus: publish("connect.deliver.{NodeA}", SendPacket)
-    Disp->>Bus: publish("connect.deliver.{NodeB}", SendPacket)
-    Bus->>GW: DeliveryHandler.HandleAsync（只收到自己那份）
-    GW->>C: WS Binary Packet{subject="chat.receive", payload}
+    Disp->>CD: 批次查詢 connectionIds 對應的 NodeId
+    Disp->>Disp: 依 NodeId 分組
+    Disp->>Bus: publish("connect.deliver.{NodeA}", ...)
+    Disp->>Bus: publish("connect.deliver.{NodeB}", ...)
+    Bus->>GWA: DeliveryHandler.HandleAsync（只收到自己那份）
     Bus->>GWB: DeliveryHandler.HandleAsync（只收到自己那份）
 ```
 
-### 7.6 架構決策記錄（新增 ADR）
+## 6. 具體介面設計
 
-#### ADR-4：Dispatcher 獨立為無狀態部署單元（延伸 ADR-3）
+沿用 `Common` 現有的介面慣例（`ICommandService<T>` / `IGetService<TQuery,TResult>` / `IMessageHandler` + `AddHandler<THandler>(subject, group)` 的 queue-group 訂閱機制）。
 
-- **Context**：ADR-3 把 fan-out/定址邏輯包成 `Common` 的 library，但執行位置仍在呼叫端（`ChatServer`）process 內，無法獨立於業務邏輯擴展；大量 user 場景需要「連線數」「路由查詢/fan-out」「業務邏輯」三個維度各自能水平擴展。
-- **Decision**：把實際查詢與分組邏輯搬到獨立服務 **Dispatcher**。`OutboundGateway`（`Common` 裡對業務服務的介面）維持不變，內部改為送出 `DispatchRequest` 給 Dispatcher，而不是在本地做查詢與分組。Dispatcher 本身無狀態、可任意增減複本，查詢倚賴 Redis Cluster 撐吞吐。
-- **Consequences**：多一個網路 hop（業務服務 → Dispatcher）；換來三層可以依各自負載獨立擴展。大房間廣播的成本正比於 Gateway 節點數，不是使用者數。
+### 6.1 Proto（重新命名，不沿用 `session_id` 這種帶身分意味的命名）
 
-#### ADR-5（條件觸發）：有狀態 + Sharded Dispatcher
+因為這是整個系統的重建，這裡直接把 wire 格式的命名改成誠實反映「這是連線層，只認得 ConnectionId」，不繼續沿用舊 proto 的 `session_id` 命名（那正是造成耦合的命名遺留）：
 
-- **Context**：若未來量測顯示 Redis Cluster 的查詢延遲或吞吐仍是瓶頸（例如訊息延遲預算被單次查詢的網路來回吃掉）。
-- **Decision（暫緩）**：屆時才考慮讓 Dispatcher 依 room/user 做一致性雜湊分片，每個 shard 在記憶體中快取一部分路由狀態，Redis 只作為 source of truth 或 rebalance 時的備援，不在熱路徑上。
-- **觸發條件**：需要先有實測數據（延遲/QPS）證明 ADR-4 的無狀態方案不足，才啟動這個 ADR；不提前預付一致性雜湊、shard rebalance 的複雜度成本。
+```protobuf
+// connection.proto（新檔案，取代 common.proto 裡跟連線相關的部分）
+syntax = "proto3";
+option csharp_namespace = "Chat.Protos";
+package chat;
+
+// 上層 -> OutboundGateway -> Dispatcher：未分組的投遞請求
+message DeliverRequest {
+	string subject = 1;
+	repeated string connection_ids = 2;
+	bytes payload = 3;
+}
+
+// Dispatcher -> Gateway：已依 NodeId 分組後的投遞封包
+message DeliverPacket {
+	string subject = 1;
+	repeated string connection_ids = 2;
+	bytes payload = 3;
+}
+```
+
+`DeliverRequest` 和 `DeliverPacket` 目前 wire 格式完全一樣（`subject` + `connection_ids` + `payload`），语意差異只在於 `connection_ids` 是全量清單還是已篩選過的子集。先分成兩個訊息型別而不是重用同一個，是為了讓 proto 本身讀起來就標示「這是request還是已分組的packet」，避免未來兩邊需求分岔時還要拆訊息型別；如果覺得目前重複沒必要，也可以先共用一個型別，等分岔時再拆。
+
+### 6.2 `ConnectionDirectory`（連線層自己擁有，`Common` 提供介面）
+
+```csharp
+namespace Common;
+
+public interface IConnectionDirectory
+{
+	ValueTask RegisterAsync(string connectionId, string nodeId);
+	ValueTask UnregisterAsync(string connectionId);
+	ValueTask<IReadOnlyDictionary<string, string>> ResolveNodesAsync(IReadOnlyCollection<string> connectionIds);
+}
+```
+
+實作直接包 Redis（或 Redis Cluster），key schema例如 `Conn:{connectionId} -> nodeId`，短 TTL + Gateway 定期續命（沿用現有 30 秒 TTL + 心跳續命的思路，只是這次續的是「連線還活著」，不是「使用者 session 還活著」）：
+
+```csharp
+internal class RedisConnectionDirectory(IDatabase database) : IConnectionDirectory
+{
+	public ValueTask RegisterAsync(string connectionId, string nodeId) =>
+		new(database.StringSetAsync($"Conn:{connectionId}", nodeId, TimeSpan.FromSeconds(30)));
+
+	public ValueTask UnregisterAsync(string connectionId) =>
+		new(database.KeyDeleteAsync($"Conn:{connectionId}"));
+
+	public async ValueTask<IReadOnlyDictionary<string, string>> ResolveNodesAsync(IReadOnlyCollection<string> connectionIds)
+	{
+		// 真實 Redis Cluster：不同 connectionId 的 key 分散在不同 slot，
+		// 無法用單一 MGET 跨 slot 查詢；改成平行送出多個 GET、一次 await 全部完成。
+		var ids = connectionIds.ToArray();
+		var values = await Task.WhenAll(
+			ids.Select(id => database.StringGetAsync($"Conn:{id}"))
+		).ConfigureAwait(false);
+
+		var result = new Dictionary<string, string>();
+		for (var i = 0; i < ids.Length; i++)
+			if (!values[i].IsNullOrEmpty)
+				result[ids[i]] = values[i]!;
+
+		return result; // 查不到的 connectionId（已斷線）直接省略，不報錯
+	}
+}
+```
+
+因為 `ConnectionDirectory` 是連線層**自己的**基礎設施（不是借用某個業務服務的資料），Gateway（寫入端）跟 Dispatcher（讀取端）可以共用同一份 Redis 連線設定，**不需要再多一次 NATS request/reply 去問誰**——這是跟前一版設計（繞去問 SessionServer）比起來明確變簡單的地方。
+
+### 6.3 `IOutboundGateway`（`Common`，上層呼叫的唯一入口）
+
+```csharp
+namespace Common;
+
+public interface IOutboundGateway
+{
+	ValueTask DeliverAsync(string subject, IReadOnlyCollection<string> connectionIds, ByteString payload);
+}
+
+internal class OutboundGateway(IMessageQueueService messageQueueService) : IOutboundGateway
+{
+	private const string DispatchSubject = "dispatch.deliver";
+
+	public ValueTask DeliverAsync(string subject, IReadOnlyCollection<string> connectionIds, ByteString payload)
+	{
+		var request = new DeliverRequest { Subject = subject, Payload = payload };
+		request.ConnectionIds.AddRange(connectionIds);
+
+		return messageQueueService.PublishAsync(DispatchSubject, request.ToByteArray());
+	}
+}
+```
+
+### 6.4 `Dispatcher`（新專案）
+
+```csharp
+namespace Dispatcher.Models.Handlers;
+
+public class DispatchHandler(
+	IConnectionDirectory connectionDirectory,
+	IMessageQueueService messageQueueService,
+	ILogger<DispatchHandler> logger) : IMessageHandler
+{
+	public async ValueTask HandleAsync(Msg msg, CancellationToken cancellationToken)
+	{
+		var request = DeliverRequest.Parser.ParseFrom(msg.Data);
+
+		var nodesByConnection = await connectionDirectory
+			.ResolveNodesAsync(request.ConnectionIds)
+			.ConfigureAwait(false);
+		// 查不到的 connectionId（已斷線）直接被省略，這裡不用特別處理
+
+		foreach (var group in nodesByConnection.GroupBy(kv => kv.Value, kv => kv.Key))
+		{
+			var packet = new DeliverPacket { Subject = request.Subject, Payload = request.Payload };
+			packet.ConnectionIds.AddRange(group);
+
+			await messageQueueService
+				.PublishAsync($"connect.deliver.{group.Key}", packet.ToByteArray())
+				.ConfigureAwait(false);
+		}
+
+		logger.LogInformation(
+			"Dispatched {Subject} to {NodeCount} node(s) for {TargetCount} connection(s).",
+			request.Subject,
+			nodesByConnection.Values.Distinct().Count(),
+			request.ConnectionIds.Count);
+	}
+}
+```
+
+`Dispatcher/Program.cs` 訂閱時掛 queue group，讓多個複本互相分攤負載：
+
+```csharp
+config.AddHandler<DispatchHandler>("dispatch.deliver", "dispatch.deliver");
+```
+
+### 6.5 Gateway 端：`ConnectionLifecycle` 維護 `ConnectionDirectory`
+
+```csharp
+namespace Gateway.Models;
+
+public class ConnectionLifecycle(
+	string nodeId,
+	ConnectionRegistry registry,
+	IConnectionDirectory connectionDirectory)
+{
+	public async ValueTask<Connection> OnConnectedAsync(WebSocket socket)
+	{
+		var connectionId = Guid.NewGuid().ToString("N");
+		var connection = new Connection(connectionId, socket);
+
+		registry.Add(connection);
+		await connectionDirectory.RegisterAsync(connectionId, nodeId).ConfigureAwait(false);
+
+		return connection;
+	}
+
+	public async ValueTask OnDisconnectedAsync(string connectionId)
+	{
+		registry.Remove(connectionId);
+		await connectionDirectory.UnregisterAsync(connectionId).ConfigureAwait(false);
+	}
+}
+```
+
+這裡刻意**不含任何身分驗證、不呼叫任何「註冊使用者」的動作**——跟現有 `ClientConnectHandler` 最大的差異就是這裡。身分驗證要不要在 Gateway 這一層做（例如握手時檢查 token），是下一階段要決定的事；連線層目前假設「能接受 WebSocket handshake 的就是一條合法連線」。
+
+## 7. 架構決策記錄（ADR）
+
+### ADR-1：連線層只認得 `ConnectionId`，不引入身分/Session 概念
+
+- **Context**：現有實作把「接受連線」跟「使用者登入」揉在一起（連線建立時直接查驗身分、註冊到 SessionServer）。
+- **Decision**：連線層的資料模型只有 `Connection` / `ConnectionId`，不出現 `Session`、`User`、`PlayerInfo` 等任何身分相關概念。使用者管理層要用什麼 key（userId? sessionId?）來記住「這個使用者對應哪個 ConnectionId」，是下一階段的設計，連線層不預設、也不依賴它。
+- **Consequences**：連線層可以獨立設計、獨立測試、獨立部署，不必等使用者管理層的設計定案。代價是「同一身分重複連線」這種問題本階段無法回答（見下方排除事項）。
+
+### ADR-2：`ConnectionDirectory` 由連線層自己擁有
+
+- **Context**：前一版設計讓 Dispatcher 去查一個假設中的 SessionServer 來解析路由——但 SessionServer 屬於還沒設計的使用者管理層，連線層反過來依賴它是本末倒置。
+- **Decision**：`ConnectionId → NodeId` 的對照表（`ConnectionDirectory`）是連線層自己的基礎設施，用連線層自己的 Redis（Cluster）存放，Gateway 直接寫、Dispatcher 直接讀，都在 `Common` 共用同一個介面/連線設定。
+- **Consequences**：比透過另一個服務轉一手少一次網路來回，設計也更單純；代價是連線層現在多了一個自己要維運的 Redis 依賴（但這個依賴本來就會存在，只是換了誰擁有它）。
+
+### ADR-3：`OutboundGateway` 是上層呼叫連線層的唯一入口，只接受 `ConnectionId`
+
+- **Context**：定址慣例（NATS subject 命名）不該外洩給呼叫端。
+- **Decision**：`IOutboundGateway.DeliverAsync(subject, connectionIds, payload)` 是唯一對外 API，參數型別就是 `ConnectionId`，不接受任何業務身分（userId/sessionId/room）。呼叫端要用什麼方式把「使用者/房間」轉換成一批 `ConnectionId`，是呼叫端（未來業務層）自己的責任。
+- **Consequences**：介面維持乾淨，連線層完全不用因為業務語意變化（例如以後房間規則改變）而跟著改。
+
+### ADR-4：Dispatcher 為無狀態部署單元，獨立於 Gateway 擴展
+
+- **Context**：大量連線場景需要「連線數」（Gateway）跟「路由查詢 + fan-out 投遞」（Dispatcher）各自獨立擴展。
+- **Decision**：Dispatcher 是獨立部署單元，本身無狀態、可任意增減複本；查詢倚賴 `ConnectionDirectory`（Redis Cluster）撐吞吐；大量連線的 fan-out 透過「依 NodeId 批次分組」處理，投遞成本正比於 Gateway 節點數，不是連線數。
+- **Consequences**：多一個網路 hop（上層 → Dispatcher）；換來 Gateway/Dispatcher 兩層可以依各自負載獨立擴展。
+
+### ADR-5（條件觸發）：有狀態 + Sharded Dispatcher
+
+- **Context**：若未來量測顯示 Redis Cluster 查詢延遲/吞吐仍是瓶頸。
+- **Decision（暫緩）**：屆時才考慮讓 Dispatcher 依某種 key 做一致性雜湊分片，記憶體快取部分路由狀態。
+- **觸發條件**：需要先有實測數據證明 ADR-4 的無狀態方案不足，才啟動這個 ADR。
+
+## 8. 明確排除於本階段（留給使用者管理層決定）
+
+- 連線要不要驗證身分、什麼時候驗證（handshake 時？連線後第一則訊息？）。
+- 使用者/Session 概念本身：一個使用者是否只能有一條連線、重複登入要不要 Supersede 舊連線——這些都需要「身分」才能回答，連線層看不到身分。
+- Room、Chat 等業務語意，以及「誰該收到這則訊息」的決策——連線層只負責「把訊息送到給定的 ConnectionId」，不負責決定名單。
+- 斷線後 `ConnectionId` 要不要保留一段時間等待重連——目前只有連線本身的 TTL（存活容錯用），跟「業務上要不要讓使用者恢復原本的房間身分」是兩件事，後者留給使用者管理層。
+
+## 9. 待確認 / 後續事項
+
+- 超大批次投遞（`DeliverRequest.connection_ids` 上萬筆）的 payload 大小上限：需要對照 NATS 的 payload 上限（預設 1MB）決定要不要加分批送出的保護。
+- `ResolveNodesAsync` 用 `Task.WhenAll` 平行送出 N 個 Redis GET，沒有做併發上限；量大時可能需要限流或改用 pipeline API。
+- Gateway 是否需要在 handshake 階段做任何驗證（即使不涉及「使用者身分」，例如限流、來源檢查），待決定連線層的安全邊界時再補。
