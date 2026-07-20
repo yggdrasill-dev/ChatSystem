@@ -358,6 +358,6 @@ public class ConnectionLifecycle(
 
 ## 9. 待確認 / 後續事項
 
-- 超大批次投遞（`DeliverRequest.connection_ids` 上萬筆）的 payload 大小上限：需要對照 NATS 的 payload 上限（預設 1MB）決定要不要加分批送出的保護。
-- `ResolveNodesAsync` 用 `Task.WhenAll` 平行送出 N 個 Redis GET，沒有做併發上限；量大時可能需要限流或改用 pipeline API。
+- **已完成**：超大批次投遞（`DeliverRequest.connection_ids` 上萬筆）的 payload 大小上限保護。新增 `Common/Delivery/DeliveryBatching.cs`，依 payload 大小動態算出每則訊息最多帶幾個 `connectionId`（保守值：訊息上限 900KB、每個 connectionId 估 40 bytes，皆未經負載測試驗證，之後有實測數據再調整），`OutboundGateway.DeliverAsync` 與 `DispatchHandler`（同一個 NodeId 分組後）都改成依此分批送出多則訊息，不再假設單一 `DeliverRequest`/`DeliverPacket` 一定裝得下。
+- **已完成**：`ResolveNodesAsync` 併發上限。原本 `Task.WhenAll` 平行送出 N 個 Redis GET 沒有上限，改用 `Parallel.ForEachAsync` 搭配 `MaxDegreeOfParallelism = 64` 限制同時進行的數量（同樣是憑經驗抓的保守暫定值，未經負載測試）。
 - Gateway 是否需要在 handshake 階段做任何驗證（即使不涉及「使用者身分」，例如限流、來源檢查），待決定連線層的安全邊界時再補。
