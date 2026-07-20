@@ -32,4 +32,29 @@ public class OutboundGatewayTests
 			&& request.ConnectionIds.SequenceEqual(connectionIds)
 			&& request.Payload.ToStringUtf8() == payloadText;
 	}
+
+	[Fact]
+	public async Task DeliverAsync_SplitsIntoMultiplePublishes_WhenBatchWouldExceedSizeBudget()
+	{
+		var sender = Substitute.For<IMessageSender>();
+		var gateway = new OutboundGateway(sender);
+
+		// payload 刻意調大，讓 DeliveryBatching 算出的批次上限縮小到方便測試的數量
+		var payload = ByteString.CopyFrom(new byte[880_000]);
+		var connectionIds = Enumerable.Range(0, 1_200).Select(i => $"conn-{i}").ToArray();
+
+		var publishedBatches = new List<string[]>();
+		sender
+			.PublishAsync(
+				Arg.Any<string>(),
+				Arg.Do<byte[]>(bytes => publishedBatches.Add(DeliverRequest.Parser.ParseFrom(bytes).ConnectionIds.ToArray())),
+				Arg.Any<IEnumerable<MessageHeaderValue>>(),
+				Arg.Any<CancellationToken>())
+			.Returns(ValueTask.CompletedTask);
+
+		await gateway.DeliverAsync("chat.receive", connectionIds, payload);
+
+		Assert.True(publishedBatches.Count > 1, "Expected the large connection id batch to be split across multiple publishes.");
+		Assert.Equal(connectionIds, publishedBatches.SelectMany(b => b));
+	}
 }

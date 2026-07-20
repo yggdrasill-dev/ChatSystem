@@ -73,4 +73,37 @@ public class DispatchHandlerTests
 			&& packet.Payload.ToStringUtf8() == "hi"
 			&& packet.ConnectionIds.OrderBy(id => id).SequenceEqual(expectedConnectionIds.OrderBy(id => id));
 	}
+
+	[Fact]
+	public async Task HandleAsync_SplitsSingleNodeGroupIntoMultiplePackets_WhenBatchWouldExceedSizeBudget()
+	{
+		var connectionIds = Enumerable.Range(0, 1_200).Select(i => $"conn-{i}").ToArray();
+
+		var directory = Substitute.For<IConnectionDirectory>();
+		directory
+			.ResolveNodesAsync(Arg.Any<IReadOnlyCollection<string>>(), Arg.Any<CancellationToken>())
+			.Returns(connectionIds.ToDictionary(id => id, _ => "node-1"));
+
+		var sender = Substitute.For<IMessageSender>();
+		var handler = new DispatchHandler(directory, sender, NullLogger<DispatchHandler>.Instance);
+
+		// payload 刻意調大，讓 DeliveryBatching 算出的批次上限縮小到方便測試的數量
+		var payload = ByteString.CopyFrom(new byte[880_000]);
+		var request = new DeliverRequest { Subject = "chat.receive", Payload = payload };
+		request.ConnectionIds.AddRange(connectionIds);
+
+		var publishedPacketIds = new List<string[]>();
+		sender
+			.PublishAsync(
+				"connect.deliver.node-1",
+				Arg.Do<byte[]>(bytes => publishedPacketIds.Add(DeliverPacket.Parser.ParseFrom(bytes).ConnectionIds.ToArray())),
+				Arg.Any<IEnumerable<MessageHeaderValue>>(),
+				Arg.Any<CancellationToken>())
+			.Returns(ValueTask.CompletedTask);
+
+		await handler.HandleAsync("dispatch.deliver", request.ToByteArray(), null);
+
+		Assert.True(publishedPacketIds.Count > 1, "Expected node-1's large connection batch to be split across multiple packets.");
+		Assert.Equal(connectionIds.OrderBy(id => id), publishedPacketIds.SelectMany(ids => ids).OrderBy(id => id));
+	}
 }

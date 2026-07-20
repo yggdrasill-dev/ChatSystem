@@ -1,6 +1,7 @@
 using Adaptare;
 using Chat.Protos;
 using Common.Connections;
+using Common.Delivery;
 using Google.Protobuf;
 
 namespace Dispatcher;
@@ -27,12 +28,17 @@ public sealed class DispatchHandler(
 
 		foreach (var group in nodesByConnection.GroupBy(kv => kv.Value, kv => kv.Key))
 		{
-			var packet = new DeliverPacket { Subject = request.Subject, Payload = request.Payload };
-			packet.ConnectionIds.AddRange(group);
+			var groupedConnectionIds = group.ToArray();
 
-			await messageSender
-				.PublishAsync($"connect.deliver.{group.Key}", packet.ToByteArray(), cancellationToken)
-				.ConfigureAwait(false);
+			foreach (var batch in DeliveryBatching.Chunk(groupedConnectionIds, request.Payload.Length))
+			{
+				var packet = new DeliverPacket { Subject = request.Subject, Payload = request.Payload };
+				packet.ConnectionIds.AddRange(batch);
+
+				await messageSender
+					.PublishAsync($"connect.deliver.{group.Key}", packet.ToByteArray(), cancellationToken)
+					.ConfigureAwait(false);
+			}
 		}
 
 		logger.LogInformation(

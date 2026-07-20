@@ -8,15 +8,18 @@ internal sealed class OutboundGateway(IMessageSender messageSender) : IOutboundG
 {
 	private const string DispatchSubject = "dispatch.deliver";
 
-	public ValueTask DeliverAsync(
+	public async ValueTask DeliverAsync(
 		string subject,
 		IReadOnlyCollection<string> connectionIds,
 		ByteString payload,
 		CancellationToken cancellationToken = default)
 	{
-		var request = new DeliverRequest { Subject = subject, Payload = payload };
-		request.ConnectionIds.AddRange(connectionIds);
+		foreach (var batch in DeliveryBatching.Chunk(connectionIds, payload.Length))
+		{
+			var request = new DeliverRequest { Subject = subject, Payload = payload };
+			request.ConnectionIds.AddRange(batch);
 
-		return messageSender.PublishAsync(DispatchSubject, request.ToByteArray(), cancellationToken);
+			await messageSender.PublishAsync(DispatchSubject, request.ToByteArray(), cancellationToken).ConfigureAwait(false);
+		}
 	}
 }
