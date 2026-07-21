@@ -43,7 +43,7 @@
 | 層 | 涵蓋範圍 | 狀態 |
 |---|---|---|
 | 連線層（Gateway/Dispatcher） | 一條 WebSocket 連線怎麼被持有、定址、投遞 | 已完成核心設計與實作，收尾中 |
-| 身分/使用者管理層 | Google OAuth 登入、Session、ConnectionId 對應使用者身分、重複登入 Supersede 規則 | 待設計 |
+| 身分/使用者管理層 | Google OAuth 登入、Session、ConnectionId 對應使用者身分、重複登入 Supersede 規則 | 設計中，見 [identity-layer.md](architecture/identity-layer.md) |
 | 房間層 | 建立/加入房間、密碼房、房間成員管理、房間後台 | 待設計 |
 | 聊天層 | 訊息收發、訊息歷史記錄 | 待設計 |
 | WebClient | 前端重做 | 待設計/待實作 |

@@ -39,6 +39,7 @@
 | `Dispatcher`（新） | 無 | 無狀態部署單元，接收「投遞請求」（`subject` + 一批 `ConnectionId` + `payload`），查 `ConnectionDirectory` 依 `NodeId` 分組後投遞給對應 Gateway 節點 |
 | `OutboundGateway` | 業務層裡手寫的 `connect.send.{connectorId}` | 上層呼叫連線層的**唯一入口**：`DeliverAsync(subject, connectionIds, payload)`。參數只接受 `ConnectionId`，不接受 userId/sessionId——那個轉換是上層自己的事 |
 | `ConnectionLifecycle` | handler 裡手動串接的多個 Command | 聚合 OnConnect / OnDisconnect 該發生的步驟順序與失敗處理（目前只有：註冊/移除 `ConnectionRegistry`、註冊/移除 `ConnectionDirectory`） |
+| `IConnectionTerminator`（新） | 無（現有實作沒有這個能力，只有收到對方 Close frame 時被動關閉） | 上層（身分層）主動終止指定 `ConnectionId` 的能力，設計脈絡見 ADR-7 |
 
 ## 4. 元件關係圖
 
@@ -61,16 +62,20 @@ graph TB
 
     subgraph Common
         OG["OutboundGateway\n(DeliverAsync 呼叫端介面)"]
+        CT["IConnectionTerminator\n(TerminateAsync 呼叫端介面)"]
         MQ[IMessageQueueService]
     end
 
     subgraph "Dispatcher（無狀態，可任意增減複本）"
         DP[DispatchHandler]
+        TP[TerminateHandler]
     end
 
     subgraph "NATS"
         SUB3[("subject: dispatch.deliver")]
         SUB2[("subject: connect.deliver.{nodeId}")]
+        SUB4[("subject: dispatch.terminate")]
+        SUB5[("subject: connect.terminate.{nodeId}")]
     end
 
     subgraph "上層（使用者管理層 / 業務層，尚未設計）"
@@ -89,6 +94,14 @@ graph TB
     SUB2 --> DH
     DH -- TryDeliver --> CR
     CR -- send --> CH
+
+    UP -- "TerminateAsync(connectionIds)" --> CT
+    CT -- publish 終止請求 --> SUB4
+    SUB4 --> TP
+    TP -- 批次查詢 NodeId --> CD
+    TP -- 依 NodeId 分組後 publish --> SUB5
+    SUB5 --> TH[TerminatePacketHandler]
+    TH -- TryClose --> CR
 ```
 
 ## 5. 訊息序列
@@ -133,6 +146,27 @@ sequenceDiagram
     Bus->>GWB: DeliveryHandler.HandleAsync（只收到自己那份）
 ```
 
+### 5.3 上層主動終止一批連線
+
+```mermaid
+sequenceDiagram
+    participant Up as 上層（未來身分層，見 identity-layer.md）
+    participant CT as IConnectionTerminator (Common)
+    participant Bus as NATS
+    participant Disp as Dispatcher
+    participant CD as ConnectionDirectory (Redis)
+    participant GWA as Gateway (Node A)
+
+    Up->>CT: TerminateAsync([connIdX, ...])
+    CT->>Bus: publish("dispatch.terminate", TerminateRequest)
+    Bus->>Disp: TerminateHandler.HandleAsync
+    Disp->>CD: 批次查詢 connectionIds 對應的 NodeId
+    Disp->>Disp: 依 NodeId 分組
+    Disp->>Bus: publish("connect.terminate.{NodeA}", ...)
+    Bus->>GWA: TerminatePacketHandler.HandleAsync（只收到自己那份）
+    GWA->>GWA: ConnectionRegistry.TryCloseAsync → Connection.CloseAsync
+```
+
 ## 6. 具體介面設計
 
 沿用 `Common` 現有的介面慣例（`ICommandService<T>` / `IGetService<TQuery,TResult>` / `IMessageHandler` + `AddHandler<THandler>(subject, group)` 的 queue-group 訂閱機制）。
@@ -159,6 +193,16 @@ message DeliverPacket {
 	string subject = 1;
 	repeated string connection_ids = 2;
 	bytes payload = 3;
+}
+
+// 上層 -> IConnectionTerminator -> Dispatcher：未分組的終止請求（見 ADR-7）
+message TerminateRequest {
+	repeated string connection_ids = 1;
+}
+
+// Dispatcher -> Gateway：已依 NodeId 分組後的終止封包
+message TerminatePacket {
+	repeated string connection_ids = 1;
 }
 ```
 
@@ -308,6 +352,50 @@ public class ConnectionLifecycle(
 
 這裡刻意**不含任何身分驗證、不呼叫任何「註冊使用者」的動作**——跟現有 `ClientConnectHandler` 最大的差異就是這裡。身分驗證要不要在 Gateway 這一層做（例如握手時檢查 token），是下一階段要決定的事；連線層目前假設「能接受 WebSocket handshake 的就是一條合法連線」。
 
+### 6.6 `IConnectionTerminator`（`Common`，新）——設計脈絡見 ADR-7
+
+身分層設計 Supersede（同一身分同時只能有一條連線生效）時，發現連線層原本沒有任何「主動終止指定連線」的能力——`ConnectionRegistry` 只公開 `Add`/`Remove`/`TryDeliverAsync`，`Connection.CloseAsync` 只有在收到對方送出的 Close frame 時被 `GatewayWebSocketEndpoint` 自己呼叫。這裡補上這個能力，設計上完全複用 `IOutboundGateway`/`Dispatcher`/`DeliverPacketHandler` 已經建立的 fan-out 模式，只是把「投遞資料」換成「終止連線」：
+
+```csharp
+namespace Common;
+
+public interface IConnectionTerminator
+{
+	ValueTask TerminateAsync(IReadOnlyCollection<string> connectionIds);
+}
+
+internal class ConnectionTerminator(IMessageQueueService messageQueueService) : IConnectionTerminator
+{
+	private const string DispatchSubject = "dispatch.terminate";
+
+	public ValueTask TerminateAsync(IReadOnlyCollection<string> connectionIds)
+	{
+		var request = new TerminateRequest();
+		request.ConnectionIds.AddRange(connectionIds);
+
+		return messageQueueService.PublishAsync(DispatchSubject, request.ToByteArray());
+	}
+}
+```
+
+`Dispatcher` 端新增對稱的 `TerminateHandler`（訂閱 `dispatch.terminate`，查 `ConnectionDirectory.ResolveNodesAsync` 依 NodeId 分組後 publish 到 `connect.terminate.{nodeId}`，邏輯結構跟 `DispatchHandler` 完全一樣，只是把 `DeliverPacket` 換成 `TerminatePacket`）。
+
+`Gateway` 端新增 `TerminatePacketHandler`（訂閱 `connect.terminate.{nodeId}`），呼叫 `ConnectionRegistry` 新增的方法：
+
+```csharp
+public async ValueTask<bool> TryCloseAsync(string connectionId, CancellationToken cancellationToken = default)
+{
+	if (!m_Connections.TryGetValue(connectionId, out var connection))
+		return false;
+
+	await connection.CloseAsync(WebSocketCloseStatus.PolicyViolation, "Superseded by a newer connection.", cancellationToken).ConfigureAwait(false);
+
+	return true;
+}
+```
+
+查不到的 `connectionId`（連線已經自然斷開）直接回傳 `false`，不報錯——沿用 `ResolveNodesAsync` 查不到就省略的既有慣例，呼叫端（身分層）不需要特別處理「舊連線其實已經斷了」這種情況。
+
 ## 7. 架構決策記錄（ADR）
 
 ### ADR-1：連線層只認得 `ConnectionId`，不引入身分/Session 概念
@@ -349,6 +437,12 @@ public class ConnectionLifecycle(
   - `Aspire.NATS.Net` 底層是新版 `NATS.Net`（`NATS.Client.Core`）非同步用戶端，跟舊 `main` 分支用的 `NATS.Client`（classic 同步用戶端）不是同一套 API；`Common` 裡 `IMessageQueueService`/`IMessageHandler` 這類抽象要對著新用戶端重新設計，不能直接照搬舊程式碼。
   - 部署到正式環境時，Aspire 的資源定義可以轉成 manifest 餵給對應的部署工具，但這次先只處理本地開發編排，正式環境的部署方式待後續另立 ADR。
 
+### ADR-7：新增 `IConnectionTerminator`，讓上層能主動終止指定連線
+
+- **Context**：設計身分層的 Supersede 規則（同一身分同時只能有一條連線生效，詳見 `identity-layer.md` ADR-4）時，發現連線層完全沒有「主動終止連線」的能力——`connection-layer.md` 第 8 節原本的排除清單也沒提到這件事，代表這不是刻意排除，是設計當時沒預想到的盲點（那時候身分層還沒開始設計，自然想不到這個需求）。
+- **Decision**：新增獨立介面 `IConnectionTerminator`（不併入 `IOutboundGateway`），複用 `Dispatcher`/`ConnectionDirectory` 已經建立的 fan-out 模式，設計見第 6.6 節。選擇獨立介面而非併入 `IOutboundGateway`，是因為「投遞資料」跟「終止生命週期」語意不同，符合這個 codebase 既有的單一職責小介面風格（`IConnectionDirectory`、`IOutboundGateway` 都是各自獨立、職責單一的小介面）。
+- **Consequences**：連線層原始碼（`ConnectionRegistry`、`ConnectionLifecycle`）不需要修改設計思路，只是新增 `TryCloseAsync` 方法跟一組對稱的 Dispatcher/Gateway handler，風險很小；代價是又多了一組 NATS subject（`dispatch.terminate`/`connect.terminate.{nodeId}`）要維護。**設計已定案，尚未實作**（見第 9 節）。
+
 ## 8. 明確排除於本階段（留給使用者管理層決定）
 
 - 連線要不要驗證身分、什麼時候驗證（handshake 時？連線後第一則訊息？）。
@@ -361,3 +455,4 @@ public class ConnectionLifecycle(
 - **已完成**：超大批次投遞（`DeliverRequest.connection_ids` 上萬筆）的 payload 大小上限保護。新增 `Common/Delivery/DeliveryBatching.cs`，依 payload 大小動態算出每則訊息最多帶幾個 `connectionId`（保守值：訊息上限 900KB、每個 connectionId 估 40 bytes，皆未經負載測試驗證，之後有實測數據再調整），`OutboundGateway.DeliverAsync` 與 `DispatchHandler`（同一個 NodeId 分組後）都改成依此分批送出多則訊息，不再假設單一 `DeliverRequest`/`DeliverPacket` 一定裝得下。
 - **已完成**：`ResolveNodesAsync` 併發上限。原本 `Task.WhenAll` 平行送出 N 個 Redis GET 沒有上限，改用 `Parallel.ForEachAsync` 搭配 `MaxDegreeOfParallelism = 64` 限制同時進行的數量（同樣是憑經驗抓的保守暫定值，未經負載測試）。
 - Gateway 是否需要在 handshake 階段做任何驗證（即使不涉及「使用者身分」，例如限流、來源檢查），待決定連線層的安全邊界時再補。
+- **待實作**：`IConnectionTerminator`（ADR-7）目前只完成設計（第 6.6 節、proto 訊息、mermaid 圖已更新），實際的 `TerminateHandler`（Dispatcher）、`TerminatePacketHandler`（Gateway）、`ConnectionRegistry.TryCloseAsync` 都還沒寫，是身分層（`identity-layer.md`）設計時發現的新增需求。
