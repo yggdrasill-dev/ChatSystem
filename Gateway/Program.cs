@@ -11,6 +11,9 @@ var builder = WebApplication.CreateBuilder(args);
 	builder.AddRedisClient("connection-directory");
 	builder.Services.AddConnectionDirectory();
 
+	// 連線關閉時對上層發事件（房間層要靠它做斷線退房）
+	builder.Services.AddConnectionEventPublisher();
+
 	// 訊息匯流排：connect.deliver.{nodeId} / connect.terminate.{nodeId} 訂閱，
 	// 交給 Adaptare.Nats 管理訂閱生命週期
 	builder.AddNatsClient("message-bus");

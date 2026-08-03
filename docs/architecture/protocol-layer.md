@@ -430,7 +430,7 @@ var builder = Host.CreateApplicationBuilder(args);
   - **per-connection 速率限流：先不做**。ADR-2 的 request/reply 已經給了天然節流——單一連線同時只有一則訊息 in-flight，吞吐上限就是 1/RTT，「client 極快速度連發」這個威脅已被結構性地擋掉大半。真要做的話放 `InboundBridge`（Gateway 端），因為一條連線固定在一個節點上，計數器可以純記憶體、不用 Redis，而且能在付出 NATS 往返成本**之前**就擋掉。等有實測數據再決定參數。
   - **per-subject／per-user 業務限流：等有業務規則再做**（例如「每人每秒最多 10 則聊天」），屆時放 `CommandRouter` 的 filter，需要 Redis 做跨節點計數。
 - **handler 例外時要不要回訊息給 client**：ack 會帶 `HANDLER_FAILED` 讓 CommandRouter 記 log 與 metrics，但「client 要不要收到一則錯誤訊息」屬於各命令自己的協定設計，本層不強制。
-- **上層目前收不到「連線已斷開」的通知**：`ConnectionLifecycle.OnDisconnectedAsync` 只清 registry 與 directory，沒有任何對外事件。**房間層設計完成後這已經從「將來會需要」變成硬前置**（`room-layer.md` ADR-3），也是本層 principal 生命週期（現在靠 TTL 撐著）的前置。屬於連線層的變更，見 `connection-layer.md` 第 9 節。
+- ~~**上層目前收不到「連線已斷開」的通知**~~ **已解除**：連線層新增了 `events.connection.disconnected`（`connection-layer.md` 第 6.7 節、ADR-8）。所以若 principal 落在本層，`Principal:{connectionId}` 可以在收到事件時直接刪掉，不必只靠 TTL。但該 ADR 把事件定為 best-effort（process 被 kill 時發不出來），所以仍要留一個長 TTL 當保險，不能假設事件一定送到。
 - **principal 的歸屬討論現在有依據了**：房間層確認了正向解析（principal／userId → connections）**確實需要存在**、而且**必須是批次的**（一間房可能很多成員，逐筆查會變成 N 次來回）。原本擔心「是不是為了罕見的『送給某個 user』在過度設計」已經被排除——房間 fan-out 是主流量。剩下的決定只有擁有者：本層的 `IConnectionPrincipals`（不透明字串、與 `connectionId → principal` 同一個擁有者）還是身分層的 `IPresenceDirectory`（目前文件裡的擁有者）。房間層只有一處呼叫端，事後搬家成本很低。
 
 ## 10. 對既有文件的影響

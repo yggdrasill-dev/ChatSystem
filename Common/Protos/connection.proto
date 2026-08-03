@@ -32,3 +32,10 @@ message TerminateRequest {
 message TerminatePacket {
 	repeated string connection_ids = 1;
 }
+
+// Gateway -> 上層：某條連線已經關閉。
+// best-effort，不保證送達（process 被 kill 時發不出來），訂閱端不能只依賴它。
+message ConnectionDisconnected {
+	string connection_id = 1;
+	string node_id = 2;
+}

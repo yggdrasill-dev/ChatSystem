@@ -119,6 +119,7 @@ public class GatewayWebSocketEndpointTests
 		builder.Services.AddSingleton(new GatewayNodeId("test-node"));
 		builder.Services.AddSingleton<ConnectionRegistry>();
 		builder.Services.AddSingleton(Substitute.For<IConnectionDirectory>());
+		builder.Services.AddSingleton(Substitute.For<IConnectionEventPublisher>());
 		builder.Services.AddSingleton<ConnectionLifecycle>();
 		builder.Services.AddSingleton(inbound);
 

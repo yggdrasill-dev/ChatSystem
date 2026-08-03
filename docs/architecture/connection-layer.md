@@ -412,6 +412,48 @@ public async ValueTask<bool> TryCloseAsync(string connectionId, CancellationToke
 
 另外 `TryCloseAsync` **刻意不呼叫 `Remove`**：socket 關閉後 receive loop 會自然結束，由 `GatewayWebSocketEndpoint` 的 `finally` 走既有的 `OnDisconnectedAsync`，才會連 `ConnectionDirectory` 一起清乾淨。
 
+### 6.7 `IConnectionEventPublisher`（`Common`，新）——設計脈絡見 ADR-8
+
+連線層唯一「主動往上告知」的通道。其他對外能力（`IOutboundGateway`、`IConnectionTerminator`）都是上層呼叫下來，這個是反方向的：
+
+```csharp
+namespace Common.Connections;
+
+public interface IConnectionEventPublisher
+{
+	ValueTask PublishDisconnectedAsync(string connectionId, string nodeId, CancellationToken cancellationToken = default);
+}
+```
+
+subject 是 `events.connection.disconnected`，**刻意不放在 `connect.*` 家族**：那個前綴目前的意思是「投遞給某個 Gateway 節點」（`connect.deliver.{nodeId}`、`connect.terminate.{nodeId}`），而這是反方向的事件廣播、沒有特定目標角色。用 `events.*` 開一個明確的事件命名空間，也避免 `connect.` 跟 `connection.` 只差三個字母的辨識風險。
+
+`ConnectionLifecycle.OnDisconnectedAsync` 在清理完成**之後**才發事件：
+
+```csharp
+public async ValueTask OnDisconnectedAsync(string connectionId, CancellationToken cancellationToken = default)
+{
+	registry.Remove(connectionId);
+	await connectionDirectory.UnregisterAsync(connectionId, cancellationToken).ConfigureAwait(false);
+
+	try
+	{
+		await connectionEventPublisher.PublishDisconnectedAsync(connectionId, nodeId.Value, cancellationToken).ConfigureAwait(false);
+	}
+	catch (OperationCanceledException)
+	{
+		logger.LogDebug(...);   // 關站時每條連線都會走到這裡，不能用 Error 洗 log
+	}
+	catch (Exception ex)
+	{
+		logger.LogError(ex, ...);   // 發不出去不能影響清理本身
+	}
+}
+```
+
+順序有意義：訂閱端收到事件時，這條連線必須已經不在 `ConnectionDirectory` 上，否則會出現「收到斷線通知卻還查得到節點」這種自相矛盾的中間狀態。這個順序有測試釘住。
+
+因為 `IConnectionTerminator` 的關閉路徑最終也會讓 receive loop 結束、走到同一個 `finally`，所以主動終止的連線同樣會發出事件，不需要另外處理。
+
 ## 7. 架構決策記錄（ADR）
 
 ### ADR-1：連線層只認得 `ConnectionId`，不引入身分/Session 概念
@@ -459,6 +501,17 @@ public async ValueTask<bool> TryCloseAsync(string connectionId, CancellationToke
 - **Decision**：新增獨立介面 `IConnectionTerminator`（不併入 `IOutboundGateway`），複用 `Dispatcher`/`ConnectionDirectory` 已經建立的 fan-out 模式，設計見第 6.6 節。選擇獨立介面而非併入 `IOutboundGateway`，是因為「投遞資料」跟「終止生命週期」語意不同，符合這個 codebase 既有的單一職責小介面風格（`IConnectionDirectory`、`IOutboundGateway` 都是各自獨立、職責單一的小介面）。
 - **Consequences**：連線層原始碼（`ConnectionRegistry`、`ConnectionLifecycle`）不需要修改設計思路，只是新增 `TryCloseAsync` 方法跟一組對稱的 Dispatcher/Gateway handler，風險很小；代價是又多了一組 NATS subject（`dispatch.terminate`/`connect.terminate.{nodeId}`）要維護。**設計已定案，尚未實作**（見第 9 節）。
 
+### ADR-8：新增斷線事件，語意是 best-effort，訂閱端不得只依賴它
+
+- **Context**：房間層要做「斷線後寬限期到期就退房」（`room-layer.md` ADR-3），但 `OnDisconnectedAsync` 原本只清自己的 registry 與 `ConnectionDirectory`，上層完全不知道連線消失了。身分層的 `Presence` 與協定層的 principal 生命週期也都在用 TTL 當這個事件的替代品。舊 `main` 分支的做法是在 `ClientConnectHandler.OnDisconnectedAsync` 裡直接呼叫 `LeaveRoomCommand`——連線層直接認識房間，正是這次要拆掉的耦合。
+- **Decision**：新增 `IConnectionEventPublisher`，連線關閉時 publish 到 `events.connection.disconnected`，設計見第 6.7 節。連線層不知道誰在聽、也不等待任何回應。
+- **Consequences**：
+  - **事件是 best-effort，不是保證**。process 被 SIGKILL、機器斷電、publish 本身失敗時，事件都不會送出。所以訂閱端必須設計成「沒收到事件也會正確」——房間層 ADR-2 刻意把正確性放在「讀取名單時過濾過期成員」上、只讓事件加速「離開」廣播，就是照這個前提設計的。任何「只在收到事件時才清理」的上層設計都是錯的。
+  - publish 失敗被吞掉並記 log，不影響 registry/directory 的清理。關站時的 `OperationCanceledException` 降級為 Debug，否則一個節點關站會依連線數產生等量的 Error log。
+  - 關站會產生「連線數量級」的事件突發。目前不批次處理——rolling deploy 時 client 幾秒內就會重連到其他節點，寬限期本來就吸收得掉。真的成為問題再考慮批次或抑制。
+  - 事件**不帶時間戳**，訂閱端收到時自己蓋。少一個「用誰的時鐘」的問題；代價是訂閱端積壓時算出的斷線時間會偏晚。以 30 秒寬限期的量級來說不影響，真的需要再加欄位。
+  - 連線層仍然不認識任何上層概念：事件只帶 `connectionId` 與 `nodeId`，不帶身分、不帶房間。
+
 ## 8. 明確排除於本階段（留給使用者管理層決定）
 
 - 連線要不要驗證身分、什麼時候驗證（handshake 時？連線後第一則訊息？）。
@@ -474,5 +527,5 @@ public async ValueTask<bool> TryCloseAsync(string connectionId, CancellationToke
 - **已完成**：`IConnectionTerminator`（ADR-7）。`Common/Protos/connection.proto` 補上 `TerminateRequest`/`TerminatePacket`（先前第 9 節誤記為已更新，實際上檔案裡沒有）、`Common/Connections/IConnectionTerminator.cs` 與 `ConnectionTerminator`（publish 到 `dispatch.terminate`，沿用 `DeliveryBatching` 做分批保護）、`Dispatcher/TerminateHandler.cs`、`Gateway/Services/TerminatePacketHandler.cs`、`ConnectionRegistry.TryCloseAsync`、`Connection.CloseOutputAsync`，以及 `AddConnectionTerminator()` DI 擴充。實作時修正了第 6.6 節原設計的兩個問題（`CloseAsync` → `CloseOutputAsync`、close description 去掉 Supersede 語意），詳見該節。
 - `AddOutboundGateway()` 與 `AddConnectionTerminator()` 共用的 Adaptare 設定抽成 `Common/NatsMessagingRegistration.cs` 的 `AddNatsMessaging()`，用 marker 確保重複註冊時那組設定只跑一次。（協定層的 `AddInboundBridge()` 後來也共用它，所以名字沒有綁連線層；細節見 `protocol-layer.md` 第 9 節。）
 - **已完成**：inbound 單一訊息的大小上限（256 KB）。`GatewayWebSocketEndpoint` 的 receive loop 用 `MemoryStream` 累積分片訊息，原本**沒有任何總量上限**——client 送一個永不結束的分片訊息就能把這個節點的記憶體吃光。而且這不只是安全問題也是正確性問題：`payload` 之後會被上層 publish 到 NATS（預設 `max_payload` 1MB），收得下也送不出去。超過上限就用 `WebSocketCloseStatus.MessageTooBig` 關閉——這裡沒有「忽略這一則」的選項，因為訊息根本收不完（協定層對「內容錯誤」採取忽略而非關閉的政策見 `protocol-layer.md` ADR-8，兩者不衝突）。用 `CloseOutputAsync` 而非 `CloseAsync`，理由同第 6.6 節。上限值 256 KB 是憑聊天文字的量級抓的，留了足夠餘裕給信封開銷，未來若有貼圖／檔案這類需求要重新評估（但那大概不該走同一條 WebSocket 通道）。
-- **待實作（房間層的硬前置）**：連線斷開時對外發事件。`ConnectionLifecycle.OnDisconnectedAsync` 目前只清 registry 與 `ConnectionDirectory`，上層完全不知道連線消失了。房間層要靠它做「斷線後寬限期到期就退房」（`room-layer.md` ADR-3），身分層的 `Presence` 與協定層的 principal 生命週期也都在用 TTL 當這個事件的替代品。設計時要一併回答：事件走什麼通道（NATS publish 還是 `Common` 的一個抽象）、以及它本質上不可靠這件事（process 被 kill 時發不出來）要怎麼被上層容忍——房間層 ADR-2 已經刻意設計成「不依賴事件也正確」，可以當參考。
+- **已完成**：連線斷開時對外發事件（ADR-8、第 6.7 節）。`Common/Connections/IConnectionEventPublisher.cs` 與 `ConnectionEventPublisher`（publish 到 `events.connection.disconnected`）、`connection.proto` 的 `ConnectionDisconnected`、`AddConnectionEventPublisher()` DI 擴充，`ConnectionLifecycle` 在清理完成後才發、失敗只記 log 不影響清理。這同時解除了房間層 ADR-3 的硬前置，也讓身分層 `Presence` 與協定層 principal 不必再只靠 TTL 撐生命週期。**目前還沒有任何訂閱端**——房間層與身分層都還沒實作，所以事件現在發出去沒人接（core NATS 對沒有訂閱者的 subject publish 是 no-op）。
 - 速率限流（每條連線每秒幾則訊息）目前**沒有做**。`protocol-layer.md` ADR-2 的 request/reply 設計已經給了天然節流——單一連線同時只有一則訊息 in-flight，吞吐上限就是 1/RTT，所以緊迫性不高。要做的話放協定層的 `InboundBridge`（一條連線固定在一個節點上，計數器可以純記憶體），詳見 `protocol-layer.md` 第 9 節。

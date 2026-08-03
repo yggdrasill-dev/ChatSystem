@@ -126,7 +126,7 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     participant GW as Gateway
-    participant EV as 連線層斷線事件（尚不存在，見第 9 節）
+    participant EV as events.connection.disconnected
     participant H as RoomDisconnectHandler
     participant MS as IRoomMembership
     participant SW as RoomGraceSweeper
@@ -346,7 +346,7 @@ internal sealed class RoomGraceSweeper(
 
 ## 9. 待確認 / 後續事項
 
-- **硬前置：連線層的斷線事件**（ADR-3）。`ConnectionLifecycle.OnDisconnectedAsync` 目前不對外發任何事件，房間層沒有它就不知道連線消失了。這是連線層的變更，屬於 `connection-layer.md` 的範圍，而且它同時是身分層 `Presence`／協定層 principal 生命週期的前置（那兩個地方都在用 TTL 當替代品）。建議在動房間層的 code 之前先補這個。
+- ~~**硬前置：連線層的斷線事件**（ADR-3）。~~ **已實作**：`events.connection.disconnected`，設計見 `connection-layer.md` 第 6.7 節與 ADR-8。房間層要訂閱它並在 handler 裡呼叫 `MarkDisconnectedAsync`。注意該 ADR 明確把事件定為 best-effort——本層 ADR-2 的「讀取時過濾」正確性不依賴它，這個前提要繼續維持，不要改成「只在收到事件時才清理」。
 - **房間本身的持久儲存選擇**。`IRoomStore` 與 `IRoomBanList` 是持久資料（房間關掉之後歷史訊息還要能查），不該只放 Redis。但這個決定跟聊天層的訊息記錄是**同一個決定**（同一個資料庫、同一套 migration/備份策略），建議一起做，不要為房間層單獨選一個。介面設計刻意不綁任何儲存技術，所以先實作 Redis 版本再換也可以，只是要接受一次資料遷移。
 - **後台權限模型**：目前只認 `OwnerUserId`。要不要有「多位管理員」或「全站管理員」（例如你自己要能關掉任何房間）？後者會需要一個房間層之外的角色概念。
 - **`ResolveConnectionsAsync` 的擁有者**（見 6.3、第 10 節）：形狀確定，歸屬待定。

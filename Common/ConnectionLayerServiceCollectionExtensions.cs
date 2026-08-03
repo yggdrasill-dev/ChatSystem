@@ -25,4 +25,12 @@ public static class ConnectionLayerServiceCollectionExtensions
 
 		return services.AddSingleton<IConnectionTerminator, ConnectionTerminator>();
 	}
+
+	// 需要先呼叫 builder.AddNatsClient(...) 註冊 INatsConnection。
+	public static IServiceCollection AddConnectionEventPublisher(this IServiceCollection services)
+	{
+		services.AddNatsMessaging();
+
+		return services.AddSingleton<IConnectionEventPublisher, ConnectionEventPublisher>();
+	}
 }
