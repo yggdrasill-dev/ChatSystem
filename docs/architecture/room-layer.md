@@ -180,9 +180,17 @@ public sealed record Room(
 public interface IRoomStore
 {
 	ValueTask<Room?> GetAsync(string roomId, CancellationToken cancellationToken = default);
+
 	ValueTask<IReadOnlyCollection<Room>> ListOpenAsync(CancellationToken cancellationToken = default);
-	ValueTask CreateAsync(Room room, CancellationToken cancellationToken = default);
-	ValueTask UpdateAsync(Room room, CancellationToken cancellationToken = default);
+
+	// 已存在則回 false，不覆寫。
+	ValueTask<bool> TryCreateAsync(Room room, CancellationToken cancellationToken = default);
+
+	// 房間不存在或已關閉則回 false。
+	ValueTask<bool> TryUpdateSettingsAsync(string roomId, string name, string? passwordHash, CancellationToken cancellationToken = default);
+
+	// 房間不存在或已經是關閉狀態則回 false。
+	ValueTask<bool> TryCloseAsync(string roomId, CancellationToken cancellationToken = default);
 }
 
 public interface IRoomBanList
@@ -194,6 +202,30 @@ public interface IRoomBanList
 ```
 
 「關閉房間」用 `IsClosed` 而不是真的刪除：歷史訊息屬於聊天層，房間紀錄如果直接消失，歷史訊息就會變成孤兒（要不要一併刪除是聊天層的決定，見第 9 節）。
+
+**為什麼不是 `GetAsync` + `UpdateAsync`**：初版設計是那樣，但 read-modify-write 會 lost update——兩個房主同時改設定、或 `room.update` 跟 `room.close` 併發都會出問題。而且**併發語意不是事後可以換掉的東西**，它會滲進每個呼叫端的寫法，所以在還沒有任何實作之前就先改掉。每個變更操作現在都是「一次到位、回傳有沒有生效」。
+
+**刻意接受的競爭**（實作時沒有用 Lua 消除，理由寫在這裡以免日後被「修正」成錯的東西）：
+
+- `TryUpdateSettingsAsync` 與 `TryCloseAsync` 併發：可能改到一個正在被關閉的房間的設定。無害——已關閉的房間，設定沒有意義。
+- 兩個 `TryCloseAsync` 併發：兩邊都可能回 `true`，`RoomClosed` 因此廣播兩次。無害——client 對重複的關閉通知照 idempotent 處理，跟 `RoomMemberLeft` 是同一個要求（見 6.5）。
+- `TryCreateAsync` **不能**有競爭：這是唯一需要真正原子的操作，實作用 Redis `SADD` 的回傳值當守門（見下方 key 設計）。
+
+**`OwnerUserId` 不可變更**這件事是刻意的，而且被後台流程依賴：`room.kick` / `room.close` / `room.update` 都是「先讀房間檢查是不是房主、再動作」，看起來像 TOCTOU，但因為房主永遠不會變所以安全。**如果以後要加「轉移房主」功能，這三個流程都要重新檢視。**
+
+**Redis key 設計**（provisional，見 ADR-7）：
+
+| key | 型別 | 用途 |
+|---|---|---|
+| `{rooms}:index` | Set | 所有 roomId。`TryCreateAsync` 用 `SADD` 的回傳值當原子守門，同時也是 `ListOpenAsync` 的來源 |
+| `{rooms}:room:{roomId}` | Hash | `name` / `password_hash` / `owner_user_id` / `created_at` / `is_closed` |
+| `{rooms}:ban:{roomId}` | Set | 封鎖的 userId。`SISMEMBER`／`SADD`／`SREM` 本身就是原子的，`IRoomBanList` 因此不需要 Try 語意 |
+
+`{rooms}` 是 Redis Cluster 的 hash tag，讓房間層所有 key 落在同一個 slot。這是刻意的取捨：代價是這批資料集中在一個節點、無法靠 Cluster 分散，換來的是「同一個操作可以跨 key 保持一致」（例如未來真的需要 Lua 時）。房間資料量小、變更頻率低，可以接受；哪天那個 slot 變成熱點再重新評估。連線層走的是相反選擇——`Conn:{connectionId}` 刻意分散在不同 slot，也因此 `ResolveNodesAsync` 不能用 MGET（見 `connection-layer.md` 6.2）。
+
+`ListOpenAsync` 是 `SMEMBERS` 之後逐筆 `HGETALL`（併發上限比照 `RedisConnectionDirectory` 的 64），也就是 N+1。房間數量小的時候沒問題，這正是 §8 把分頁列為「先不做」時心裡有數的成本。
+
+`TryCreateAsync` 若在 `SADD` 成功之後、`HSET` 之前失敗，index 裡會留下一個沒有 hash 的 roomId。讀取端一律把「hash 不存在」視為房間不存在並跳過，所以那只是垃圾不是錯誤；而且 roomId 由呼叫端每次新產生，重試不會撞到同一個 id。
 
 ### 6.2 `IRoomMembership`（`Common.Rooms`，Redis）
 
@@ -335,6 +367,15 @@ internal sealed class RoomGraceSweeper(
 - **Decision**：存雜湊（加 per-room salt）。房主忘記密碼就用 `room.update` 設一組新的，不提供「查看目前密碼」。
 - **Consequences**：`RoomSummary` 只揭露 `has_password` 布林值。代價是房主無法在 UI 上看到現在的密碼，只能重設——對一個 Demo 專案來說這個取捨很划算，避免了「儲存可還原的密碼」這個一旦做錯就很難補救的決定。
 
+### ADR-7（provisional）：房間與封鎖名單先放 Redis，跟聊天層一起遷到正式儲存
+
+- **Context**：`IRoomStore` / `IRoomBanList` 是持久資料（房間關掉之後歷史訊息還要能查），不該只放 Redis。但真正逼出「需要可查詢的持久儲存」的是聊天層的訊息記錄（要分頁、可能要搜尋），而那還沒設計。另一個選項是先只寫一個 in-memory 實作、等儲存決定了再寫真的。
+- **Decision**：先寫 Redis 實作並明確標為 provisional。正式儲存的選擇跟聊天層的訊息記錄**一起做**，屆時遷移。
+- **Consequences**：
+  - 抽象是跟一個**真的**實作一起設計的，不是只對著 in-memory dictionary 驗證過。這個 repo 有前例：`IConnectionDirectory` 跟 `RedisConnectionDirectory` 一起設計，所以「Cluster 跨 slot 不能 MGET」在設計階段就被發現並寫進 ADR，而不是實作到一半才炸。這次同樣抓到了 hash tag 的取捨與 `TryCreateAsync` 的原子性需求（見 6.1）。
+  - 代價是屆時要遷一次資料。量很小（房間 + 封鎖名單），可以接受。
+  - Redis 要開持久化（AOF／RDB）才配得上「持久資料」這個定位，這跟連線層那個純快取用途的 Redis 需求不同。所以房間層用**自己的** Redis 資源（AppHost 的 `room-store`），不共用 `connection-directory`——同時也符合 `connection-layer.md` ADR-2 的擁有權原則：每一層的基礎設施由自己擁有。因為同一個 process（`CommandRouter`）會同時需要兩個 Redis，房間層的 client 必須用 keyed service 註冊。
+
 ## 8. 明確排除於本階段
 
 - 訊息內容、訊息歷史記錄與其查詢（聊天層）。
@@ -345,6 +386,9 @@ internal sealed class RoomGraceSweeper(
 - 寬限期內訊息的補送（見 ADR-2）。
 
 ## 9. 待確認 / 後續事項
+
+- **已完成**：持久層的抽象與 Redis 實作。`Common/Rooms/`（`Room`、`IRoomStore`、`IRoomBanList`、`RedisRoomStore`、`RedisRoomBanList`、`RoomKeys`）與 `Common/RoomLayerServiceCollectionExtensions.cs` 的 `AddRoomStore(redisServiceKey)`。過程中把 6.1 的介面從 `Get` + `Update` 改成意圖式操作（見該節），並確認了 hash tag 的取捨。**`IRoomMembership` 還沒實作**——它是暫時狀態不是持久層，會跟 handler 一起做。
+- **待做**：AppHost 的 `room-store` Redis 資源與 `CommandRouter` 的 `AddKeyedRedisClient` 註冊。刻意還沒加——目前沒有任何東西消費 `IRoomStore`，先加只會是死接線（而且 Aspire 會多起一個沒人用的容器）。等 handler 落地時一起接。
 
 - ~~**硬前置：連線層的斷線事件**（ADR-3）。~~ **已實作**：`events.connection.disconnected`，設計見 `connection-layer.md` 第 6.7 節與 ADR-8。房間層要訂閱它並在 handler 裡呼叫 `MarkDisconnectedAsync`。注意該 ADR 明確把事件定為 best-effort——本層 ADR-2 的「讀取時過濾」正確性不依賴它，這個前提要繼續維持，不要改成「只在收到事件時才清理」。
 - **房間本身的持久儲存選擇**。`IRoomStore` 與 `IRoomBanList` 是持久資料（房間關掉之後歷史訊息還要能查），不該只放 Redis。但這個決定跟聊天層的訊息記錄是**同一個決定**（同一個資料庫、同一套 migration/備份策略），建議一起做，不要為房間層單獨選一個。介面設計刻意不綁任何儲存技術，所以先實作 Redis 版本再換也可以，只是要接受一次資料遷移。
