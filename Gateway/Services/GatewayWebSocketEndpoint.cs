@@ -9,6 +9,12 @@ public static class GatewayWebSocketEndpoint
 {
 	private const int ReceiveBufferSize = 8192;
 
+	// 單一 inbound 訊息的大小上限。兩個理由都不是可選的：
+	// 1. 分片訊息沒有上限的話，client 送一個永不結束的分片就能把這個節點的記憶體吃光。
+	// 2. payload 之後會被上層 publish 到 NATS（預設 max_payload 1MB），
+	//    收得下也送不出去，不如在這裡就拒絕。
+	private const int MaxMessageBytes = 256 * 1024;
+
 	public static void MapGatewayWebSocket(this WebApplication app, string pattern = "/ws")
 	{
 		app.Map(pattern, async (
@@ -31,7 +37,7 @@ public static class GatewayWebSocketEndpoint
 
 			try
 			{
-				await ReceiveLoopAsync(connection, inbound, cancellationToken);
+				await ReceiveLoopAsync(connection, inbound, logger, cancellationToken);
 			}
 			catch (OperationCanceledException)
 			{
@@ -52,6 +58,7 @@ public static class GatewayWebSocketEndpoint
 	private static async Task ReceiveLoopAsync(
 		Connection connection,
 		IInboundMessageHandler inbound,
+		ILogger logger,
 		CancellationToken cancellationToken)
 	{
 		var buffer = new byte[ReceiveBufferSize];
@@ -70,6 +77,22 @@ public static class GatewayWebSocketEndpoint
 					// 收到對方的 close frame 後要送出自己的 close frame 完成 handshake，
 					// 否則對方呼叫 CloseAsync 等待回應時會拿到 WebSocketException。
 					await connection.CloseAsync(WebSocketCloseStatus.NormalClosure, null, cancellationToken).ConfigureAwait(false);
+					return;
+				}
+
+				if (stream.Length + result.Count > MaxMessageBytes)
+				{
+					logger.LogWarning(
+						"{ConnectionId} exceeded the {MaxMessageBytes} byte inbound message limit, closing.",
+						connection.ConnectionId,
+						MaxMessageBytes);
+
+					// 用 CloseOutputAsync 而非 CloseAsync：這裡不等對方回應，直接結束迴圈讓
+					// finally 收尾。剩下的分片不再讀，socket 釋放時一併中止。
+					await connection
+						.CloseOutputAsync(WebSocketCloseStatus.MessageTooBig, null, cancellationToken)
+						.ConfigureAwait(false);
+
 					return;
 				}
 

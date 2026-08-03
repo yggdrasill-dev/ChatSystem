@@ -203,7 +203,7 @@ internal sealed class InboundBridge(
 	ILogger<InboundBridge> logger) : IInboundMessageHandler
 {
 	private const string InboundSubject = "command.inbound";
-	private static readonly TimeSpan _Timeout = TimeSpan.FromSeconds(5); // 值待確認，見第 9 節
+	private static readonly TimeSpan _Timeout = TimeSpan.FromSeconds(10); // 為什麼是 10 秒見第 9 節
 
 	public async ValueTask HandleAsync(
 		string connectionId,
@@ -390,6 +390,18 @@ var builder = Host.CreateApplicationBuilder(args);
 - **Decision（暫緩）**：屆時才考慮由 `InboundBridge` 依 `hash(connectionId)` 分流到固定的 shard subject，改用 fire-and-forget 但保住每連線順序。
 - **觸發條件**：需要實測數據證明 request/reply 的吞吐不足。這與 `connection-layer.md` ADR-5 是同一類決策，應該一起評估。
 
+### ADR-8：狀態違反才終止連線，內容錯誤只記 log 並忽略
+
+- **Context**：協定層會遇到三類壞輸入——未知 subject、payload 解析失敗、以及「這條連線現在不該送這個 subject」（例如還沒綁定身分就發業務命令）。本文件初稿的傾向是未知 subject 忽略、payload 畸形 terminate，但這個不對稱撐不住檢驗。
+- **Decision**：依「壞的是這一則訊息，還是這條連線」劃線。
+  - **內容錯誤**（未知 subject、payload 解析失敗）→ 記 log + metrics，忽略該則訊息，**連線保留**。
+  - **狀態違反**（`IInboundFilter` 回傳 `Terminate`，例如未綁定身分就送業務命令）→ 終止連線。
+- **Consequences**：
+  - 未知 subject 不能 terminate 的理由很實際：WebClient 是從靜態站台載入的，rolling deploy 期間必然出現「新 client + 舊 `CommandRouter`」，terminate 會造成大量斷線。要記 **warning** 而非 debug 並加 counter，因為它同時是「版本錯位」與「有人在亂送」的訊號。
+  - payload 畸形也不 terminate，是因為 client 幾乎都會自動重連，terminate 會變成「重連 → 送同一個壞封包 → 又被踢」的緊迫迴圈，而每次重連的成本（WebSocket handshake + Redis 寫入）比直接忽略那則訊息貴得多——為了防濫用反而製造更大的負載。
+  - 濫用不靠 terminate 防，靠限流與訊息大小上限（見第 9 節），那才是對症的工具。
+  - 代價：client 送出壞封包時只會「什麼都沒發生」，不會收到錯誤回應。要讓 client 知道就得在協定裡加一種錯誤訊息型別，屬於各命令自己的協定設計（見第 9 節 handler 例外那條），本層不強制。
+
 ## 8. 明確排除於本階段
 
 - 具體命令的業務語意：身分綁定屬身分層、房間/聊天屬更上層，本層只提供註冊與分派機制。
@@ -400,11 +412,13 @@ var builder = Host.CreateApplicationBuilder(args);
 ## 9. 待確認 / 後續事項
 
 - **已決定**：服務專案名為 `CommandRouter`，NATS subject 前綴為 `command.inbound`（沿用「前綴對應目標角色」的既有慣例：`dispatch.*` 給 `Dispatcher`、`connect.*` 給 Gateway 節點）。`Command` 這個字是用來跟 `Dispatcher` 區隔——`Dispatcher` 搬的是不理解內容的投遞封包，這個服務處理的是已解析成型別的命令；單獨叫 `Router` 會跟 `Dispatcher` 語意撞車（兩者幾乎同義，光看專案清單 `Gateway / Dispatcher / Router / Common` 猜不出哪個是上行哪個是下行）。排除 `Ingress`：k8s Ingress 有既定含義（HTTP 反向代理／入口控制器），會被誤認成基礎設施元件。排除 `Protocol`：協定層的共用抽象已經用 `Common.Protocol` 命名空間，服務同名會打架。**保留的風險**：ADR-1 預期未來某個業務會拆成自己的宿主 process，屆時「唯一的 CommandRouter」這個命名會變尷尬（不會有 `CommandRouter2`）。真要拆時再改名，subject 前綴要一起改，成本不小但可控。
-- **`InboundBridge` 的 timeout 值與逾時後行為**。目前寫 5 秒，並讓例外往上丟導致連線關閉（client 重連重送）。傾向這樣而不是默默丟掉那則訊息——一則聊天訊息無聲消失比斷線重連糟。要注意 `GatewayWebSocketEndpoint.cs:36` 會把 `OperationCanceledException` 當正常關站吞掉，所以 log 必須記在 bridge 裡（6.2 已這樣寫）。
-- **未知 subject 的政策**：傾向記 log + 忽略（前向兼容，讓新版 client 對舊版 CommandRouter 時不會直接斷線），不 terminate。
-- **payload 畸形的政策**：傾向視為協定違反直接 terminate。這兩條政策方向不同，需要確認是刻意的。
-- **`CommandRouter` 是否 per-command 開 DI scope**：`Gateway/Program.cs:25` 目前 inbound handler 註冊為 singleton；身分層的 `ISessionStore`/`IPresenceDirectory` 也都是 Redis singleton，所以初期不需要 scope。但將來 handler 若要碰 scoped 資源（例如 DbContext），要決定是 per-command 開 scope 還是各 handler 自己用 `IServiceScopeFactory`。
-- **限流參數**（per-connection / per-subject）：跟 `connection-layer.md` 第 9 節「Gateway 要不要在 handshake 階段做限流/來源檢查」是同一個安全邊界問題，建議一起決定。
+- **已決定**：`InboundBridge` 的 timeout 為 **10 秒**，逾時就讓連線關閉（client 重連重送）。關鍵是先認清 timeout 在防什麼——NATS 有 no-responders 機制，`CommandRouter` 整個掛掉時 `RequestAsync` 會立刻失敗而不是等到逾時（Adaptare 怎麼把這個表面化，實作時要確認），所以 timeout 只覆蓋「Router 活著但太慢」也就是過載。既然是過載，就要給得寬鬆到能吸收 GC pause 與 Redis failover（Sentinel／Cluster failover 常在數秒級）而不誤殺大量活著的連線；handler 本身只是幾次 Redis 往返，正常是毫秒級。**不選「記 log 後繼續讀下一個 frame」**，因為那則逾時的訊息可能還在路上、稍後才被 Router 處理，ADR-2 好不容易保住的單連線順序就破了。要接受的粗糙處：例外往上丟會被 `GatewayWebSocketEndpoint.cs:36` 的 `catch (OperationCanceledException)` 吞掉、socket 直接被 dispose，client 看到的是 1006 abnormal closure 而不是乾淨的 close frame（所以 log 必須記在 bridge 裡，6.2 已這樣寫）。想要乾淨關閉得讓 bridge 自己呼叫 `IConnectionTerminator` 繞 Dispatcher 回到同一個 Gateway——為一個關閉繞一圈不值得。
+- **已決定**：未知 subject 與 payload 畸形**都是 log + 忽略，不關連線**，見 ADR-8。這修正了本節先前「未知 subject 忽略、payload 畸形 terminate」的傾向。
+- **已決定**：`CommandRouter` **一開始就 per-command 開 DI scope**，handler 註冊為 scoped，`ISessionStore`／`IPresenceDirectory`／`PacketRegistry` 維持 singleton。目前所有依賴都是 Redis singleton、確實不需要 scope，但 `using var scope = scopeFactory.CreateScope()` 是三行的事，而事後補是破壞性的——handler 的生命週期假設一旦改變會產生 captive dependency 那類難查的問題。而且「一則命令」對應「一個 request」是 .NET 的預設心智模型，將來寫 handler 的人會直覺假設 scoped 語意。（舊 `main` 的 `ClientConnectHandler.OnReceiveAsync` 正是 `CreateScope()` 沒有 `using` 的 scope 洩漏，這區域值得一開始就做對。）
+- **已決定**：限流分三塊處理。
+  - **訊息大小上限：已實作**（連線層）。`GatewayWebSocketEndpoint` 的 receive loop 原本用 `MemoryStream` 累積分片但沒有總量上限，client 送一個永不結束的分片就能吃光節點記憶體；而且 payload 之後要 publish 到 NATS（預設 `max_payload` 1MB），收得下也送不出去。已加上 256 KB 上限，超過就以 `MessageTooBig` 關閉。詳見 `connection-layer.md` 第 9 節。
+  - **per-connection 速率限流：先不做**。ADR-2 的 request/reply 已經給了天然節流——單一連線同時只有一則訊息 in-flight，吞吐上限就是 1/RTT，「client 極快速度連發」這個威脅已被結構性地擋掉大半。真要做的話放 `InboundBridge`（Gateway 端），因為一條連線固定在一個節點上，計數器可以純記憶體、不用 Redis，而且能在付出 NATS 往返成本**之前**就擋掉。等有實測數據再決定參數。
+  - **per-subject／per-user 業務限流：等有業務規則再做**（例如「每人每秒最多 10 則聊天」），屆時放 `CommandRouter` 的 filter，需要 Redis 做跨節點計數。
 - **handler 例外時要不要回訊息給 client**：ack 會帶 `HANDLER_FAILED` 讓 CommandRouter 記 log 與 metrics，但「client 要不要收到一則錯誤訊息」屬於各命令自己的協定設計，本層不強制。
 - **上層目前收不到「連線已斷開」的通知**：`ConnectionLifecycle.OnDisconnectedAsync` 只清 registry 與 directory，沒有任何對外事件。房間層將來一定會需要（斷線要退房），這需要連線層新增一個對外事件，屬於連線層的變更，不在本文件範圍——但要記在案，因為它會影響房間層的設計順序。
 
