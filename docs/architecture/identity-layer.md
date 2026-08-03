@@ -32,8 +32,8 @@
 | `ISessionStore`（新，`Common`） | `SessionToken → UserId`，opaque token，Redis 存放，7 天、隨活動 sliding 續期（見 ADR-2、ADR-3） |
 | Session Cookie | `httpOnly` + `Secure` + `SameSite=Lax`，存 `SessionToken` |
 | `IPresenceDirectory`（新，`Common`） | `UserId → 目前的 ConnectionId`（單一值）實作 Supersede（見 ADR-4），外加 `ConnectionId → UserId` 反向索引供協定層守門 filter 查詢（見 ADR-8） |
-| `IdentityBindHandler`（新，註冊在協定層 `Router` 的 `IPacketHandler<BindRequest>`） | WebSocket 連線建立後收到的第一則訊息：驗證 Session、查/綁定 Presence、必要時踢掉舊連線 |
-| `IdentityBoundFilter`（新，註冊在協定層 `Router` 的 `IInboundFilter`） | 守門規則：連線還沒綁定身分前，除 `identity.bind` 以外的 subject 一律拒絕（見 `protocol-layer.md` ADR-6） |
+| `IdentityBindHandler`（新，註冊在協定層 `CommandRouter` 的 `IPacketHandler<BindRequest>`） | WebSocket 連線建立後收到的第一則訊息：驗證 Session、查/綁定 Presence、必要時踢掉舊連線 |
+| `IdentityBoundFilter`（新，註冊在協定層 `CommandRouter` 的 `IInboundFilter`） | 守門規則：連線還沒綁定身分前，除 `identity.bind` 以外的 subject 一律拒絕（見 `protocol-layer.md` ADR-6） |
 | `IConnectionTerminator`（連線層新增，非此層擁有） | 此層呼叫連線層的能力，強制關閉指定 `ConnectionId`。設計見 `connection-layer.md` ADR-7 |
 
 ## 4. 元件關係圖
@@ -62,7 +62,7 @@ graph TB
         BR["InboundBridge\n(協定層元件，寄宿於此)"]
     end
 
-    subgraph "Router（協定層，見 protocol-layer.md）"
+    subgraph "CommandRouter（協定層，見 protocol-layer.md）"
         FL["IdentityBoundFilter\n(身分層註冊)"]
         IB["IdentityBindHandler\n(身分層註冊)"]
     end
@@ -79,7 +79,7 @@ graph TB
     WC -- "3. WebSocket 連線" --> WS
     WC -- "4. 送出 identity.bind(BindRequest)" --> WS
     WS --> BR
-    BR -- "router.inbound（request/reply）" --> FL
+    BR -- "command.inbound（request/reply）" --> FL
     FL -- "Allow" --> IB
     IB -- "ResolveUserIdAsync" --> SS
     IB -- "GetCurrentConnectionIdAsync / BindAsync" --> PD
@@ -113,7 +113,7 @@ sequenceDiagram
 sequenceDiagram
     participant WC as WebClient
     participant GW as Gateway
-    participant RT as Router（協定層）
+    participant RT as CommandRouter（協定層）
     participant IB as IdentityBindHandler
     participant SS as ISessionStore
     participant PD as IPresenceDirectory
@@ -123,7 +123,7 @@ sequenceDiagram
     WC->>GW: WebSocket 連線（帶 Cookie）
     GW->>GW: ConnectionLifecycle.OnConnectedAsync（不碰身分，照舊）
     WC->>GW: 第一則訊息 identity.bind(BindRequest)
-    GW->>RT: InboundBridge → RequestAsync("router.inbound", InboundPacket)
+    GW->>RT: InboundBridge → RequestAsync("command.inbound", InboundPacket)
     RT->>RT: filter pipeline → registry 解出 BindRequest
     RT->>IB: HandleAsync(connectionId, BindRequest)
     IB->>SS: ResolveUserIdAsync(sessionToken)
@@ -175,7 +175,7 @@ public interface IPresenceDirectory
 
 Supersede 的踢人動作由呼叫端（`IdentityBindHandler`）在覆寫前自己查出舊值再呼叫 `IConnectionTerminator`，`IPresenceDirectory` 本身不知道終止連線這件事。
 
-### 6.3 `IdentityBindHandler`（註冊在協定層 `Router`）
+### 6.3 `IdentityBindHandler`（註冊在協定層 `CommandRouter`）
 
 身分綁定是「連線建立後的第一則 inbound 訊息」，但 subject 比對與 payload 解析都由協定層負責，這層只實作 handler 本身：
 
@@ -222,7 +222,7 @@ internal sealed class IdentityBindHandler(
 services.AddPacket<BindRequest>("identity.bind").WithHandler<IdentityBindHandler>();
 ```
 
-### 6.4 `IdentityBoundFilter`（註冊在協定層 `Router`）
+### 6.4 `IdentityBoundFilter`（註冊在協定層 `CommandRouter`）
 
 守門規則：連線還沒綁定身分前，除了 `identity.bind` 以外的 subject 一律拒絕。這條規則橫跨所有命令，所以放在協定層的 filter pipeline，而不是每個 handler 自己檢查。
 
@@ -310,7 +310,7 @@ var sessionToken = await sessionStore.CreateSessionAsync(payload.Subject);
 
 ### ADR-8：`IPresenceDirectory` 增加 `ConnectionId → UserId` 反向索引
 
-- **Context**：協定層的守門 filter（`protocol-layer.md` ADR-6）需要回答「這條連線綁定身分了沒」，但 ADR-4 決定的 schema 只有 `UserId → ConnectionId` 單向。`Router` 是多複本無狀態服務，任何複本都可能收到任何連線的訊息，這個狀態不能放在 `Router` 記憶體裡。
+- **Context**：協定層的守門 filter（`protocol-layer.md` ADR-6）需要回答「這條連線綁定身分了沒」，但 ADR-4 決定的 schema 只有 `UserId → ConnectionId` 單向。`CommandRouter` 是多複本無狀態服務，任何複本都可能收到任何連線的訊息，這個狀態不能放在 `CommandRouter` 記憶體裡。
 - **Decision**：新增反向 key `ConnectionUser:{connectionId}` → `userId`，`BindAsync` 時與正向 key 一起寫入。
 - **Consequences**：`ConnectionId` 是每條連線新產生的 Guid、不會重用，所以殘留的舊值不會被誤判成有效綁定（跟 ADR-7 同一個推論）。但 ADR-7「刻意不設 TTL」的理由不適用於反向 key——正向 key 每個身分只有一筆、會被下次登入覆寫，反向 key 是每條連線一筆、永遠不會被覆寫，沒有 TTL 就會無上限成長，所以必須設。TTL 長度需要決定（見第 9 節）：取 Session 的 7 天太長（連線活不了那麼久），取連線層 `ConnectionDirectory` 的 30 秒又太短（身分層沒有對應的心跳續命機制）。
 

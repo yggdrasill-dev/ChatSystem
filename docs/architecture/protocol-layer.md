@@ -34,12 +34,12 @@
 
 | 概念 | 職責 |
 |---|---|
-| `InboundPacket`（proto，新） | Gateway → Router 的信封：`connection_id` + `subject` + `payload` |
-| `InboundAck`（proto，新） | Router → Gateway 的處理結果。**只用於順序控制與觀測**，Gateway 不依據它做任何動作（見 ADR-5） |
-| `InboundBridge`（協定層元件，寄宿在 Gateway process） | 取代 `NoOpInboundMessageHandler` 的 DI 註冊。把 `(connectionId, subject, payload)` 用 request/reply 送給 Router，收到 ack 才讓 receive loop 讀下一個 frame |
-| `Router`（新服務，命名待定見第 9 節） | 訂閱 `router.inbound`（掛 queue group），跑 filter pipeline → 查 registry → 解析 → 分派 |
+| `InboundPacket`（proto，新） | Gateway → CommandRouter 的信封：`connection_id` + `subject` + `payload` |
+| `InboundAck`（proto，新） | CommandRouter → Gateway 的處理結果。**只用於順序控制與觀測**，Gateway 不依據它做任何動作（見 ADR-5） |
+| `InboundBridge`（協定層元件，寄宿在 Gateway process） | 取代 `NoOpInboundMessageHandler` 的 DI 註冊。把 `(connectionId, subject, payload)` 用 request/reply 送給 CommandRouter，收到 ack 才讓 receive loop 讀下一個 frame |
+| `CommandRouter`（新服務） | 訂閱 `command.inbound`（掛 queue group），跑 filter pipeline → 查 registry → 解析 → 分派 |
 | `PacketRegistry` | `subject ↔ 訊息型別` 的唯一對應表，**入站解析與出站序列化共用同一份** |
-| `IPacketHandler<TMessage>` | 各層/各功能自己實作的命令 handler，向 Router 註冊 |
+| `IPacketHandler<TMessage>` | 各層/各功能自己實作的命令 handler，向 CommandRouter 註冊 |
 | `IInboundFilter` | 分派前的前置條件檢查，只看得到 `connectionId` + `subject`，看不到 payload（見 ADR-6） |
 | `IPacketPublisher` | 出口：把 typed 訊息轉成 `(subject, bytes)` 後呼叫既有的 `IOutboundGateway`，下行一律經 `Dispatcher`（見 ADR-5） |
 
@@ -56,7 +56,7 @@ graph TB
         IB["InboundBridge\n(協定層元件，寄宿於此\n取代 NoOpInboundMessageHandler)"]
     end
 
-    subgraph "Router（協定層，新服務）"
+    subgraph "CommandRouter（協定層，新服務）"
         IP[InboundProcessor]
         FP["IInboundFilter pipeline"]
         RG[("PacketRegistry\nsubject ↔ 型別")]
@@ -72,7 +72,7 @@ graph TB
 
     WC -- "WebSocket Packet" --> WS
     WS -- "IInboundMessageHandler\n(connectionId, subject, payload)" --> IB
-    IB -- "request/reply\nrouter.inbound" --> IP
+    IB -- "request/reply\ncommand.inbound" --> IP
     IP --> FP
     FP --> RG
     RG --> H1
@@ -94,13 +94,13 @@ sequenceDiagram
     participant WC as WebClient
     participant WS as GatewayWebSocketEndpoint
     participant IB as InboundBridge
-    participant RT as Router
+    participant RT as CommandRouter
     participant H as IPacketHandler
 
     WC->>WS: WebSocket frame（Packet）
     WS->>WS: Packet.Parser.ParseFrom（連線層：只拆信封）
     WS->>IB: HandleAsync(connectionId, subject, payload)
-    IB->>RT: RequestAsync("router.inbound", InboundPacket)
+    IB->>RT: RequestAsync("command.inbound", InboundPacket)
     RT->>RT: filter pipeline
     RT->>RT: registry 查 subject → 型別
     RT->>RT: TMessage.Parser.ParseFrom(payload)（協定層：解內容）
@@ -140,7 +140,7 @@ sequenceDiagram
 sequenceDiagram
     participant WC as WebClient
     participant IB as InboundBridge
-    participant RT as Router
+    participant RT as CommandRouter
     participant CT as IConnectionTerminator
     participant DP as Dispatcher
     participant GW as 連線所在的 Gateway 節點
@@ -155,7 +155,7 @@ sequenceDiagram
     Note over IB: 只記 log，不自己關連線（ADR-5）
 ```
 
-這裡有個要注意的交錯：等待 ack 的 Gateway 節點，跟收到 terminate 的 Gateway 節點是同一個。`Connection.CloseAsync` 會在 receive loop 還在 await ack 時把 close frame 送出去，socket 狀態變成 `CloseSent`；ack 回來後 receive loop 檢查 `connection.State == WebSocketState.Open` 不成立就自然結束，`finally` 照原本流程跑 `OnDisconnectedAsync`。兩者不會互相踩到——`Connection` 的 `m_SendLock` 已經保證 `SendAsync`/`CloseAsync` 互相排隊。
+這裡有個要注意的交錯：等待 ack 的 Gateway 節點，跟收到 terminate 的 Gateway 節點是同一個。`Connection.CloseOutputAsync` 會在 receive loop 還在 await ack 時把 close frame 送出去，socket 狀態變成 `CloseSent`；ack 回來後 receive loop 檢查 `connection.State == WebSocketState.Open` 不成立就自然結束，`finally` 照原本流程跑 `OnDisconnectedAsync`。兩者不會互相踩到——`Connection` 的 `m_SendLock` 已經保證送出類的呼叫互相排隊。（連線層刻意用 `CloseOutputAsync` 而非 `CloseAsync`，正是為了不跟 receive loop 搶同一個 receive，見 `connection-layer.md` 第 6.6 節。）
 
 ## 6. 具體介面設計
 
@@ -168,14 +168,14 @@ syntax = "proto3";
 option csharp_namespace = "Chat.Protos";
 package chat;
 
-// Gateway（InboundBridge）-> Router：一則來自 client 的封包，附上它來自哪條連線。
+// Gateway（InboundBridge）-> CommandRouter：一則來自 client 的封包，附上它來自哪條連線。
 message InboundPacket {
 	string connection_id = 1;
 	string subject = 2;
 	bytes payload = 3;
 }
 
-// Router -> Gateway（InboundBridge）：處理結果。
+// CommandRouter -> Gateway（InboundBridge）：處理結果。
 // 只用於順序控制與觀測，Gateway 不依據它做任何動作（見 ADR-5）。
 message InboundAck {
 	enum Status {
@@ -194,7 +194,7 @@ message InboundAck {
 ### 6.2 `InboundBridge`（協定層元件，寄宿在 Gateway process）
 
 ```csharp
-namespace Protocol; // 專案/命名空間名稱待定，見第 9 節
+namespace CommandRouter; // 共用抽象放 Common.Protocol，見 6.3 節
 
 // 取代 Gateway/Program.cs 裡 NoOpInboundMessageHandler 的 DI 註冊。
 // 這是協定層的元件、只是寄宿在 Gateway process，連線層程式碼不需要任何修改。
@@ -202,7 +202,7 @@ internal sealed class InboundBridge(
 	IMessageSender messageSender,
 	ILogger<InboundBridge> logger) : IInboundMessageHandler
 {
-	private const string RouterSubject = "router.inbound";
+	private const string InboundSubject = "command.inbound";
 	private static readonly TimeSpan _Timeout = TimeSpan.FromSeconds(5); // 值待確認，見第 9 節
 
 	public async ValueTask HandleAsync(
@@ -224,7 +224,7 @@ internal sealed class InboundBridge(
 		try
 		{
 			var reply = await messageSender
-				.RequestAsync<byte[], byte[]>(RouterSubject, packet.ToByteArray(), timeout.Token)
+				.RequestAsync<byte[], byte[]>(InboundSubject, packet.ToByteArray(), timeout.Token)
 				.ConfigureAwait(false);
 
 			var ack = InboundAck.Parser.ParseFrom(reply);
@@ -236,9 +236,9 @@ internal sealed class InboundBridge(
 		}
 		catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
 		{
-			// Router 沒回應。這個例外往上丟之後會被連線層當成正常關站吞掉
+			// CommandRouter 沒回應。這個例外往上丟之後會被連線層當成正常關站吞掉
 			// （GatewayWebSocketEndpoint.cs:36），所以 log 一定要在這裡記。
-			logger.LogError("{ConnectionId} {Subject} timed out waiting for router.", connectionId, subject);
+			logger.LogError("{ConnectionId} {Subject} timed out waiting for the command router.", connectionId, subject);
 			throw;
 		}
 	}
@@ -265,7 +265,7 @@ public interface IPacketHandler<TMessage> where TMessage : IMessage<TMessage>
 註冊時把 subject 一起宣告，讓每個 subject 字面值在整個 codebase 只出現一次：
 
 ```csharp
-// 身分層在 Router 的組裝處註冊自己的命令
+// 身分層在 CommandRouter 的組裝處註冊自己的命令
 services.AddPacket<BindRequest>("identity.bind").WithHandler<IdentityBindHandler>();
 
 // 只出現在下行的訊息型別也要宣告 subject，這樣 IPacketPublisher 才反查得到
@@ -283,7 +283,7 @@ public enum FilterDecision
 {
 	Allow,
 	Drop,      // 忽略這則封包，連線保留
-	Terminate, // 視為協定違反，Router 統一呼叫 IConnectionTerminator
+	Terminate, // 視為協定違反，CommandRouter 統一呼叫 IConnectionTerminator
 }
 
 public interface IInboundFilter
@@ -298,7 +298,7 @@ public interface IInboundFilter
 }
 ```
 
-處置動作（`IConnectionTerminator`、log、metrics）一律由 Router 統一執行，filter 只回傳判斷。身分層的「未綁定前只接受 `identity.bind`」就是註冊一個這種 filter（見第 10 節：身分層需要補一個目前沒有的反向查詢）。
+處置動作（`IConnectionTerminator`、log、metrics）一律由 CommandRouter 統一執行，filter 只回傳判斷。身分層的「未綁定前只接受 `identity.bind`」就是註冊一個這種 filter（見第 10 節：身分層需要補一個目前沒有的反向查詢）。
 
 ### 6.5 出口：`IPacketPublisher`
 
@@ -317,7 +317,7 @@ public interface IPacketPublisher
 
 實作只有三行：registry 反查 subject → `message.ToByteString()` → 呼叫既有的 `IOutboundGateway.DeliverAsync`。呼叫端從此不再手寫 subject 字串、不再自己 `ToByteArray()`。
 
-### 6.6 `Router` 服務的組裝樣貌
+### 6.6 `CommandRouter` 服務的組裝樣貌
 
 ```csharp
 var builder = Host.CreateApplicationBuilder(args);
@@ -340,7 +340,7 @@ var builder = Host.CreateApplicationBuilder(args);
 		.AddMessageQueue()
 		.AddNatsMessageQueue(config => config
 			.ConfigureResolveConnection(sp => (NatsConnection)sp.GetRequiredService<INatsConnection>())
-			.AddProcessor<InboundProcessor>("router.inbound", "router.inbound")); // 第二個參數為 queue group
+			.AddProcessor<InboundProcessor>("command.inbound", "command.inbound")); // 第二個參數為 queue group
 }
 ```
 
@@ -351,20 +351,20 @@ var builder = Host.CreateApplicationBuilder(args);
 ### ADR-1：協定層獨立成服務，Gateway 只保留一個 thin bridge
 
 - **Context**：`IInboundMessageHandler` 是單一插槽。若讓各層直接在 Gateway process 內實作，Gateway 會逐漸變成業務邏輯的宿主，部署上跟業務綁在一起。
-- **Decision**：協定層獨立成 `Router` 服務；Gateway 只寄宿一個 `InboundBridge`。
-- **Consequences**：Gateway 維持純管道，跟下行的 `Dispatcher` 形成對稱；業務 handler 可以獨立更新、獨立擴展。代價有三個：每則 inbound 多一次網路 hop；`Router` 成為所有業務 handler 的宿主 process（未來某個業務要獨立擴展，再讓它訂閱自己的 subject 拆出去）；`Router` 全掛時 inbound 全斷，但下行（`Dispatcher`）不受影響。
+- **Decision**：協定層獨立成 `CommandRouter` 服務；Gateway 只寄宿一個 `InboundBridge`。
+- **Consequences**：Gateway 維持純管道，跟下行的 `Dispatcher` 形成對稱；業務 handler 可以獨立更新、獨立擴展。代價有三個：每則 inbound 多一次網路 hop；`CommandRouter` 成為所有業務 handler 的宿主 process（未來某個業務要獨立擴展，再讓它訂閱自己的 subject 拆出去）；`CommandRouter` 全掛時 inbound 全斷，但下行（`Dispatcher`）不受影響。
 
-### ADR-2：Gateway → Router 用 request/reply，不用 fire-and-forget publish
+### ADR-2：Gateway → CommandRouter 用 request/reply，不用 fire-and-forget publish
 
 - **Context**：拆成獨立服務 + queue group 之後，同一條連線的兩則訊息會被分到不同複本並行處理，訊息順序不再保證。對聊天系統這是實質錯誤（聊天記錄順序錯亂），而且第一個踩到的是身分綁定——`identity.bind` 還沒處理完，後面的業務訊息就先被處理了。
 - **Decision**：`InboundBridge` 用 `IMessageSender.RequestAsync` 送出並等待 `InboundAck` 才返回。因為連線層的 receive loop 是「`await` 完 `HandleAsync` 才讀下一個 frame」（`GatewayWebSocketEndpoint.cs:84`），單一連線同時最多一則訊息 in-flight，端到端順序因此被保證；不同連線之間仍完全並行（各自有獨立的 receive loop）。
-- **Consequences**：不需要引入 `connectionId` 分片，`connection-layer.md` ADR-5 維持暫緩。代價：每則 inbound 多一次 NATS round-trip；單一連線的 inbound 吞吐上限變成 1/RTT（叢集內亞毫秒級，聊天場景遠遠夠用，但不適用高頻串流類的 subject）；`Router` 變慢或掛掉會直接反壓到 receive loop——這其實是想要的行為，避免 Gateway 無上限累積待處理訊息。
+- **Consequences**：不需要引入 `connectionId` 分片，`connection-layer.md` ADR-5 維持暫緩。代價：每則 inbound 多一次 NATS round-trip；單一連線的 inbound 吞吐上限變成 1/RTT（叢集內亞毫秒級，聊天場景遠遠夠用，但不適用高頻串流類的 subject）；`CommandRouter` 變慢或掛掉會直接反壓到 receive loop——這其實是想要的行為，避免 Gateway 無上限累積待處理訊息。
 
-### ADR-3：固定使用單一 NATS subject `router.inbound`，不把 client 的 subject 拼進 NATS subject
+### ADR-3：固定使用單一 NATS subject `command.inbound`，不把 client 的 subject 拼進 NATS subject
 
-- **Context**：更省事的做法是 `PublishAsync($"router.inbound.{clientSubject}", ...)`，讓 NATS 自己做分派、Router 連 registry 都不用寫。舊 `main` 分支正是這個方向，而且更徹底——`SendQueueCommandService` 直接把 client 給的 subject 當 NATS subject 用。
-- **Decision**：固定單一 subject，分派由 `Router` 內部的 registry 負責。
-- **Consequences**：客戶端無法決定訊息發布到哪個 NATS subject，內部 messaging 拓樸不再有一部分由客戶端輸入決定；未知 subject、payload 畸形、限流、per-subject 觀測都有唯一的著力點；「未綁定身分前只接受 `identity.bind`」這種跨命令規則也才有地方放（靠 NATS 分派的話每個 handler 都得自己檢查）。代價：`Router` 不能靠 NATS subject 做水平分流，所有 inbound 都經過同一個 queue group——要分流是加複本，不是加 subject。
+- **Context**：更省事的做法是 `PublishAsync($"command.inbound.{clientSubject}", ...)`，讓 NATS 自己做分派、CommandRouter 連 registry 都不用寫。舊 `main` 分支正是這個方向，而且更徹底——`SendQueueCommandService` 直接把 client 給的 subject 當 NATS subject 用。
+- **Decision**：固定單一 subject，分派由 `CommandRouter` 內部的 registry 負責。
+- **Consequences**：客戶端無法決定訊息發布到哪個 NATS subject，內部 messaging 拓樸不再有一部分由客戶端輸入決定；未知 subject、payload 畸形、限流、per-subject 觀測都有唯一的著力點；「未綁定身分前只接受 `identity.bind`」這種跨命令規則也才有地方放（靠 NATS 分派的話每個 handler 都得自己檢查）。代價：`CommandRouter` 不能靠 NATS subject 做水平分流，所有 inbound 都經過同一個 queue group——要分流是加複本，不是加 subject。
 
 ### ADR-4：`subject ↔ 型別` 用 DI 收集的 registry，不用 `oneof` 大信封也不用 `Any`
 
@@ -374,17 +374,17 @@ var builder = Host.CreateApplicationBuilder(args);
 
 ### ADR-5：下行一律經 `Dispatcher`，協定層不自己開第二條下行通道
 
-- **Context**：`InboundAck` 是 Router 回 Gateway 的既有通道，技術上可以順便夾帶「關掉這條連線」或「把這則訊息回給 client」，省一次繞行——特別是目標連線往往就在發出 request 的那個 Gateway 節點上。
+- **Context**：`InboundAck` 是 CommandRouter 回 Gateway 的既有通道，技術上可以順便夾帶「關掉這條連線」或「把這則訊息回給 client」，省一次繞行——特別是目標連線往往就在發出 request 的那個 Gateway 節點上。
 - **Decision**：不這樣做。ack 只表達處理結果，僅用於順序控制與觀測。任何要送回 client 的訊息走 `IPacketPublisher` → `IOutboundGateway` → `dispatch.deliver` → `Dispatcher`；任何要關的連線走 `IConnectionTerminator` → `dispatch.terminate` → `Dispatcher`。
-- **Consequences**：下行只有一條路徑，`InboundBridge` 完全不需要知道「投遞」或「終止連線」這些概念，維持 thin；也不會出現「同一件事有兩套機制、行為卻不完全一致」的長期維護問題。代價：即使目標連線就在原本那個節點上，訊息仍會繞 `Router` → `Dispatcher` → 同一個 Gateway 一圈，多一次 hop 加一次 Redis 查詢。這個浪費是刻意接受的。
+- **Consequences**：下行只有一條路徑，`InboundBridge` 完全不需要知道「投遞」或「終止連線」這些概念，維持 thin；也不會出現「同一件事有兩套機制、行為卻不完全一致」的長期維護問題。代價：即使目標連線就在原本那個節點上，訊息仍會繞 `CommandRouter` → `Dispatcher` → 同一個 Gateway 一圈，多一次 hop 加一次 Redis 查詢。這個浪費是刻意接受的。
 
 ### ADR-6：前置條件用 filter pipeline，由各層自己註冊
 
 - **Context**：「未綁定身分前只接受 `identity.bind`」需要一個統一的著力點，但若由協定層直接實作，協定層就反過來依賴身分層。
-- **Decision**：協定層只定義 `IInboundFilter`（只看得到 `connectionId` + `subject`），身分層自己註冊 filter；處置動作由 Router 統一執行。
+- **Decision**：協定層只定義 `IInboundFilter`（只看得到 `connectionId` + `subject`），身分層自己註冊 filter；處置動作由 CommandRouter 統一執行。
 - **Consequences**：依賴方向維持向下，協定層不認識身分概念，延續 `connection-layer.md` ADR-1 的精神。代價：身分層需要一個目前設計裡沒有的「`ConnectionId` → 是否已綁定」查詢（見第 10 節）。
 
-### ADR-7（條件觸發）：`Router` 依 `connectionId` 分片
+### ADR-7（條件觸發）：`CommandRouter` 依 `connectionId` 分片
 
 - **Context**：若 ADR-2 的「每連線 1/RTT」吞吐上限成為實際瓶頸。
 - **Decision（暫緩）**：屆時才考慮由 `InboundBridge` 依 `hash(connectionId)` 分流到固定的 shard subject，改用 fire-and-forget 但保住每連線順序。
@@ -399,22 +399,22 @@ var builder = Host.CreateApplicationBuilder(args);
 
 ## 9. 待確認 / 後續事項
 
-- **專案與命名空間名稱**：`Router` 是取「下行有 `Dispatcher`、上行對稱有 `Router`」的意思，也可能叫 `Protocol` / `Ingress`。沿用 `identity-layer.md` 的處理方式，先標待定。
+- **已決定**：服務專案名為 `CommandRouter`，NATS subject 前綴為 `command.inbound`（沿用「前綴對應目標角色」的既有慣例：`dispatch.*` 給 `Dispatcher`、`connect.*` 給 Gateway 節點）。`Command` 這個字是用來跟 `Dispatcher` 區隔——`Dispatcher` 搬的是不理解內容的投遞封包，這個服務處理的是已解析成型別的命令；單獨叫 `Router` 會跟 `Dispatcher` 語意撞車（兩者幾乎同義，光看專案清單 `Gateway / Dispatcher / Router / Common` 猜不出哪個是上行哪個是下行）。排除 `Ingress`：k8s Ingress 有既定含義（HTTP 反向代理／入口控制器），會被誤認成基礎設施元件。排除 `Protocol`：協定層的共用抽象已經用 `Common.Protocol` 命名空間，服務同名會打架。**保留的風險**：ADR-1 預期未來某個業務會拆成自己的宿主 process，屆時「唯一的 CommandRouter」這個命名會變尷尬（不會有 `CommandRouter2`）。真要拆時再改名，subject 前綴要一起改，成本不小但可控。
 - **`InboundBridge` 的 timeout 值與逾時後行為**。目前寫 5 秒，並讓例外往上丟導致連線關閉（client 重連重送）。傾向這樣而不是默默丟掉那則訊息——一則聊天訊息無聲消失比斷線重連糟。要注意 `GatewayWebSocketEndpoint.cs:36` 會把 `OperationCanceledException` 當正常關站吞掉，所以 log 必須記在 bridge 裡（6.2 已這樣寫）。
-- **未知 subject 的政策**：傾向記 log + 忽略（前向兼容，讓新版 client 對舊版 Router 時不會直接斷線），不 terminate。
+- **未知 subject 的政策**：傾向記 log + 忽略（前向兼容，讓新版 client 對舊版 CommandRouter 時不會直接斷線），不 terminate。
 - **payload 畸形的政策**：傾向視為協定違反直接 terminate。這兩條政策方向不同，需要確認是刻意的。
-- **`Router` 是否 per-command 開 DI scope**：`Gateway/Program.cs:25` 目前 inbound handler 註冊為 singleton；身分層的 `ISessionStore`/`IPresenceDirectory` 也都是 Redis singleton，所以初期不需要 scope。但將來 handler 若要碰 scoped 資源（例如 DbContext），要決定是 per-command 開 scope 還是各 handler 自己用 `IServiceScopeFactory`。
+- **`CommandRouter` 是否 per-command 開 DI scope**：`Gateway/Program.cs:25` 目前 inbound handler 註冊為 singleton；身分層的 `ISessionStore`/`IPresenceDirectory` 也都是 Redis singleton，所以初期不需要 scope。但將來 handler 若要碰 scoped 資源（例如 DbContext），要決定是 per-command 開 scope 還是各 handler 自己用 `IServiceScopeFactory`。
 - **限流參數**（per-connection / per-subject）：跟 `connection-layer.md` 第 9 節「Gateway 要不要在 handshake 階段做限流/來源檢查」是同一個安全邊界問題，建議一起決定。
-- **handler 例外時要不要回訊息給 client**：ack 會帶 `HANDLER_FAILED` 讓 Router 記 log 與 metrics，但「client 要不要收到一則錯誤訊息」屬於各命令自己的協定設計，本層不強制。
+- **handler 例外時要不要回訊息給 client**：ack 會帶 `HANDLER_FAILED` 讓 CommandRouter 記 log 與 metrics，但「client 要不要收到一則錯誤訊息」屬於各命令自己的協定設計，本層不強制。
 - **上層目前收不到「連線已斷開」的通知**：`ConnectionLifecycle.OnDisconnectedAsync` 只清 registry 與 directory，沒有任何對外事件。房間層將來一定會需要（斷線要退房），這需要連線層新增一個對外事件，屬於連線層的變更，不在本文件範圍——但要記在案，因為它會影響房間層的設計順序。
 
 ## 10. 對既有文件的影響
 
 ### `identity-layer.md`（已同步修訂）
 
-- **第 3 節表格**：`identity.bind inbound handler（Gateway 端 DI 插件）` 那一列拆成兩列——`IdentityBindHandler`（註冊在 `Router` 的 `IPacketHandler<BindRequest>`）與 `IdentityBoundFilter`（註冊在 `Router` 的 `IInboundFilter`）。取代 `NoOpInboundMessageHandler` 的是協定層的 `InboundBridge`，不是身分層。
-- **第 4 節元件關係圖**：新增 `Router` subgraph，`IB` 從 `Gateway` 移進去，`Gateway` 內改放 `InboundBridge`。
-- **第 5.2 節序列圖**：`Gateway` 與 handler 之間插入 `Router` 這一跳，並在結尾補上 `InboundAck` 與「Gateway 才讀下一個 frame」。
+- **第 3 節表格**：`identity.bind inbound handler（Gateway 端 DI 插件）` 那一列拆成兩列——`IdentityBindHandler`（註冊在 `CommandRouter` 的 `IPacketHandler<BindRequest>`）與 `IdentityBoundFilter`（註冊在 `CommandRouter` 的 `IInboundFilter`）。取代 `NoOpInboundMessageHandler` 的是協定層的 `InboundBridge`，不是身分層。
+- **第 4 節元件關係圖**：新增 `CommandRouter` subgraph，`IB` 從 `Gateway` 移進去，`Gateway` 內改放 `InboundBridge`。
+- **第 5.2 節序列圖**：`Gateway` 與 handler 之間插入 `CommandRouter` 這一跳，並在結尾補上 `InboundAck` 與「Gateway 才讀下一個 frame」。
 - **第 6.2 節**：`IPresenceDirectory` 新增 `GetBoundUserIdAsync(connectionId)`。
 - **第 6.3 節**：`IdentityBindingInboundHandler : IInboundMessageHandler` 連同 `if (subject != "identity.bind") return;` 改寫成 `IPacketHandler<BindRequest>`，`payload.ToStringUtf8()` 換成 typed 欄位，新增 `BindRequest { string session_token = 1; }` 放身分層自己的 proto。原本「啟動時把這個實作換掉 `NoOpInboundMessageHandler` 的 DI 註冊即可」那句已移除。
 - **新增第 6.4 節**：`IdentityBoundFilter`，原本的 `POST /login` 順移為 6.5。
@@ -422,4 +422,4 @@ var builder = Host.CreateApplicationBuilder(args);
 
 ### `connection-layer.md` 不需要修改設計
 
-協定層只使用連線層既有的 `IInboundMessageHandler` 插槽、`IOutboundGateway`、`IConnectionTerminator`，沒有要求連線層新增或改變任何東西。本層 ADR-5 與 ADR-6 的前置條件 `IConnectionTerminator`（該文件 ADR-7）已實作完成，`Router` 只要 `AddConnectionTerminator()` 就能用。
+協定層只使用連線層既有的 `IInboundMessageHandler` 插槽、`IOutboundGateway`、`IConnectionTerminator`，沒有要求連線層新增或改變任何東西。本層 ADR-5 與 ADR-6 的前置條件 `IConnectionTerminator`（該文件 ADR-7）已實作完成，`CommandRouter` 只要 `AddConnectionTerminator()` 就能用。
