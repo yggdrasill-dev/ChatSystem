@@ -8,6 +8,7 @@
 
   <ItemGroup>
     <Protobuf Include="Protos\connection.proto" GrpcServices="None" />
+    <Protobuf Include="Protos\protocol.proto" GrpcServices="None" />
   </ItemGroup>
 
   <ItemGroup>

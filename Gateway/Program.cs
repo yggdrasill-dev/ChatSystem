@@ -22,8 +22,9 @@ var builder = WebApplication.CreateBuilder(args);
 	builder.Services.AddSingleton<ConnectionRegistry>();
 	builder.Services.AddSingleton<ConnectionLifecycle>();
 
-	// 使用者管理層/業務層還沒設計，先用 no-op 佔位，之後直接換掉這個註冊即可
-	builder.Services.AddSingleton<IInboundMessageHandler, NoOpInboundMessageHandler>();
+	// 上行封包交給協定層的 InboundBridge（request/reply 到 command.inbound），
+	// 由 CommandRouter 負責解析與分派。Gateway 本身不解讀 payload。
+	builder.Services.AddInboundBridge();
 
 	builder.Services
 		.AddMessageQueue()

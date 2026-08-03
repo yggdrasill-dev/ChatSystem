@@ -194,8 +194,6 @@ internal sealed class IdentityBindHandler(
 	IPresenceDirectory presenceDirectory,
 	IConnectionTerminator connectionTerminator) : IPacketHandler<BindRequest>
 {
-	public static MessageParser<BindRequest> Parser => BindRequest.Parser;
-
 	public async ValueTask HandleAsync(string connectionId, BindRequest message, CancellationToken cancellationToken = default)
 	{
 		var userId = await sessionStore.ResolveUserIdAsync(message.SessionToken).ConfigureAwait(false);
@@ -219,7 +217,7 @@ internal sealed class IdentityBindHandler(
 跟前一版設計的差異：不再有 `if (subject != "identity.bind") return;` 這種自己分派的程式碼（subject 比對交給協定層的 registry），`payload.ToStringUtf8()` 也換成 typed 欄位。註冊方式見 `protocol-layer.md` 第 6.3 節：
 
 ```csharp
-services.AddPacket<BindRequest>("identity.bind").WithHandler<IdentityBindHandler>();
+services.AddPacketHandler<BindRequest, IdentityBindHandler>("identity.bind");
 ```
 
 ### 6.4 `IdentityBoundFilter`（註冊在協定層 `CommandRouter`）
@@ -247,6 +245,12 @@ internal sealed class IdentityBoundFilter(IPresenceDirectory presenceDirectory) 
 ```
 
 由身分層自己註冊，協定層不認識身分概念（`protocol-layer.md` ADR-6）。這也是 ADR-8 反向索引的唯一使用者。
+
+```csharp
+services.AddInboundFilter<IdentityBoundFilter>();
+```
+
+協定層的機制已經實作完成（`Common/Protocol/` 與 `CommandRouter/`），本層只要補上 `BindRequest` proto、這兩個類別，以及在 `CommandRouter/Program.cs` 加上這三行註冊。
 
 ### 6.5 `POST /login`（概念，部署位置待定）
 

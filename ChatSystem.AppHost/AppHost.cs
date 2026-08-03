@@ -12,6 +12,13 @@ builder.AddProject<Projects.Dispatcher>("dispatcher")
 	.WaitFor(connectionDirectory)
 	.WaitFor(messageBus);
 
+// 協定層：訂閱 command.inbound，解析 client 命令後分派給各層註冊的 handler
+builder.AddProject<Projects.CommandRouter>("command-router")
+	.WithReference(connectionDirectory)
+	.WithReference(messageBus)
+	.WaitFor(connectionDirectory)
+	.WaitFor(messageBus);
+
 // 多開複本模擬多個 Gateway 節點，驗證 ConnectionDirectory + Dispatcher 的跨節點路由
 builder.AddProject<Projects.Gateway>("gateway")
 	.WithReference(connectionDirectory)

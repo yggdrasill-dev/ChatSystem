@@ -1,6 +1,6 @@
 # 協定層架構設計（Protocol Layer）
 
-狀態：討論中 draft，尚未實作
+狀態：機制已實作（`Common/Protocol/` + `CommandRouter/`），尚未有任何層註冊命令——registry 目前是空的
 技術棧：延續連線層的 .NET + NATS（Adaptare）+ protobuf
 範圍：**client 封包內容的解析、subject 與型別的對應、分派給對的 handler**，不含任何具體命令的業務語意
 
@@ -27,7 +27,7 @@
 
 **`feature/rebuild` 現況**：
 
-- `Gateway/Models/NoOpInboundMessageHandler.cs`：插槽佔位，只記 log。
+- `Gateway/Models/NoOpInboundMessageHandler.cs`：插槽佔位，只記 log。**本層實作後已刪除**，那個 DI 註冊改成 `AddInboundBridge()`。
 - `docs/architecture/identity-layer.md` 第 6.3 節的 `if (subject != "identity.bind") return; // 之後有其他 subject 時在這裡分派`——這行註解就是本文件要取代的設計。單一插槽會讓每個新增功能都去改同一個檔案。
 
 ## 3. 核心概念
@@ -194,7 +194,7 @@ message InboundAck {
 ### 6.2 `InboundBridge`（協定層元件，寄宿在 Gateway process）
 
 ```csharp
-namespace CommandRouter; // 共用抽象放 Common.Protocol，見 6.3 節
+namespace Common.Protocol; // 寄宿在 Gateway，所以必須放共用組件而不是 CommandRouter 專案
 
 // 取代 Gateway/Program.cs 裡 NoOpInboundMessageHandler 的 DI 註冊。
 // 這是協定層的元件、只是寄宿在 Gateway process，連線層程式碼不需要任何修改。
@@ -252,27 +252,33 @@ internal sealed class InboundBridge(
 ```csharp
 namespace Common.Protocol;
 
-public interface IPacketHandler<TMessage> where TMessage : IMessage<TMessage>
+public interface IPacketHandler<TMessage> where TMessage : IMessage<TMessage>, new()
 {
-	// protobuf 產生的類別沒有 static abstract Parser，由實作端明白交出來：
-	//   public static MessageParser<BindRequest> Parser => BindRequest.Parser;
-	static abstract MessageParser<TMessage> Parser { get; }
-
 	ValueTask HandleAsync(string connectionId, TMessage message, CancellationToken cancellationToken = default);
 }
 ```
+
+`new()` 約束是為了讓協定層自己用 `new MessageParser<TMessage>(() => new TMessage())` 建 parser。protobuf 產生的類別有 `static Parser` 但泛型約束拿不到它；初版設計要求 handler 用 `static abstract MessageParser<TMessage> Parser` 交出來，實作時發現沒必要——parser 是訊息型別的性質，不是 handler 的性質，讓 handler 宣告它是白給的樣板碼。
 
 註冊時把 subject 一起宣告，讓每個 subject 字面值在整個 codebase 只出現一次：
 
 ```csharp
 // 身分層在 CommandRouter 的組裝處註冊自己的命令
-services.AddPacket<BindRequest>("identity.bind").WithHandler<IdentityBindHandler>();
+services.AddPacketHandler<BindRequest, IdentityBindHandler>("identity.bind");
 
 // 只出現在下行的訊息型別也要宣告 subject，這樣 IPacketPublisher 才反查得到
-services.AddPacket<BindReply>("identity.bind.reply");
+services.AddOutboundPacket<BindReply>("identity.bind.reply");
+
+// filter 同樣由各層自己註冊
+services.AddInboundFilter<IdentityBoundFilter>();
 ```
 
-`PacketRegistry` 是這些註冊的彙總，同時服務兩個方向：`subject → (parser, handler)` 給入站用，`型別 → subject` 給出站用。啟動時對重複 subject 直接 fail fast，並把整份對應表寫進 log（緩解 ADR-4 失去編譯期檢查的代價）。
+`AddPacketHandler` 會順便把 handler 註冊為 **scoped**（見第 9 節的 DI scope 決議）。
+
+`PacketRegistry` 是這些註冊的彙總，同時服務兩個方向：`subject → (parser, handler)` 給入站用，`型別 → subject` 給出站用。兩個實作細節：
+
+- 只用 `AddOutboundPacket` 註冊的 subject，`IsInboundSubject` 會回 `false`——client 送這種 subject 上來，對協定層而言等同未知 subject，不是「有註冊但沒 handler」的錯誤。
+- 重複的 subject 或重複的訊息型別在建構 registry 時直接丟例外。`CommandRouter/Program.cs` 在 `host.Run()` 之前就解析一次 registry 並把對應表寫進 log，讓這個 fail fast 發生在啟動時而不是第一則訊息進來時（緩解 ADR-4 失去編譯期檢查的代價）。
 
 ### 6.4 `IInboundFilter`
 
@@ -329,12 +335,12 @@ var builder = Host.CreateApplicationBuilder(args);
 	builder.AddNatsClient("message-bus");
 	builder.Services.AddConnectionDirectory();
 	builder.Services.AddOutboundGateway();
+	builder.Services.AddConnectionTerminator();
 
 	// 協定層自己
 	builder.Services.AddPacketRegistry();
 
-	// 各層註冊自己的命令與 filter
-	builder.Services.AddIdentityPackets();
+	// 各層在這裡註冊自己的命令與 filter（身分層尚未實作，所以目前這裡是空的）
 
 	builder.Services
 		.AddMessageQueue()
@@ -344,7 +350,7 @@ var builder = Host.CreateApplicationBuilder(args);
 }
 ```
 
-`InboundProcessor : IMessageProcessor<byte[], byte[]>`（Adaptare 的 request/reply handler 型別，`HandleAsync` 回傳 reply）。`AddProcessor` 的實際多載簽章待實作時對著套件確認，這裡沿用 `Dispatcher/Program.cs:20` 的 `AddHandler<DispatchHandler>("dispatch.deliver", "dispatch.deliver")` 寫法推導。
+`InboundProcessor : IMessageProcessor<byte[], byte[]>`（Adaptare 的 request/reply handler 型別，`HandleAsync` 回傳 reply）。`AddProcessor<TProcessor>(subject, queueGroup)` 這個多載實測存在，與 `Dispatcher/Program.cs` 的 `AddHandler` 寫法一致。
 
 ## 7. 架構決策記錄（ADR）
 
@@ -411,6 +417,9 @@ var builder = Host.CreateApplicationBuilder(args);
 
 ## 9. 待確認 / 後續事項
 
+- **已完成**：協定層機制全部實作。`Common/Protocol/`（`IPacketHandler`、`IInboundFilter`、`PacketRegistration`、`PacketRegistry`、`IPacketPublisher`/`PacketPublisher`、`InboundBridge`）、`Common/Protos/protocol.proto`、`Common/ProtocolLayerServiceCollectionExtensions.cs`、`CommandRouter/`（`InboundProcessor` + `Program.cs`）。`Gateway/Program.cs` 的 `NoOpInboundMessageHandler` 註冊換成 `AddInboundBridge()`（該檔案已刪除），AppHost 新增 `command-router` 資源。**尚未有任何層註冊命令**，所以現在任何 client 命令都會被回 `UNKNOWN_SUBJECT`——這是預期狀態，等身分層實作。
+- **已完成**：`AddOutboundGateway()`／`AddConnectionTerminator()`／`AddInboundBridge()` 共用的 Adaptare 設定移到 `Common/NatsMessagingRegistration.cs` 的 `AddNatsMessaging()`（原本叫 `AddConnectionLayerMessaging()`，現在協定層也要用，名字不該再綁連線層）。共用設定用 marker 只跑一次，但那個 marker 擋不住「應用程式為了註冊自己的 handler 又呼叫一次 `AddNatsMessageQueue`」——Gateway 與 Dispatcher 正是這樣。實測 Adaptare 容許這種重複呼叫、`IMessageSender` 仍解得出來，`Common.Tests/Protocol/NatsMessagingRegistrationTests.cs` 把 Gateway 與 CommandRouter 兩種註冊組合都釘住了。
+- **已驗證**：端到端跑過一次真的 AppHost（Redis + NATS 容器 + 兩個 Gateway 複本 + Dispatcher + CommandRouter）。WebSocket client 連上 Gateway、送出 `Packet`，連線在超過 bridge 的 10 秒 timeout 之後仍然是 `Open` 且能繼續送第二則訊息，最後乾淨完成 close handshake——證明 `AddProcessor` 的 request/reply 在真的 NATS 上有來有回（若 ack 沒回來，連線會在 10 秒被關掉）。順帶確認 NATS server 回報的 `MaxPayload` 就是 1048576，跟第 9 節限流那條引用的 1MB 一致。
 - **已決定**：服務專案名為 `CommandRouter`，NATS subject 前綴為 `command.inbound`（沿用「前綴對應目標角色」的既有慣例：`dispatch.*` 給 `Dispatcher`、`connect.*` 給 Gateway 節點）。`Command` 這個字是用來跟 `Dispatcher` 區隔——`Dispatcher` 搬的是不理解內容的投遞封包，這個服務處理的是已解析成型別的命令；單獨叫 `Router` 會跟 `Dispatcher` 語意撞車（兩者幾乎同義，光看專案清單 `Gateway / Dispatcher / Router / Common` 猜不出哪個是上行哪個是下行）。排除 `Ingress`：k8s Ingress 有既定含義（HTTP 反向代理／入口控制器），會被誤認成基礎設施元件。排除 `Protocol`：協定層的共用抽象已經用 `Common.Protocol` 命名空間，服務同名會打架。**保留的風險**：ADR-1 預期未來某個業務會拆成自己的宿主 process，屆時「唯一的 CommandRouter」這個命名會變尷尬（不會有 `CommandRouter2`）。真要拆時再改名，subject 前綴要一起改，成本不小但可控。
 - **已決定**：`InboundBridge` 的 timeout 為 **10 秒**，逾時就讓連線關閉（client 重連重送）。關鍵是先認清 timeout 在防什麼——NATS 有 no-responders 機制，`CommandRouter` 整個掛掉時 `RequestAsync` 會立刻失敗而不是等到逾時（Adaptare 怎麼把這個表面化，實作時要確認），所以 timeout 只覆蓋「Router 活著但太慢」也就是過載。既然是過載，就要給得寬鬆到能吸收 GC pause 與 Redis failover（Sentinel／Cluster failover 常在數秒級）而不誤殺大量活著的連線；handler 本身只是幾次 Redis 往返，正常是毫秒級。**不選「記 log 後繼續讀下一個 frame」**，因為那則逾時的訊息可能還在路上、稍後才被 Router 處理，ADR-2 好不容易保住的單連線順序就破了。要接受的粗糙處：例外往上丟會被 `GatewayWebSocketEndpoint.cs:36` 的 `catch (OperationCanceledException)` 吞掉、socket 直接被 dispose，client 看到的是 1006 abnormal closure 而不是乾淨的 close frame（所以 log 必須記在 bridge 裡，6.2 已這樣寫）。想要乾淨關閉得讓 bridge 自己呼叫 `IConnectionTerminator` 繞 Dispatcher 回到同一個 Gateway——為一個關閉繞一圈不值得。
 - **已決定**：未知 subject 與 payload 畸形**都是 log + 忽略，不關連線**，見 ADR-8。這修正了本節先前「未知 subject 忽略、payload 畸形 terminate」的傾向。

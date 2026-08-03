@@ -1,0 +1,26 @@
+syntax = "proto3";
+
+option csharp_namespace = "Chat.Protos";
+package chat;
+
+// Gateway（InboundBridge）-> CommandRouter：一則來自 client 的封包，附上它來自哪條連線。
+message InboundPacket {
+	string connection_id = 1;
+	string subject = 2;
+	bytes payload = 3;
+}
+
+// CommandRouter -> Gateway（InboundBridge）：處理結果。
+// 只用於順序控制與觀測，Gateway 不依據它做任何動作（見 protocol-layer.md ADR-5）。
+message InboundAck {
+	enum Status {
+		OK = 0;
+		UNKNOWN_SUBJECT = 1;
+		MALFORMED_PAYLOAD = 2;
+		REJECTED_BY_FILTER = 3;
+		HANDLER_FAILED = 4;
+	}
+
+	Status status = 1;
+	string detail = 2;
+}
