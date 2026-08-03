@@ -325,6 +325,7 @@ var sessionToken = await sessionStore.CreateSessionAsync(payload.Subject);
 
 - `POST /login` endpoint 的部署位置尚未決定：獨立服務（類似舊 `AuthServer` 的精簡版）還是併入某個既有專案。這個決定不影響本文件已定案的介面設計，純粹是部署拓樸問題。
 - Session 的 sliding 續期實際觸發時機還沒定案（例如：每次 WebSocket 重新連線時順便 `RefreshAsync`？還是需要獨立的 refresh 機制？）。
-- 連線層需要新增的 `IConnectionTerminator` 目前只在 `connection-layer.md` ADR-7 完成設計，尚未實作。
+- ~~連線層需要新增的 `IConnectionTerminator` 目前只在 `connection-layer.md` ADR-7 完成設計，尚未實作。~~ 已實作完成。
+- 連線層的 close description 是中性字串（`"Connection terminated by server."`），**不會**告訴 client「你被新連線取代了」——Supersede 是本層語意，連線層刻意不知道（見 `connection-layer.md` 第 6.6 節）。如果 WebClient 需要區分「被踢掉」與「一般斷線」以顯示不同提示，得由本層在 `TerminateAsync` 之前先送一則訊息給舊連線，或替 `TerminateRequest` 補一個 `reason` 欄位。尚未決定要不要做。
 - ADR-8 反向索引 `ConnectionUser:{connectionId}` 的 TTL 長度與續期方式尚未決定。一個可能的解法是不設固定 TTL、改成每次該連線有訊息通過 filter 時順手續期（filter 本來就已經讀了這個 key），但這會讓「閒置但仍連線中」的連線在 TTL 到期後被守門規則誤判成未綁定。需要跟第 9 節第 2 點的 Session sliding 續期時機一起想。
 - 本層設計依賴 `protocol-layer.md` 定案。該文件目前也是 draft，若協定層的 handler/filter 介面形狀變動，本層第 6.3、6.4 節要跟著調整。

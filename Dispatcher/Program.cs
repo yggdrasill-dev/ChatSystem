@@ -9,7 +9,8 @@ var builder = Host.CreateApplicationBuilder(args);
 	builder.AddRedisClient("connection-directory");
 	builder.Services.AddConnectionDirectory();
 
-	// 訊息匯流排：訂閱 dispatch.deliver（掛 queue group），投遞到 connect.deliver.{nodeId}
+	// 訊息匯流排：訂閱 dispatch.deliver / dispatch.terminate（掛 queue group），
+	// 分別投遞到 connect.deliver.{nodeId} / connect.terminate.{nodeId}
 	builder.AddNatsClient("message-bus");
 
 	builder.Services
@@ -17,7 +18,8 @@ var builder = Host.CreateApplicationBuilder(args);
 		.AddNatsGlobPatternExchange("*")
 		.AddNatsMessageQueue(config => config
 			.ConfigureResolveConnection(sp => (NatsConnection)sp.GetRequiredService<INatsConnection>())
-			.AddHandler<DispatchHandler>("dispatch.deliver", "dispatch.deliver"));
+			.AddHandler<DispatchHandler>("dispatch.deliver", "dispatch.deliver")
+			.AddHandler<TerminateHandler>("dispatch.terminate", "dispatch.terminate"));
 }
 
 var host = builder.Build();

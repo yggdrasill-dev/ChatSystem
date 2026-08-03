@@ -422,4 +422,4 @@ var builder = Host.CreateApplicationBuilder(args);
 
 ### `connection-layer.md` 不需要修改設計
 
-協定層只使用連線層既有的 `IInboundMessageHandler` 插槽、`IOutboundGateway`、`IConnectionTerminator`，沒有要求連線層新增或改變任何東西。但有一個實作順序上的依賴：`IConnectionTerminator`（該文件 ADR-7，第 9 節標記為待實作）是本層 ADR-5 與 ADR-6 的前置條件，必須先完成。
+協定層只使用連線層既有的 `IInboundMessageHandler` 插槽、`IOutboundGateway`、`IConnectionTerminator`，沒有要求連線層新增或改變任何東西。本層 ADR-5 與 ADR-6 的前置條件 `IConnectionTerminator`（該文件 ADR-7）已實作完成，`Router` 只要 `AddConnectionTerminator()` 就能用。

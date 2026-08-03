@@ -49,4 +49,21 @@ public sealed class Connection(string connectionId, WebSocket socket)
 			m_SendLock.Release();
 		}
 	}
+
+	// 由伺服器主動發起關閉時要用這個，不能用 CloseAsync：CloseAsync 會在送出 close frame 後
+	// 等待對方回應的 close frame，而 receive loop 同時也在 ReceiveAsync，兩邊會搶同一個 receive。
+	// CloseOutputAsync 只送出自己的 close frame，剩下的交給 receive loop 照既有流程收尾。
+	public async Task CloseOutputAsync(WebSocketCloseStatus closeStatus, string? statusDescription, CancellationToken cancellationToken = default)
+	{
+		await m_SendLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+
+		try
+		{
+			await socket.CloseOutputAsync(closeStatus, statusDescription, cancellationToken).ConfigureAwait(false);
+		}
+		finally
+		{
+			m_SendLock.Release();
+		}
+	}
 }

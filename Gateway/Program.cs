@@ -11,7 +11,8 @@ var builder = WebApplication.CreateBuilder(args);
 	builder.AddRedisClient("connection-directory");
 	builder.Services.AddConnectionDirectory();
 
-	// 訊息匯流排：connect.deliver.{nodeId} 訂閱，交給 Adaptare.Nats 管理訂閱生命週期
+	// 訊息匯流排：connect.deliver.{nodeId} / connect.terminate.{nodeId} 訂閱，
+	// 交給 Adaptare.Nats 管理訂閱生命週期
 	builder.AddNatsClient("message-bus");
 
 	// 這個 process 自己的節點識別碼，啟動時產生一次
@@ -28,7 +29,8 @@ var builder = WebApplication.CreateBuilder(args);
 		.AddMessageQueue()
 		.AddNatsMessageQueue(config => config
 			.ConfigureResolveConnection(sp => (NatsConnection)sp.GetRequiredService<INatsConnection>())
-			.AddHandler<DeliverPacketHandler>($"connect.deliver.{nodeId.Value}"));
+			.AddHandler<DeliverPacketHandler>($"connect.deliver.{nodeId.Value}")
+			.AddHandler<TerminatePacketHandler>($"connect.terminate.{nodeId.Value}"));
 
 	builder.Services.AddHostedService<ConnectionHeartbeatService>();
 }

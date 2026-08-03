@@ -388,13 +388,29 @@ public async ValueTask<bool> TryCloseAsync(string connectionId, CancellationToke
 	if (!m_Connections.TryGetValue(connectionId, out var connection))
 		return false;
 
-	await connection.CloseAsync(WebSocketCloseStatus.PolicyViolation, "Superseded by a newer connection.", cancellationToken).ConfigureAwait(false);
+	try
+	{
+		await connection
+			.CloseOutputAsync(WebSocketCloseStatus.PolicyViolation, CloseDescription, cancellationToken)
+			.ConfigureAwait(false);
+	}
+	catch (Exception ex) when (ex is WebSocketException or ObjectDisposedException)
+	{
+		return false; // 跟「連線正在自然斷開」競爭，結果等同於查不到
+	}
 
 	return true;
 }
 ```
 
 查不到的 `connectionId`（連線已經自然斷開）直接回傳 `false`，不報錯——沿用 `ResolveNodesAsync` 查不到就省略的既有慣例，呼叫端（身分層）不需要特別處理「舊連線其實已經斷了」這種情況。
+
+實作時修正了本節原本設計的兩個問題（見第 9 節）：
+
+1. **必須用 `CloseOutputAsync`，不能用 `CloseAsync`**。`WebSocket.CloseAsync` 會在送出 close frame 後**等待對方回應的 close frame**，而 receive loop 同時也在 `ReceiveAsync`——兩邊會搶同一個 receive，結果是例外或卡住。`CloseOutputAsync` 只送出自己的 close frame，socket 狀態轉為 `CloseSent`，receive loop 下一輪的狀態檢查就會結束迴圈，`finally` 照既有流程跑 `OnDisconnectedAsync`。因此 `Connection` 也對稱新增了一個取 `m_SendLock` 的 `CloseOutputAsync`。
+2. **close description 不能寫 `"Superseded by a newer connection."`**。Supersede 是身分層的語意，連線層不知道上層為什麼要關這條連線，寫死這句話等於把上層概念漏進連線層（違反 ADR-1）。實作改用中性字串 `"Connection terminated by server."`；要讓 client 分辨原因是上層的責任。
+
+另外 `TryCloseAsync` **刻意不呼叫 `Remove`**：socket 關閉後 receive loop 會自然結束，由 `GatewayWebSocketEndpoint` 的 `finally` 走既有的 `OnDisconnectedAsync`，才會連 `ConnectionDirectory` 一起清乾淨。
 
 ## 7. 架構決策記錄（ADR）
 
@@ -455,4 +471,5 @@ public async ValueTask<bool> TryCloseAsync(string connectionId, CancellationToke
 - **已完成**：超大批次投遞（`DeliverRequest.connection_ids` 上萬筆）的 payload 大小上限保護。新增 `Common/Delivery/DeliveryBatching.cs`，依 payload 大小動態算出每則訊息最多帶幾個 `connectionId`（保守值：訊息上限 900KB、每個 connectionId 估 40 bytes，皆未經負載測試驗證，之後有實測數據再調整），`OutboundGateway.DeliverAsync` 與 `DispatchHandler`（同一個 NodeId 分組後）都改成依此分批送出多則訊息，不再假設單一 `DeliverRequest`/`DeliverPacket` 一定裝得下。
 - **已完成**：`ResolveNodesAsync` 併發上限。原本 `Task.WhenAll` 平行送出 N 個 Redis GET 沒有上限，改用 `Parallel.ForEachAsync` 搭配 `MaxDegreeOfParallelism = 64` 限制同時進行的數量（同樣是憑經驗抓的保守暫定值，未經負載測試）。
 - Gateway 是否需要在 handshake 階段做任何驗證（即使不涉及「使用者身分」，例如限流、來源檢查），待決定連線層的安全邊界時再補。
-- **待實作**：`IConnectionTerminator`（ADR-7）目前只完成設計（第 6.6 節、proto 訊息、mermaid 圖已更新），實際的 `TerminateHandler`（Dispatcher）、`TerminatePacketHandler`（Gateway）、`ConnectionRegistry.TryCloseAsync` 都還沒寫，是身分層（`identity-layer.md`）設計時發現的新增需求。
+- **已完成**：`IConnectionTerminator`（ADR-7）。`Common/Protos/connection.proto` 補上 `TerminateRequest`/`TerminatePacket`（先前第 9 節誤記為已更新，實際上檔案裡沒有）、`Common/Connections/IConnectionTerminator.cs` 與 `ConnectionTerminator`（publish 到 `dispatch.terminate`，沿用 `DeliveryBatching` 做分批保護）、`Dispatcher/TerminateHandler.cs`、`Gateway/Services/TerminatePacketHandler.cs`、`ConnectionRegistry.TryCloseAsync`、`Connection.CloseOutputAsync`，以及 `AddConnectionTerminator()` DI 擴充。實作時修正了第 6.6 節原設計的兩個問題（`CloseAsync` → `CloseOutputAsync`、close description 去掉 Supersede 語意），詳見該節。
+- `AddOutboundGateway()` 與 `AddConnectionTerminator()` 共用的 Adaptare 設定抽成私有的 `AddConnectionLayerMessaging()`，用 marker 確保兩者同時註冊時那組設定只跑一次。

@@ -25,9 +25,16 @@ internal sealed class RecordingFakeWebSocket : WebSocket
 		return Task.CompletedTask;
 	}
 
+	public WebSocketCloseStatus? CloseOutputStatus { get; private set; }
+
+	public string? CloseOutputDescription { get; private set; }
+
 	public override Task CloseOutputAsync(WebSocketCloseStatus closeStatus, string? statusDescription, CancellationToken cancellationToken)
 	{
+		CloseOutputStatus = closeStatus;
+		CloseOutputDescription = statusDescription;
 		m_State = WebSocketState.CloseSent;
+
 		return Task.CompletedTask;
 	}
 

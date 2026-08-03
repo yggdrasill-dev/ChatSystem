@@ -22,3 +22,13 @@ message DeliverPacket {
 	repeated string connection_ids = 2;
 	bytes payload = 3;
 }
+
+// 上層 -> IConnectionTerminator -> Dispatcher：未分組的終止請求。
+message TerminateRequest {
+	repeated string connection_ids = 1;
+}
+
+// Dispatcher -> Gateway：已依 NodeId 分組後的終止封包。
+message TerminatePacket {
+	repeated string connection_ids = 1;
+}

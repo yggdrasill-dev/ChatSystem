@@ -1,3 +1,4 @@
+using System.Net.WebSockets;
 using Chat.Protos;
 using Gateway.Models;
 using Gateway.Tests.TestSupport;
@@ -43,6 +44,44 @@ public class ConnectionRegistryTests
 		var delivered = await registry.TryDeliverAsync("conn-1", "subject", ByteString.Empty);
 
 		Assert.False(delivered);
+	}
+
+	[Fact]
+	public async Task TryCloseAsync_ReturnsFalse_WhenConnectionIdNotFound()
+	{
+		var registry = new ConnectionRegistry();
+
+		var closed = await registry.TryCloseAsync("missing");
+
+		Assert.False(closed);
+	}
+
+	[Fact]
+	public async Task TryCloseAsync_SendsCloseFrame_WithoutWaitingForThePeer()
+	{
+		var socket = new RecordingFakeWebSocket();
+		var registry = new ConnectionRegistry();
+		registry.Add(new Connection("conn-1", socket));
+
+		var closed = await registry.TryCloseAsync("conn-1");
+
+		Assert.True(closed);
+		// CloseOutputAsync 而非 CloseAsync：不能跟 receive loop 搶同一個 receive
+		Assert.Equal(WebSocketState.CloseSent, socket.State);
+		Assert.Equal(WebSocketCloseStatus.PolicyViolation, socket.CloseOutputStatus);
+	}
+
+	[Fact]
+	public async Task TryCloseAsync_LeavesRemovalToTheReceiveLoop()
+	{
+		var registry = new ConnectionRegistry();
+		registry.Add(new Connection("conn-1", new RecordingFakeWebSocket()));
+
+		await registry.TryCloseAsync("conn-1");
+
+		// 刻意不在 TryCloseAsync 裡 Remove：由 GatewayWebSocketEndpoint 的 finally
+		// 走既有的 OnDisconnectedAsync 收尾，才會連 ConnectionDirectory 一起清掉。
+		Assert.Equal(1, registry.Count);
 	}
 
 	[Fact]
