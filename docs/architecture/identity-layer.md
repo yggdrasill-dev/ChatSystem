@@ -168,6 +168,11 @@ public interface IPresenceDirectory
 
 	// 協定層守門 filter 用：這條連線綁定的身分是誰，沒綁定則回 null。見 ADR-8。
 	ValueTask<string?> GetBoundUserIdAsync(string connectionId);
+
+	// 房間 fan-out 用：一間房可能很多成員，逐筆查會變成 N 次來回。
+	// 查不到的 userId（不在線／寬限期中）直接省略，沿用 ResolveNodesAsync 的既有慣例。
+	// 見 room-layer.md 第 6.3 節與 ADR-1。
+	ValueTask<IReadOnlyCollection<string>> ResolveConnectionsAsync(IReadOnlyCollection<string> userIds);
 }
 ```
 
@@ -293,6 +298,7 @@ var sessionToken = await sessionStore.CreateSessionAsync(payload.Subject);
 - **Context**：同一 Google 帳號重複連線時，要允許多連線並存還是踢掉舊連線；若允許，範圍要精確到「只有重新登入才踢」還是「任何第二條連線都踢」。
 - **Decision**：任何時候有第二條連線嘗試綁定同一身分，就主動終止舊連線——不限於重新走過 Google 登入的情境。
 - **Consequences**：`IPresenceDirectory` 的 schema 可以單純用「單一值」（`UserId → 一個 ConnectionId`），不需要處理「一個身分對應一組連線」的複雜度；代價是同一帳號不能同時開兩個分頁各自維持一條連線（後開的會把先開的踢斷）。這個決策直接促成了 ADR-7（連線層新增 `IConnectionTerminator`）。
+- **後續確認**：房間層採用「成員名單以 `userId` 為鍵」（`room-layer.md` ADR-1），加上產品決定「一個使用者一次只能在一間房」，本 ADR 的單一值 schema 剛好夠用，不需要改成集合。房間層對 Supersede 也因此完全透明——同一身分換連線時，成員資格不受影響。
 
 ### ADR-5：Google 登入請求帶 `nonce`，防 token 替換 / login CSRF
 

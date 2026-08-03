@@ -407,6 +407,7 @@ var builder = Host.CreateApplicationBuilder(args);
   - payload 畸形也不 terminate，是因為 client 幾乎都會自動重連，terminate 會變成「重連 → 送同一個壞封包 → 又被踢」的緊迫迴圈，而每次重連的成本（WebSocket handshake + Redis 寫入）比直接忽略那則訊息貴得多——為了防濫用反而製造更大的負載。
   - 濫用不靠 terminate 防，靠限流與訊息大小上限（見第 9 節），那才是對症的工具。
   - 代價：client 送出壞封包時只會「什麼都沒發生」，不會收到錯誤回應。要讓 client 知道就得在協定裡加一種錯誤訊息型別，屬於各命令自己的協定設計（見第 9 節 handler 例外那條），本層不強制。
+  - **對上層的隱含要求**：正因為本層對錯誤是「記 log + 忽略」，業務層自己的失敗（密碼錯誤、被封鎖、權限不足）**必須**用明確的下行訊息回覆，不能靠關連線或沉默——否則 client 會什麼都收不到、看起來像卡住。`room-layer.md` 的 `RoomOperationReply` 就是照這條要求設計的。
 
 ## 8. 明確排除於本階段
 
@@ -429,7 +430,8 @@ var builder = Host.CreateApplicationBuilder(args);
   - **per-connection 速率限流：先不做**。ADR-2 的 request/reply 已經給了天然節流——單一連線同時只有一則訊息 in-flight，吞吐上限就是 1/RTT，「client 極快速度連發」這個威脅已被結構性地擋掉大半。真要做的話放 `InboundBridge`（Gateway 端），因為一條連線固定在一個節點上，計數器可以純記憶體、不用 Redis，而且能在付出 NATS 往返成本**之前**就擋掉。等有實測數據再決定參數。
   - **per-subject／per-user 業務限流：等有業務規則再做**（例如「每人每秒最多 10 則聊天」），屆時放 `CommandRouter` 的 filter，需要 Redis 做跨節點計數。
 - **handler 例外時要不要回訊息給 client**：ack 會帶 `HANDLER_FAILED` 讓 CommandRouter 記 log 與 metrics，但「client 要不要收到一則錯誤訊息」屬於各命令自己的協定設計，本層不強制。
-- **上層目前收不到「連線已斷開」的通知**：`ConnectionLifecycle.OnDisconnectedAsync` 只清 registry 與 directory，沒有任何對外事件。房間層將來一定會需要（斷線要退房），這需要連線層新增一個對外事件，屬於連線層的變更，不在本文件範圍——但要記在案，因為它會影響房間層的設計順序。
+- **上層目前收不到「連線已斷開」的通知**：`ConnectionLifecycle.OnDisconnectedAsync` 只清 registry 與 directory，沒有任何對外事件。**房間層設計完成後這已經從「將來會需要」變成硬前置**（`room-layer.md` ADR-3），也是本層 principal 生命週期（現在靠 TTL 撐著）的前置。屬於連線層的變更，見 `connection-layer.md` 第 9 節。
+- **principal 的歸屬討論現在有依據了**：房間層確認了正向解析（principal／userId → connections）**確實需要存在**、而且**必須是批次的**（一間房可能很多成員，逐筆查會變成 N 次來回）。原本擔心「是不是為了罕見的『送給某個 user』在過度設計」已經被排除——房間 fan-out 是主流量。剩下的決定只有擁有者：本層的 `IConnectionPrincipals`（不透明字串、與 `connectionId → principal` 同一個擁有者）還是身分層的 `IPresenceDirectory`（目前文件裡的擁有者）。房間層只有一處呼叫端，事後搬家成本很低。
 
 ## 10. 對既有文件的影響
 
