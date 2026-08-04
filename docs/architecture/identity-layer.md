@@ -1,6 +1,6 @@
 # 身分/使用者管理層架構設計（Identity Layer）
 
-狀態：設計已定案（**handshake cookie 驗證**，見 ADR-8），尚未實作
+狀態：設計已定案（**handshake cookie 驗證**，見 ADR-8）；`Common/Identity/` 的三個 store 已實作，`IConnectionAuthenticator`、連線層接線與 Identity 服務尚未（見第 9 節）
 技術棧：延續連線層的 .NET + NATS + Redis；登入改用 Google OAuth（Google Identity Services，前端直接取得 ID Token，見 ADR-1）
 範圍：**使用者怎麼證明身分、登入狀態怎麼被系統記住、一個身分目前繫結在哪一條 ConnectionId 上**，不含房間、聊天等業務語意
 依賴：驗證發生在 WebSocket handshake，所以本層需要連線層開一個 hook（見 ADR-8 與 `connection-layer.md` 第 6.8 節、ADR-9）；命令的解析與分派仍由協定層負責（[protocol-layer.md](protocol-layer.md)），但本層**不再註冊任何 handler 或 filter**
@@ -235,7 +235,7 @@ namespace Common.Identity;
 public interface IPresenceDirectory
 {
 	// 綁定並回傳「被這次綁定取代掉的舊 connectionId」（沒有則 null）。
-	// 用 GETSET 一次原子完成讀舊值 + 寫新值，見 ADR-4。
+	// 用 SET ... GET 一次原子完成讀舊值 + 寫新值，見 ADR-4。
 	ValueTask<string?> BindAsync(string userId, string connectionId, CancellationToken cancellationToken = default);
 
 	// 只有當目前值等於 connectionId 時才刪除（fencing，見 ADR-4）。
@@ -325,7 +325,9 @@ var sessionToken = await sessionStore.CreateSessionAsync(payload.Subject);
 | `Presence:{userId}` | String | 無（ADR-7） | → `connectionId`。`GETSET` 綁定、Lua compare-and-delete 解綁 |
 | `LoginNonce:{nonce}` | String | 2 分鐘 | 一次性，`KeyDelete` 回傳值當守門 |
 
-全部不加 hash tag（理由見 6.2）。身分層用**自己的** Redis 資源（AppHost 的 `identity-store`），不共用連線層的 `connection-directory`——`Session` 是持久資料需要 AOF/RDB，連線層那個是純快取用途，設定需求不同；這也延續 `connection-layer.md` ADR-2 的擁有權原則。因為 `CommandRouter` 會同時需要多個 Redis，註冊一律走 keyed service（比照 `AddRoomStore(redisServiceKey)`）。
+全部不加 hash tag（理由見 6.2）。三個 store 由 `AddIdentityStores(redisServiceKey)` 一起註冊為 singleton（`Common/IdentityLayerServiceCollectionExtensions.cs`）。
+
+身分層用**自己的** Redis 資源（AppHost 的 `identity-store`），不共用連線層的 `connection-directory`——`Session` 是持久資料需要 AOF/RDB，連線層那個是純快取用途，設定需求不同；這也延續 `connection-layer.md` ADR-2 的擁有權原則。因為 `CommandRouter` 會同時需要多個 Redis，註冊一律走 keyed service（比照 `AddRoomStore(redisServiceKey)`）。
 
 ## 7. 架構決策記錄（ADR）
 
@@ -352,11 +354,11 @@ var sessionToken = await sessionStore.CreateSessionAsync(payload.Subject);
 - **Consequences**：符合一般網站「記住我」的預期，也讓身分層跟連線層的生命週期真正互相獨立。
 - **續期時機（本版定案）**：就在 handshake 那次驗證之後順手 `KeyExpire`（`IConnectionAuthenticator.ResolveAsync` 內）。連線建立是低頻事件，多一次 Redis 寫入無所謂。前一版設計沒有這個著力點——那時唯一每次都會經過的地方是守門 filter，而那是**每則命令**一次寫入，成本完全不同。長時間掛著同一條連線不會續期，但 7 天的量級遠大於任何合理的連線壽命，不構成問題。
 
-### ADR-4：Supersede 定義為「同一身分同時只能有一條連線生效」，用 `GETSET` + fencing 實作
+### ADR-4：Supersede 定義為「同一身分同時只能有一條連線生效」，用 `SET ... GET` + fencing 實作
 
 - **Context**：同一 Google 帳號重複連線時，要允許多連線並存還是踢掉舊連線；若允許，範圍要精確到「只有重新登入才踢」還是「任何第二條連線都踢」。
 - **Decision**：任何時候有第二條連線嘗試綁定同一身分，就主動終止舊連線——不限於重新走過 Google 登入的情境。實作上：
-  - **綁定用 `GETSET`**（`StringGetSetAsync`）一次原子完成「取回舊值 + 寫入新值」。這消掉了「先 GET 再 SET」的競爭：兩條連線同時在不同 Gateway 節點綁同一身分時，兩邊拿回的舊值不同、只有一個會成為最終值，不會留下一條「還活著但 Presence 已經不指向它」的孤兒連線。
+  - **綁定用 `SET ... GET`**（`StringSetAndGetAsync`，即 Redis 6.2 之後取代 `GETSET` 的寫法）一次原子完成「取回舊值 + 寫入新值」。這消掉了「先 GET 再 SET」的競爭：兩條連線同時在不同 Gateway 節點綁同一身分時，兩邊拿回的舊值不同、只有一個會成為最終值，不會留下一條「還活著但 Presence 已經不指向它」的孤兒連線。
   - **解綁必須 fencing**：只有當 `Presence:{userId}` 目前值等於要解綁的 `connectionId` 時才刪除。Supersede 時新連線先綁定、舊連線的斷線清理才跑到，無條件刪除會讓一個**正在線上**的使用者從 Presence 消失——後果是房間 fan-out 靜默跳過他（比 ADR-7 講的「殘留舊值」嚴重得多，殘留是無害的，誤刪是丟訊息）。這跟 `room-layer.md` ADR-4 是同一個 race 的另一半。
 - **Consequences**：`IPresenceDirectory` 的 schema 可以單純用單一值，不需要處理「一個身分對應一組連線」的複雜度；代價是同一帳號不能同時開兩個分頁各自維持一條連線（後開的會把先開的踢斷）。這個決策直接促成了 ADR-7（連線層新增 `IConnectionTerminator`）。
 - **後續確認**：房間層採用「成員名單以 `userId` 為鍵」（`room-layer.md` ADR-1），加上產品決定「一個使用者一次只能在一間房」，本 ADR 的單一值 schema 剛好夠用，不需要改成集合。房間層對 Supersede 也因此完全透明——同一身分換連線時，成員資格不受影響。
@@ -425,6 +427,8 @@ var sessionToken = await sessionStore.CreateSessionAsync(payload.Subject);
 
 ## 9. 待確認 / 後續事項
 
+- **已完成**：`Common/Identity/` 的三個 store 與 DI 註冊。`ISessionStore`／`RedisSessionStore`、`ILoginNonceStore`／`RedisLoginNonceStore`、`IPresenceDirectory`／`RedisPresenceDirectory`、`IdentityKeys`、`OpaqueToken`、`Common/IdentityLayerServiceCollectionExtensions.cs` 的 `AddIdentityStores(redisServiceKey)`，測試在 `Common.Tests/Identity/`。刻意先只做這一層——不動任何 process，可以獨立驗證。實作時確認的兩件事：`StringSetAndGetAsync` 在 StackExchange.Redis 3.x 只剩帶 `keepTtl` 的多載；`KeyExpireAsync(key, ttl)` 解析到的是帶 `ExpireWhen` 的多載（測試的 `Received` 斷言必須對上實際被呼叫的那一個，否則會出現「明明呼叫了卻說沒收到」）。
+- **待做**：`IConnectionAuthenticator`（6.3）與連線層的接線。它需要 `IConnectionTerminator`，而後者要 NATS——所以那一步會同時動到 Gateway 的 DI 與 AppHost，跟本層第一步刻意分開。
 - ~~`POST /login` endpoint 的部署位置尚未決定。~~ **已決定**：獨立 `Identity` 專案，但必須與 Gateway 同源（ADR-10）。
 - ~~Session 的 sliding 續期實際觸發時機還沒定案。~~ **已決定**：在 handshake 的 `ResolveAsync` 內續期（ADR-3）。
 - ~~連線層需要新增的 `IConnectionTerminator`。~~ 已實作完成。
