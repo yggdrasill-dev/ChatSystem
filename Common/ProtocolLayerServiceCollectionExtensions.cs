@@ -7,13 +7,10 @@ namespace Microsoft.Extensions.DependencyInjection;
 public static class ProtocolLayerServiceCollectionExtensions
 {
 	// Gateway 端：取代 NoOpInboundMessageHandler 的註冊。
-	// 需要先呼叫 builder.AddNatsClient(...) 註冊 INatsConnection。
-	public static IServiceCollection AddInboundBridge(this IServiceCollection services)
-	{
-		services.AddNatsMessaging();
-
-		return services.AddSingleton<IInboundMessageHandler, InboundBridge>();
-	}
+	// 需要 IMessageSender，也就是宿主自己組的那一次 Adaptare message queue
+	// （見 ConnectionLayerServiceCollectionExtensions 的說明）。
+	public static IServiceCollection AddInboundBridge(this IServiceCollection services) =>
+		services.AddSingleton<IInboundMessageHandler, InboundBridge>();
 
 	// CommandRouter 端：registry 與出口。
 	// 需要先呼叫 AddOutboundGateway()，IPacketPublisher 靠它把訊息交給 Dispatcher。

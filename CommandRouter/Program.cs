@@ -26,16 +26,18 @@ var builder = Host.CreateApplicationBuilder(args);
 	builder.Services.AddRoomStore("room-store");
 	builder.Services.AddIdentityStores("identity-store");
 	builder.Services.AddRoomPackets();
-	builder.Services.AddRoomGraceSweeper();
+	builder.Services.AddRoomMembershipMaintenance();
 
+	// 這個 process 唯一一次 Adaptare message queue 註冊（見 Common/NatsMessagingRegistration.cs）。
 	builder.Services
 		.AddMessageQueue()
+		.AddNatsGlobPatternExchange("*")
 		.AddNatsMessageQueue(config => config
 			.ConfigureResolveConnection(sp => (NatsConnection)sp.GetRequiredService<INatsConnection>())
-			.AddProcessor<InboundProcessor>("command.inbound", "command.inbound")
-			// queue group 用有層次的名字：不同 group 各收到一份事件，未來第二個訂閱端沿用
-			// 同一個名字就會跟房間層互搶（見 RoomDisconnectHandler 的註解）。
-			.AddHandler<RoomDisconnectHandler>("events.connection.disconnected", "room.membership"));
+			// 這裡刻意只有 processor。實測「同一條鏈裡混用 AddProcessor 與 AddHandler」時
+			// handler 完全收不到訊息，所以房間層的斷線事件訂閱改用 NATS client 自己訂
+			// （見 Common/Rooms/RoomDisconnectSubscriber.cs）。
+			.AddProcessor<InboundProcessor>("command.inbound", "command.inbound"));
 }
 
 var host = builder.Build();

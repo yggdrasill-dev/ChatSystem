@@ -60,8 +60,15 @@ public static class RoomLayerServiceCollectionExtensions
 		return services.AddOutboundPacket<RoomList>("room.list.reply");
 	}
 
-	// 寬限期到期成員的清理與廣播。需要先呼叫 AddRoomPackets()——sweeper 用同一個
-	// RoomBroadcaster，而且它廣播的 RoomMemberLeft 要靠 registry 才反查得到 subject。
-	public static IServiceCollection AddRoomGraceSweeper(this IServiceCollection services) =>
-		services.AddHostedService<RoomGraceSweeper>();
+	// 寬限期的兩端：訂閱斷線事件把成員標記進寬限期，以及掃掉到期的成員並廣播離開。
+	//
+	// 需要先呼叫 AddRoomPackets()（sweeper 用同一個 RoomBroadcaster，而且它廣播的
+	// RoomMemberLeft 要靠 registry 才反查得到 subject）與 builder.AddNatsClient(...)
+	// （訂閱端直接用 INatsConnection，不經過 Adaptare——理由見 RoomDisconnectSubscriber）。
+	public static IServiceCollection AddRoomMembershipMaintenance(this IServiceCollection services)
+	{
+		services.AddHostedService<RoomDisconnectSubscriber>();
+
+		return services.AddHostedService<RoomGraceSweeper>();
+	}
 }

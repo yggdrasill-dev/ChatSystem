@@ -415,9 +415,13 @@ internal sealed class RoomGraceSweeper(
 - **端到端驗證（跑真的 AppHost，兩個 client 分別連到兩個 Gateway 複本，所以每次廣播都必須跨節點）**：10 項通過、3 項失敗，失敗全部指向**協定層/messaging 的接線**而不是房間層的邏輯。
   - **通過**：`room.create`；`room.join` 的密碼房驗證與名單回覆；**alice 跨節點收到 bob 的 `RoomMemberJoined`**（`IPacketPublisher` → `Dispatcher` → 另一個節點這條下行 fan-out 第一次被真的走到）；`room.list` 的人數與 `has_password`；非房主踢人被拒；寬限期內重連拿回完整名單。
   - **修好的**：`InboundAck` 的空 ack bug（見 `protocol-layer.md` 第 9 節）。修好之前**任何成功的命令都會殺掉連線**，所以房間層一行都跑不動。
-  - **still broken ①：每個下行訊息被投遞兩次。** client 收到兩份 `room.joined`、兩份 `room.reply`。Dispatcher 的 log 顯示它只 publish 一次，所以重複發生在 **Gateway 的訂閱側**。最可能的原因是 `AddMessageQueue()`／`AddNatsMessageQueue()` 在同一個 process 被呼叫兩次——一次來自 `NatsMessagingRegistration.AddNatsMessaging()`（marker 只擋共用設定，擋不住這個），一次來自 Gateway 自己註冊 handler 的那條鏈。`protocol-layer.md` 第 9 節早就記下「實測 Adaptare 容許這種重複呼叫」，當時的結論是「`IMessageSender` 仍解得出來」——**但沒有檢查訂閱有沒有因此被建立兩份**。在房間層出現之前這個 bug 是隱形的：下行只有 terminate（重複關同一條連線是 no-op）與 ack（request/reply 只取第一個回覆）。
-  - **still broken ②：`RoomDisconnectHandler` 從來沒被呼叫過。** 加了一行 log 之後確認 0 次。所以沒有人被標記進寬限期、`{rooms}:grace` 永遠是空的、`RoomGraceSweeper` 永遠沒事做——ADR-2 的整個寬限期機制目前是死的。CommandRouter 的 `AddNatsMessageQueue` 鏈同時有 `AddProcessor`（`command.inbound`，會動）與 `AddHandler`（`events.connection.disconnected`，不會動），懷疑是同一個重複註冊問題的另一面。
-  - **下一步**：把 messaging 的註冊改成「每個 host 只呼叫一次 `AddNatsMessageQueue`，handler 的註冊透過參數傳進去」，拿掉 `AddNatsMessaging()` 的 marker hack。這兩個 bug 都不是房間層的問題，修完要重跑這個驗證。
+  - **已修：每個下行訊息被投遞兩次。** client 收到兩份 `room.joined`、兩份 `room.reply`（「密碼錯」那個檢查會失敗就是因為吃到重複的 create reply；「重連無感」會失敗是因為吃到重複的 `RoomMemberJoined`）。原因是 `AddNatsMessageQueue()` 在同一個 process 被呼叫兩次——一次來自 `AddNatsMessaging()` 的共用設定，一次來自 host 自己註冊 handler 那條鏈——每多一次就多一個 `IMessageQueueBackgroundRegistration`，而 handler 設定是共用的 options，所以每個訂閱被建立兩份。修法與回歸測試見 `Common/NatsMessagingRegistration.cs` 與 `protocol-layer.md` 第 9 節。**修好這一個，12 項檢查裡有 11 項通過。**
+  - **still broken：斷線事件從來沒有抵達房間層。** 寬限期的整個機制目前是死的（沒有人被標記、`{rooms}:grace` 永遠空的、sweeper 永遠沒事做）。已經排除的可能：
+    - 訂閱端沒起來 → 排除。log 確認 `Subscribing to events.connection.disconnected as room.membership` 有印出來。
+    - Adaptare 的 `AddHandler` 跟 `AddProcessor` 混用的問題 → 已改成**用原生 `INatsConnection` 自己訂**（`RoomDisconnectSubscriber`），**還是收不到**。
+    - Gateway 端發布失敗 → 排除。`ConnectionLifecycle` 對 publish 失敗會記 Error，四次斷線都沒有。
+    - 所以問題在**發布端實際送出去的東西**：`IMessageSender.PublishAsync("events.connection.disconnected", ...)` 經過 Adaptare 的 `"*"` glob exchange 之後，落到 NATS 上的 subject 或格式跟訂閱端預期的不一樣。`dispatch.*` / `connect.*` 會動是因為兩端都走 Adaptare，subject 不管被怎麼改寫都對得上；`events.*` 是第一個「一端 Adaptare 發、另一端原生訂」的組合。
+    - **下一步**：用原生 NATS client 訂 `>` 把實際流過的 subject 印出來，就知道 Adaptare 到底發到哪裡。修法可能是讓發布端也走原生 client（跟訂閱端對稱），或找出 Adaptare 的 subject 對應規則。
 - **待確認**：`room.ban` 目前**不會**順手把人踢出房間，照 ADR-5 的「後台正常用法是踢出＋封鎖，UI 上做成一個動作」。但這代表封鎖一個正在房間裡的人，他會留在裡面直到自己離開——對一個管理工具來說很奇怪。要嘛 ban 順手 remove（那 ban 就有兩種副作用，而且沒辦法只封鎖一個不在房間裡的人），要嘛維持現狀並在 UI 上強制兩個命令一起送。**這條沒有定案，只是照文件實作**。
 
 - ~~**硬前置：連線層的斷線事件**（ADR-3）。~~ **已實作**：`events.connection.disconnected`，設計見 `connection-layer.md` 第 6.7 節與 ADR-8。房間層要訂閱它並在 handler 裡呼叫 `MarkDisconnectedAsync`。注意該 ADR 明確把事件定為 best-effort——本層 ADR-2 的「讀取時過濾」正確性不依賴它，這個前提要繼續維持，不要改成「只在收到事件時才清理」。事件會帶 `principal`（`connection-layer.md` ADR-9），所以本層不需要任何 `connectionId → userId` 的反查。

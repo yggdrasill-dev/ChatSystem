@@ -42,8 +42,11 @@ var builder = WebApplication.CreateBuilder(args);
 	// 由 CommandRouter 負責解析與分派。Gateway 本身不解讀 payload。
 	builder.Services.AddInboundBridge();
 
+	// 這個 process 唯一一次 Adaptare message queue 註冊。多一次就會讓每個訂閱被建立兩份、
+	// 每則下行訊息被投遞兩次——理由見 Common/NatsMessagingRegistration.cs。
 	builder.Services
 		.AddMessageQueue()
+		.AddNatsGlobPatternExchange("*")
 		.AddNatsMessageQueue(config => config
 			.ConfigureResolveConnection(sp => (NatsConnection)sp.GetRequiredService<INatsConnection>())
 			.AddHandler<DeliverPacketHandler>($"connect.deliver.{nodeId.Value}")

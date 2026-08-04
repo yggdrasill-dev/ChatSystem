@@ -24,6 +24,14 @@ var allowFakeIdTokens = builder.Environment.IsDevelopment()
 	builder.Services.AddConnectionTerminator();
 	builder.Services.AddConnectionAuthenticator();
 
+	// 這個 process 唯一一次 Adaptare message queue 註冊。它只發不收（登出時的 terminate），
+	// 所以沒有任何 handler（見 Common/NatsMessagingRegistration.cs）。
+	builder.Services
+		.AddMessageQueue()
+		.AddNatsGlobPatternExchange("*")
+		.AddNatsMessageQueue(config => config
+			.ConfigureResolveConnection(sp => (NatsConnection)sp.GetRequiredService<INatsConnection>()));
+
 	if (allowFakeIdTokens)
 		builder.Services.AddSingleton<IIdTokenValidator, FakeIdTokenValidator>();
 	else
