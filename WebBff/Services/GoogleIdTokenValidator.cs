@@ -1,6 +1,6 @@
 using Google.Apis.Auth;
 
-namespace WebClient.Services;
+namespace WebBff.Services;
 
 internal sealed class GoogleIdTokenValidator(string? googleClientId) : IIdTokenValidator
 {

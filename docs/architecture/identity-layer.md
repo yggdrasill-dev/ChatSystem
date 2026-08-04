@@ -1,6 +1,6 @@
 # 身分/使用者管理層架構設計（Identity Layer）
 
-狀態：設計已定案（**handshake cookie 驗證**，見 ADR-8）；`Common/Identity/`、連線層接線、以及登入/登出 endpoint（寄宿在 `WebClient`，見 ADR-10）都已實作。剩下的是前端本身與 Google OAuth client id 這個外部前置作業（見第 9 節）
+狀態：設計已定案（**handshake cookie 驗證**，見 ADR-8）；`Common/Identity/`、連線層接線、以及登入/登出 endpoint（寄宿在 `WebBff`，見 ADR-10）都已實作。剩下的是前端本身（Angular，`webClient`）與 Google OAuth client id 這個外部前置作業（見第 9 節）
 技術棧：延續連線層的 .NET + NATS + Redis；登入改用 Google OAuth（Google Identity Services，前端直接取得 ID Token，見 ADR-1）
 範圍：**使用者怎麼證明身分、登入狀態怎麼被系統記住、一個身分目前繫結在哪一條 ConnectionId 上**，不含房間、聊天等業務語意
 依賴：驗證發生在 WebSocket handshake，所以本層需要連線層開一個 hook（見 ADR-8 與 `connection-layer.md` 第 6.8 節、ADR-9）；命令的解析與分派仍由協定層負責（[protocol-layer.md](protocol-layer.md)），但本層**不再註冊任何 handler 或 filter**
@@ -39,7 +39,7 @@
 | `ISessionStore`（新，`Common.Identity`） | `SessionToken → UserId`，opaque token，Redis 存放，7 天、隨活動 sliding 續期（見 ADR-2、ADR-3） |
 | `ILoginNonceStore`（新，`Common.Identity`） | ADR-5 的一次性 nonce：登入前配發、驗證時消耗 |
 | `IUserProfileStore`（新，`Common.Identity`） | `UserId → 暱稱 / 頭像網址`。只有寫入，還沒有查詢介面（見 ADR-11） |
-| `IIdTokenValidator`（新，`WebClient/Services`） | 把 static 的 `GoogleJsonWebSignature.ValidateAsync` 包成可替換的介面。刻意不放 `Common`，`Google.Apis.Auth` 只有登入這一處需要 |
+| `IIdTokenValidator`（新，`WebBff/Services`） | 把 static 的 `GoogleJsonWebSignature.ValidateAsync` 包成可替換的介面。刻意不放 `Common`，`Google.Apis.Auth` 只有登入這一處需要 |
 | Session Cookie | `httpOnly` + `Secure` + `SameSite=Lax`，存 `SessionToken`。**必須跟 Gateway 同 site**，否則 handshake 帶不上（見 ADR-10） |
 | `IPresenceDirectory`（新，`Common.Identity`） | `UserId → 目前的 ConnectionId`（單一值），實作 Supersede（見 ADR-4）與房間 fan-out 需要的批次正向解析 |
 | `IConnectionAuthenticator`（新，`Common.Identity`） | 連線層在 handshake / 斷線時呼叫的唯一 hook：驗 Session、綁定 Presence、必要時踢掉舊連線、斷線時解除綁定（見 6.3） |
@@ -58,7 +58,7 @@ graph TB
         G[Google Identity Services]
     end
 
-    subgraph "WebClient（前端 host 兼 BFF，見 ADR-10）"
+    subgraph "WebBff（前端的 BFF，見 ADR-10）"
         NO["GET /login/nonce"]
         LI["POST /login\n驗證 ID Token + nonce"]
         LO["POST /logout"]
@@ -118,7 +118,7 @@ graph TB
 sequenceDiagram
     participant WC as WebClient
     participant G as Google
-    participant LI as WebClient（BFF）
+    participant LI as WebBff
     participant NS as ILoginNonceStore
     participant SS as ISessionStore
 
@@ -305,11 +305,13 @@ cookie 的名字（`chat_session`）放在 `Common.Identity.SessionCookie.Name`�
 
 allowlist 從設定讀（AppHost 注入，開發與正式環境各自的來源不同），比對失敗回 403 且**不 accept**。這不是可選的加強項，理由見 ADR-9。
 
-實務上最容易踩的坑：本機開發時 `WebClient` 與 Gateway 是同 host 不同 port，`http://localhost:5150` 與 `http://localhost:5042` 對 `SameSite` 而言算同 site（cookie 會送），但對 `Origin` 字串比對而言是不同值——**前端 host 的完整 origin 必須進 Gateway 的 allowlist**，否則本機是通的、上 stage 才炸（或反過來）。目前的值是 `http://localhost:5150` 與 `https://localhost:7150`（`WebClient/Properties/launchSettings.json` 的兩個 profile）。
+實務上最容易踩的坑：本機開發時 `WebBff` 與 Gateway 是同 host 不同 port，`http://localhost:5150` 與 `http://localhost:5042` 對 `SameSite` 而言算同 site（cookie 會送），但對 `Origin` 字串比對而言是不同值——**瀏覽器實際載入頁面的那個 origin 必須進 Gateway 的 allowlist**，否則本機是通的、上 stage 才炸（或反過來）。目前的值是 `http://localhost:5150` 與 `https://localhost:7150`（`WebBff/Properties/launchSettings.json` 的兩個 profile）。
 
-### 6.5 登入流程的 HTTP endpoint（寄宿在 `WebClient`，見 ADR-10）
+**Angular 接上之後這個值要改**：`ng serve` 起來後瀏覽器的 origin 是 dev server（預設 `http://localhost:4200`），**即使 `/login/*` 透過 Angular 的 `proxy.conf.json` 轉回 `WebBff`**——proxy 只改變請求送到哪，不改變 origin。production 是同源（Angular build 產物由 `WebBff` 出）所以只需要真實網域。dev 與 prod 的 origin 拓樸不同，這正是「本機通、上線炸」的來源，見第 9 節。
 
-`WebClient/Services/LoginEndpoints.cs` 的 `MapLoginEndpoints()`，比照連線層 `MapGatewayWebSocket()` 的形狀——endpoint 包成擴充方法，測試才能用同一套「手動建 `WebApplication`」的方式對著真的 Kestrel 驗狀態碼與 `Set-Cookie`。
+### 6.5 登入流程的 HTTP endpoint（寄宿在 `WebBff`，見 ADR-10）
+
+`WebBff/Services/LoginEndpoints.cs` 的 `MapLoginEndpoints()`，比照連線層 `MapGatewayWebSocket()` 的形狀——endpoint 包成擴充方法，測試才能用同一套「手動建 `WebApplication`」的方式對著真的 Kestrel 驗狀態碼與 `Set-Cookie`。
 
 | endpoint | 行為 | 回應 |
 |---|---|---|
@@ -421,15 +423,16 @@ allowlist 從設定讀（AppHost 注入，開發與正式環境各自的來源�
   - allowlist 是設定而非常數，開發/正式環境各自維護。**本機開發的 port 一定要記得放進去**（見 6.4 那個坑）。
   - 非瀏覽器 client（測試工具、未來的原生 app）不會帶 `Origin`。目前策略是「沒有 `Origin` 就拒絕」，因為現階段唯一的 client 就是瀏覽器；未來要支援原生 client 時，那類 client 也不會用 cookie 認證，屆時需要另一條驗證路徑（例如 `Authorization` header），這條規則要一起重新設計。
 
-### ADR-10：登入 endpoint 寄宿在前端 host（`WebClient`），不獨立成服務、也不進 Gateway
+### ADR-10：登入 endpoint 寄宿在前端的 BFF（`WebBff`），不獨立成服務、也不進 Gateway
 
-- **Context**：`POST /login` 那組 endpoint 有三個可能的家——Gateway 專案、獨立的身分服務、或前端自己的 host。ADR-8 之後 cookie 必須跟著 handshake 送到 Gateway，所以「跟 Gateway 同 site」不是可選項：不同 site 就得把 cookie 降成 `SameSite=None; Secure`，並失去 ADR-9 的第二層防護。
-- **Decision**：放進 `WebClient`（前端 host），也就是 BFF（backend-for-frontend）的形狀。本文件前一版的決定是「獨立成 `Identity` 專案」，已被取代。
+- **Context**：`POST /login` 那組 endpoint 有三個可能的家——Gateway 專案、獨立的身分服務、或前端自己的後端。ADR-8 之後 cookie 必須跟著 handshake 送到 Gateway，所以「跟 Gateway 同 site」不是可選項：不同 site 就得把 cookie 降成 `SameSite=None; Secure`，並失去 ADR-9 的第二層防護。
+- **Decision**：放進 `WebBff`——一個 ASP.NET Core 專案，負責出前端的靜態檔（未來 Angular 的 build 產物）並簽發 session cookie，也就是 BFF（backend-for-frontend）的形狀。本文件前一版的決定是「獨立成 `Identity` 專案」，已被取代。
+- **命名**：這個專案一度叫 `WebClient`，但 `webClient` 在這個 repo（含 `main` 分支）一直指 Angular 那一包，而且 `WebClient` 對一個 server 是誤導的名字（還跟 `System.Net.WebClient` 撞名）。分工是：`WebBff` = .NET host，`webClient` = Angular UI。
 - **Consequences**：
   - **CORS 完全不需要**。前端的 `fetch` 是 same-origin，不用設 policy、不用 `AllowCredentials`、不用維護第二份 origin 清單。獨立服務方案這三件事都得做，而且做錯的症狀（cookie 沒送出去）很難查。
   - **`SameSite=Lax` 自然成立**：cookie 由使用者正在看的那個站台簽發，不是靠部署拓樸硬撐出來的。
   - **Gateway 完全不受影響**。前一版主張獨立專案的理由是「不要讓 Gateway 變成身分層宿主」，這個目的一樣達成——Gateway 保留的身分依賴仍然只有 `IConnectionAuthenticator` 一個介面。
-  - **代價一**：前端 host 不能是純靜態託管。它要連 identity-store（Redis）與 NATS（登出時終止連線），所以 CDN／GitHub Pages／S3 那類選項出局；哪天真的想那樣做，這組 endpoint 就得搬家。
+  - **代價一**：出靜態檔的那一層不能是純靜態託管。`WebBff` 要連 identity-store（Redis）與 NATS（登出時終止連線），所以「Angular 直接丟 CDN／GitHub Pages／S3」出局。**`main` 分支的 `webClient/nginx` + Dockerfile 就是那個形狀，不能照搬**——照搬的症狀是 cookie 不見了。
   - **代價二**：仍然要跟 Gateway 同一個註冊網域（正式環境靠同一個 ingress 分路徑）。這個約束在程式碼與 diff 上完全看不出來，所以寫在這裡。
   - 本機開發時 cookie 跨 port 沒問題（cookie 不分 port，`localhost:5150` 簽發的 cookie 會跟著 `ws://localhost:5042/ws` 的 handshake 送出），但 `Origin` 是逐字比對，所以 Gateway 的 allowlist 必須放前端 host 的完整 origin。
 
@@ -450,7 +453,7 @@ allowlist 從設定讀（AppHost 注入，開發與正式環境各自的來源�
 - **Consequences**：
   - 這是一個**完整的身分偽造後門**：開著的時候任何字串都能登入成任何人。兩道鎖的設計是為了讓它不可能因為單一疏失而生效（光是設定檔被複製到正式環境不夠，環境也必須是 Development）。
   - 它同時是 `IIdTokenValidator` 這個介面存在的第二個理由（第一個是可測試性）——如果只為了測試，用 substitute 就夠了。
-  - **移除條件**：WebClient 前端接上真的 Google 登入之後，這個實作就沒有使用者了，應該連同設定一起刪掉。留著它等於永久保留一個後門，而「反正預設是關的」是安全問題裡最常見的自我安慰。
+  - **移除條件**：前端接上真的 Google 登入之後，這個實作就沒有使用者了，應該連同設定一起刪掉。留著它等於永久保留一個後門，而「反正預設是關的」是安全問題裡最常見的自我安慰。
 
 ## 8. 明確排除於本階段
 
@@ -464,10 +467,14 @@ allowlist 從設定讀（AppHost 注入，開發與正式環境各自的來源�
 
 - **已完成**：`Common/Identity/` 的三個 store 與 DI 註冊。`ISessionStore`／`RedisSessionStore`、`ILoginNonceStore`／`RedisLoginNonceStore`、`IPresenceDirectory`／`RedisPresenceDirectory`、`IdentityKeys`、`OpaqueToken`、`Common/IdentityLayerServiceCollectionExtensions.cs` 的 `AddIdentityStores(redisServiceKey)`，測試在 `Common.Tests/Identity/`。刻意先只做這一層——不動任何 process，可以獨立驗證。實作時確認的兩件事：`StringSetAndGetAsync` 在 StackExchange.Redis 3.x 只剩帶 `keepTtl` 的多載；`KeyExpireAsync(key, ttl)` 解析到的是帶 `ExpireWhen` 的多載（測試的 `Received` 斷言必須對上實際被呼叫的那一個，否則會出現「明明呼叫了卻說沒收到」）。
 - **已完成**：`IConnectionAuthenticator`／`ConnectionAuthenticator`（6.3）、`SessionCookie`、`AddConnectionAuthenticator()`，以及連線層的接線（`connection-layer.md` 第 6.8 節、ADR-9）。AppHost 新增 `identity-store`（開 `WithDataVolume()` + `WithPersistence()`，不然 AppHost 重啟一次就得重新登入），Gateway 掛上 `AddKeyedRedisClient("identity-store")` 與 `Gateway:AllowedOrigins` 設定。實作時踩到的坑寫在 6.3（`BindAsync` 這個名字會被 minimal API 的參數繫結慣例攔截）。
-- **已完成**：`WebClient` 專案骨架與登入流程的四個 endpoint（6.5）、`IIdTokenValidator`／`GoogleIdTokenValidator`／`FakeIdTokenValidator`（ADR-12）、`IUserProfileStore`（ADR-11）、`IConnectionAuthenticator.TerminateConnectionsAsync`。AppHost 新增 `webclient`（`WithExternalHttpEndpoints()`），Gateway 的 allowlist 指向它。
+- **已完成**：`WebBff` 專案骨架與登入流程的四個 endpoint（6.5）、`IIdTokenValidator`／`GoogleIdTokenValidator`／`FakeIdTokenValidator`（ADR-12）、`IUserProfileStore`（ADR-11）、`IConnectionAuthenticator.TerminateConnectionsAsync`。AppHost 新增 `web-bff`（`WithExternalHttpEndpoints()`），Gateway 的 allowlist 指向它。
 - **待做（不在 code 裡）**：Google Cloud 的 OAuth client id 與 authorized JavaScript origins。設定進 `Login:GoogleClientId` 之前 `POST /login` 一律回 503；要在那之前跑端到端驗證，把 `Login:AllowFakeIdTokens` 打開（ADR-12）。
-- **待做**：WebClient 的前端本身。工具鏈還沒決定，而這個決定**不影響已經寫好的東西**——不論選什麼，build 產物落到 `wwwroot` 就能用（`MapFallbackToFile("index.html")` 已經替 SPA 深層路由準備好）。如果選了有自己 dev server 的工具鏈（Vite 之類），dev 時要嘛用它的 proxy 把 `/login/*` 轉回這個 host（瀏覽器看到的仍是同源），要嘛把它的 origin 也加進 Gateway 的 allowlist。
-- ~~`POST /login` endpoint 的部署位置尚未決定。~~ **已決定**：寄宿在 `WebClient`（BFF），見 ADR-10。前一版的「獨立 `Identity` 專案」已被取代。
+- **待做**：Angular 前端本身（專案名 `webClient`，沿用 `main` 的資料夾名）。`WebBff` 這邊已經準備好——build 產物落到 `wwwroot` 就能用，`MapFallbackToFile("index.html")` 也替 SPA 深層路由備好了。接上之前有四件事要決定，全部跟名字無關但都會影響部署：
+  1. **Gateway 的 allowlist 要改成 dev server 的 origin**（`ng serve` 預設 `http://localhost:4200`），理由見 6.4。
+  2. **`/login/*` 在 dev 要走 Angular 的 `proxy.conf.json` 轉回 `WebBff`**，否則 cookie 會被簽在錯的 origin 上。
+  3. **Aspire 要不要納管 Angular**（`AddNpmApp`）：納管的話 `dotnet run` AppHost 一次起全套，代價是任何要跑 AppHost 的人都要裝 node。傾向先不納管。
+  4. **production 的 build 串接放哪**：`.csproj` 的 MSBuild target（方便，但沒裝 node 就 build 不過）還是 CI 兩段式（乾淨）。傾向 CI。
+- ~~`POST /login` endpoint 的部署位置尚未決定。~~ **已決定**：寄宿在 `WebBff`，見 ADR-10。前一版的「獨立 `Identity` 專案」已被取代。
 - ~~Session 的 sliding 續期實際觸發時機還沒定案。~~ **已決定**：在 handshake 的 `ResolveAsync` 內續期（ADR-3）。
 - ~~連線層需要新增的 `IConnectionTerminator`。~~ 已實作完成。
 - ~~ADR-8 反向索引 `ConnectionUser:{connectionId}` 的 TTL 長度與續期方式尚未決定。~~ **已消失**：反向索引整條刪除（新 ADR-8）。

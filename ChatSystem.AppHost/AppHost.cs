@@ -26,9 +26,10 @@ builder.AddProject<Projects.CommandRouter>("command-router")
 	.WaitFor(messageBus);
 
 // 多開複本模擬多個 Gateway 節點，驗證 ConnectionDirectory + Dispatcher 的跨節點路由
-// 前端 host 兼登入服務（BFF）：簽發 session cookie，跟 Gateway 同 site 所以 cookie 帶得過去。
-// 需要 identity-store（Session/nonce/profile）與 message-bus（登出時終止該身分的連線）。
-builder.AddProject<Projects.WebClient>("webclient")
+// 前端的 BFF：出靜態檔（未來 Angular 的 build 產物）並簽發 session cookie。
+// 跟 Gateway 同 site 所以 cookie 帶得過去；需要 identity-store（Session/nonce/profile）
+// 與 message-bus（登出時終止該身分的連線）。
+builder.AddProject<Projects.WebBff>("web-bff")
 	.WithReference(identityStore)
 	.WithReference(messageBus)
 	.WaitFor(identityStore)

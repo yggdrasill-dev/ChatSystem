@@ -1,6 +1,6 @@
 using Common.Identity;
 
-namespace WebClient.Services;
+namespace WebBff.Services;
 
 // 登入流程的 HTTP 入口。跟前端寄宿在同一個 host，所以：
 // - 前端的 fetch 是 same-origin，不需要 CORS

@@ -11,7 +11,7 @@
 沿用 `main` 分支既有 Demo 的核心互動流程（登入 → 房間列表 → 建立/加入房間 → 聊天），但這次重建有意做的改變：
 
 - 身分驗證改為 Google OAuth，取代 `main` 上自建帳密註冊的 `AuthServer`
-- WebClient 前端重做，不沿用既有 Angular 專案
+- `webClient` 前端重做（仍然是 Angular），不沿用既有的 Angular 專案內容；另外新增一個 `WebBff` 專案當它的後端，見第 5 節
 - 新增訊息歷史記錄（chat history persistence）——`main` 上沒有這個功能
 - 新增房間後台管理功能——`main` 上沒有這個功能
 
@@ -46,7 +46,8 @@
 | 身分/使用者管理層 | Google OAuth 登入、Session、ConnectionId 對應使用者身分、重複登入 Supersede 規則 | **已實作**（含登入/登出 endpoint），只剩 Google client id 這個外部前置作業，見 [identity-layer.md](architecture/identity-layer.md) |
 | 房間層 | 建立/加入房間、密碼房、房間成員管理、房間後台 | 設計中，見 [room-layer.md](architecture/room-layer.md) |
 | 聊天層 | 訊息收發、訊息歷史記錄 | 待設計 |
-| WebClient | 前端重做；**同時是登入流程的後端**（BFF，見 [identity-layer.md](architecture/identity-layer.md) ADR-10） | 專案骨架與登入 endpoint 已實作，前端本身待設計（工具鏈未定） |
+| WebBff | 前端的 BFF：出前端靜態檔 + 登入/登出 endpoint（見 [identity-layer.md](architecture/identity-layer.md) ADR-10） | 已實作 |
+| webClient | Angular 前端，重做（沿用 `main` 的資料夾名） | 待實作 |
 
 ## 6. 待確認事項
 

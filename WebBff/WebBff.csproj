@@ -13,7 +13,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <InternalsVisibleTo Include="WebClient.Tests" />
+    <InternalsVisibleTo Include="WebBff.Tests" />
   </ItemGroup>
 
   <PropertyGroup>

@@ -24,7 +24,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\WebClient\WebClient.csproj" />
+    <ProjectReference Include="..\WebBff\WebBff.csproj" />
   </ItemGroup>
 
 </Project>

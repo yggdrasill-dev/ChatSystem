@@ -1,4 +1,4 @@
-namespace WebClient.Services;
+namespace WebBff.Services;
 
 // 驗證過的 ID Token 內容。只取這個系統真的會用到的三個 claim。
 public sealed record IdTokenPayload(string UserId, string? DisplayName, string? PictureUrl);
@@ -6,7 +6,7 @@ public sealed record IdTokenPayload(string UserId, string? DisplayName, string? 
 // 把 Google ID Token 的驗證包成介面的唯一理由是可測試性：
 // GoogleJsonWebSignature.ValidateAsync 是 static 方法，不包起來就沒有辦法在測試裡替換。
 //
-// 這個介面刻意留在 WebClient 專案裡、不進 Common——Google.Apis.Auth 只有這裡需要，
+// 這個介面刻意留在 WebBff 專案裡、不進 Common——Google.Apis.Auth 只有這裡需要，
 // 放 Common 會讓 Gateway 與 CommandRouter 一起把它拖進去。
 public interface IIdTokenValidator
 {

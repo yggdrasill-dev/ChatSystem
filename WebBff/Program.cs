@@ -1,5 +1,5 @@
 using NATS.Client.Core;
-using WebClient.Services;
+using WebBff.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 

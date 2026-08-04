@@ -10,9 +10,9 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using NSubstitute;
-using WebClient.Services;
+using WebBff.Services;
 
-namespace WebClient.Tests;
+namespace WebBff.Tests;
 
 // 對著真的 Kestrel 跑：要驗的東西有一半在 HTTP 層（狀態碼、Set-Cookie 的屬性），
 // 用 in-memory 的 handler 測不到 cookie 真的長什麼樣。

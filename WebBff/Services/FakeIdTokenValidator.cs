@@ -1,4 +1,4 @@
-namespace WebClient.Services;
+namespace WebBff.Services;
 
 // 開發用的假驗證器：把 idToken 字串直接當成 userId，不做任何驗證。
 //
