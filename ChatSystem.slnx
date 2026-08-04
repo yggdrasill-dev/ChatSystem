@@ -9,6 +9,7 @@
   <Project Path="Dispatcher/Dispatcher.csproj" />
   <Project Path="Gateway.Tests/Gateway.Tests.csproj" />
   <Project Path="Gateway/Gateway.csproj" />
+  <Project Path="Integration.Tests/Integration.Tests.csproj" />
   <Project Path="WebBff.Tests/WebBff.Tests.csproj" />
   <Project Path="WebBff/WebBff.csproj" />
 </Solution>

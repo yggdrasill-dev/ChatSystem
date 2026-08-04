@@ -50,7 +50,8 @@ var builder = WebApplication.CreateBuilder(args);
 		.AddNatsMessageQueue(config => config
 			.ConfigureResolveConnection(sp => (NatsConnection)sp.GetRequiredService<INatsConnection>())
 			.AddHandler<DeliverPacketHandler>($"connect.deliver.{nodeId.Value}")
-			.AddHandler<TerminatePacketHandler>($"connect.terminate.{nodeId.Value}"));
+			.AddHandler<TerminatePacketHandler>($"connect.terminate.{nodeId.Value}"))
+		.AddNatsGlobPatternExchange("*");
 
 	builder.Services.AddHostedService<ConnectionHeartbeatService>();
 }
