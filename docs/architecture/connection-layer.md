@@ -445,7 +445,7 @@ public interface IConnectionEventPublisher
 }
 ```
 
-**這個 publisher 用原生 `INatsConnection` 而不是 Adaptare 的 `IMessageSender`**：訂閱端（房間層）也是原生訂的，而這條通道原本是唯一「一端 Adaptare 發、另一端原生訂」的組合——結果事件根本到不了。同一個 `IMessageSender` 發 `dispatch.deliver` 會到、發這個 subject 不會到，差別只在 subject 字串，所以是 Adaptare 的 subject 對應規則。詳見 `room-layer.md` 第 9 節。
+**這個 publisher 用原生 `INatsConnection` 而不是 Adaptare 的 `IMessageSender`**——理由是要跟訂閱端（房間層，原生訂）**對稱**，不是「這條通道必須用原生」。實測 Adaptare 的 publish 不是「把 payload 原樣發到字面 subject」，所以「Adaptare 發、原生訂」收不到任何東西；兩端一致就會通，用哪一套都行。Adaptare 實際在 wire 上送什麼目前不知道，完整的排除過程與未解問題見 `room-layer.md` 第 9 節。
 
 subject 是 `events.connection.disconnected`，**刻意不放在 `connect.*` 家族**：那個前綴目前的意思是「投遞給某個 Gateway 節點」（`connect.deliver.{nodeId}`、`connect.terminate.{nodeId}`），而這是反方向的事件廣播、沒有特定目標角色。用 `events.*` 開一個明確的事件命名空間，也避免 `connect.` 跟 `connection.` 只差三個字母的辨識風險。
 

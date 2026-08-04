@@ -416,10 +416,14 @@ internal sealed class RoomGraceSweeper(
   - 驗證腳本在 `scratchpad/RoomE2E`（引用 `Common`，用真的 protobuf 型別），可重複執行。
   - 到達全綠之前修了三個 bug，全部**不在房間層**：`InboundAck` 的空 ack（任何成功的命令都會殺掉連線）、`AddNatsMessaging()` 造成的下行訊息重複投遞、以及斷線事件的發布端／訂閱端不對稱。前兩個見 `protocol-layer.md` 第 9 節，第三個見下面。
   - **已修：每個下行訊息被投遞兩次。** client 收到兩份 `room.joined`、兩份 `room.reply`（「密碼錯」那個檢查會失敗就是因為吃到重複的 create reply；「重連無感」會失敗是因為吃到重複的 `RoomMemberJoined`）。原因是 `AddNatsMessageQueue()` 在同一個 process 被呼叫兩次——一次來自 `AddNatsMessaging()` 的共用設定，一次來自 host 自己註冊 handler 那條鏈——每多一次就多一個 `IMessageQueueBackgroundRegistration`，而 handler 設定是共用的 options，所以每個訂閱被建立兩份。修法與回歸測試見 `Common/NatsMessagingRegistration.cs` 與 `protocol-layer.md` 第 9 節。**修好這一個，12 項檢查裡有 11 項通過。**
-  - **已修：斷線事件抵達不了房間層**（修好之前寬限期的整個機制是死的——沒有人被標記、`{rooms}:grace` 永遠空的、sweeper 永遠沒事做）。排除的過程：訂閱端有起來（log 有印）；Gateway 端發布沒有失敗（失敗會記 Error）；改用原生 `INatsConnection` 訂閱**還是收不到**。剩下的唯一可能就是**發布端**——同一個 `IMessageSender` 發 `dispatch.deliver` 會到、發 `events.connection.disconnected` 不會到，差別只在 subject 字串，所以是 Adaptare 的 subject 對應規則。
-    - **修法**：`ConnectionEventPublisher` 也改用原生 `INatsConnection.PublishAsync`，讓這條通道兩端對稱。改完 22 項全綠。
-    - **為什麼只有這條通道踩到**：`dispatch.*` / `connect.*` / `command.inbound` 的兩端都是 Adaptare，subject 不管被怎麼改寫都對得上。`events.connection.disconnected` 是唯一「一端 Adaptare 發、另一端原生訂」的組合，也就是唯一會暴露這件事的地方。
-    - **留下的不對稱**：系統現在有兩套 messaging——事件通道用原生 NATS，其他仍走 Adaptare。這是刻意的最小改動，但它同時是「要不要整批換掉 Adaptare」這個決定的第一步（這一輪三個 bug 有兩個跟它有關）。
+  - **已修：斷線事件抵達不了房間層**（修好之前寬限期的整個機制是死的——沒有人被標記、`{rooms}:grace` 永遠空的、sweeper 永遠沒事做）。**這裡其實是兩個獨立的問題疊在一起**：
+    - **A**：CommandRouter 的 Adaptare 鏈裡混用 `AddProcessor` 與 `AddHandler` 時，handler 完全不會訂閱（processor 正常）。這是為什麼 Adaptare 版的訂閱端收不到。
+    - **B**：Adaptare 的 publish 跟原生 publish 在 wire 上**不等價**。這是為什麼換成原生訂閱端之後還是收不到。
+    - 解掉任何一個都會通。**採用的是 B**：`ConnectionEventPublisher` 也改用原生 `INatsConnection.PublishAsync`，讓這條通道兩端對稱。改完 22 項全綠。選 B 不是因為它必要，是因為它是當時能確定做得出來的那一條。
+  - **這裡有一個沒被解釋的東西，不要當成已知**：實際被驗證的只有三個組合——Adaptare 發／Adaptare 訂（會到）、Adaptare 發／原生訂（不會到）、原生發／原生訂（會到）。**「Adaptare 發／Adaptare 訂」用在這個 subject 上從來沒被測過**（因為先撞到 A 就換掉訂閱端了）。
+    - 所以能斷言的只有：**Adaptare 的 publish 不是「把 payload 原樣發到字面 subject」**。差在 subject 改寫、外層信封還是 headers，**目前不知道**——用來推論的 `dispatch.deliver` 也是 Adaptare 兩端，對 wire 上的實際內容一樣沒有證據（NATS 的 wire sniffer 沒連上，所以 wire 從頭到尾沒被看到）。
+    - 這條**先前的版本寫成「差別只在 subject 字串，所以是 Adaptare 的 subject 對應規則」，那超出了證據**，已修正。
+  - **留下的不對稱**：系統現在有兩套 messaging——事件通道用原生 NATS，其他仍走 Adaptare。要真正收乾淨有兩條路：(1) 把 wire 看清楚（修好 sniffer 或讀 Adaptare 原始碼）再知情地決定；(2) 讓整個系統只用一套機制，讓「兩端一致」變成結構保證而不是每條通道各自去對。這一輪三個 bug 有兩個跟 Adaptare 有關，而我們用它只做三件事（publish bytes、request/reply bytes、subscribe + queue group），三件在 NATS.Net 都是一行——**「要不要整批換成原生」是一個還沒做的決定**。
 - **待確認**：`room.ban` 目前**不會**順手把人踢出房間，照 ADR-5 的「後台正常用法是踢出＋封鎖，UI 上做成一個動作」。但這代表封鎖一個正在房間裡的人，他會留在裡面直到自己離開——對一個管理工具來說很奇怪。要嘛 ban 順手 remove（那 ban 就有兩種副作用，而且沒辦法只封鎖一個不在房間裡的人），要嘛維持現狀並在 UI 上強制兩個命令一起送。**這條沒有定案，只是照文件實作**。
 
 - ~~**硬前置：連線層的斷線事件**（ADR-3）。~~ **已實作**：`events.connection.disconnected`，設計見 `connection-layer.md` 第 6.7 節與 ADR-8。房間層要訂閱它並在 handler 裡呼叫 `MarkDisconnectedAsync`。注意該 ADR 明確把事件定為 best-effort——本層 ADR-2 的「讀取時過濾」正確性不依賴它，這個前提要繼續維持，不要改成「只在收到事件時才清理」。事件會帶 `principal`（`connection-layer.md` ADR-9），所以本層不需要任何 `connectionId → userId` 的反查。

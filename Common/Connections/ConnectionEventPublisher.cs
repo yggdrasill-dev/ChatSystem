@@ -6,12 +6,13 @@ namespace Common.Connections;
 
 // 直接用原生 NATS client 發，不經過 Adaptare 的 IMessageSender。
 //
-// 理由是對稱：訂閱端（房間層的 RoomDisconnectSubscriber）也是原生訂的。這條事件通道是整個
-// 系統唯一「連線層 → 業務層」的方向，而它原本是唯一「一端 Adaptare 發、另一端原生訂」的
-// 組合——結果事件根本到不了訂閱端（同一個 IMessageSender 發 dispatch.deliver 會到、發這個
-// subject 不會到，差別只在 subject 字串，所以是 Adaptare 的 subject 對應規則）。
+// 理由是**對稱**，不是「這條通道必須用原生」：訂閱端（房間層的 RoomDisconnectSubscriber）
+// 是原生訂的，而實測 Adaptare 的 publish 不是「把 payload 原樣發到字面 subject」——所以
+// 「Adaptare 發、原生訂」這個組合收不到任何東西。兩端一致就會通，用哪一套都行。
 //
-// dispatch.* / connect.* 目前仍走 Adaptare，因為那些路徑的兩端都是 Adaptare，對得上。
+// Adaptare 到底在 wire 上送什麼**目前不知道**（sniffer 沒連上，wire 沒被看到）。
+// dispatch.* / connect.* 仍走 Adaptare，因為那些路徑兩端都是 Adaptare，不管它怎麼改寫都
+// 對得上。完整的排除過程與留下的未解問題見 room-layer.md 第 9 節。
 internal sealed class ConnectionEventPublisher(INatsConnection connection) : IConnectionEventPublisher
 {
 	// 刻意不放在 connect.* 家族裡：那個前綴目前的意思是「投遞給某個 Gateway 節點」
