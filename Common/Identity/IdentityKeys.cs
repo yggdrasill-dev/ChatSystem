@@ -17,4 +17,12 @@ internal static class IdentityKeys
 	public static RedisKey Presence(string userId) => $"Presence:{userId}";
 
 	public static RedisKey LoginNonce(string nonce) => $"LoginNonce:{nonce}";
+
+	public static RedisKey Profile(string userId) => $"Profile:{userId}";
+
+	public static class ProfileFields
+	{
+		public const string DisplayName = "display_name";
+		public const string PictureUrl = "picture_url";
+	}
 }

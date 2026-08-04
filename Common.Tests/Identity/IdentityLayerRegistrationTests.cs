@@ -19,10 +19,15 @@ public class IdentityLayerRegistrationTests
 		{
 			await provider.GetRequiredService<ISessionStore>().RevokeAsync("token-1");
 			await provider.GetRequiredService<ILoginNonceStore>().TryConsumeAsync("nonce-1");
-			await provider.GetRequiredService<IPresenceDirectory>().UnbindAsync("user-1", "conn-1");
+			await provider.GetRequiredService<IUserProfileStore>().SaveAsync("user-1", "Sunny", null);
+			await provider.GetRequiredService<IPresenceDirectory>().UnbindConnectionAsync("user-1", "conn-1");
 
 			await identityDatabase.Received(1).KeyDeleteAsync((RedisKey)"Session:token-1", Arg.Any<CommandFlags>());
 			await identityDatabase.Received(1).KeyDeleteAsync((RedisKey)"LoginNonce:nonce-1", Arg.Any<CommandFlags>());
+			await identityDatabase.Received(1).HashSetAsync(
+				(RedisKey)"Profile:user-1",
+				Arg.Any<HashEntry[]>(),
+				Arg.Any<CommandFlags>());
 			await identityDatabase.Received(1).ScriptEvaluateAsync(
 				Arg.Any<string>(),
 				Arg.Any<RedisKey[]>(),
@@ -44,6 +49,7 @@ public class IdentityLayerRegistrationTests
 		{
 			Assert.Same(provider.GetRequiredService<ISessionStore>(), provider.GetRequiredService<ISessionStore>());
 			Assert.Same(provider.GetRequiredService<ILoginNonceStore>(), provider.GetRequiredService<ILoginNonceStore>());
+			Assert.Same(provider.GetRequiredService<IUserProfileStore>(), provider.GetRequiredService<IUserProfileStore>());
 			Assert.Same(provider.GetRequiredService<IPresenceDirectory>(), provider.GetRequiredService<IPresenceDirectory>());
 		}
 	}

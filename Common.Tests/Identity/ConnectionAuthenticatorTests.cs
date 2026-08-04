@@ -45,7 +45,7 @@ public class ConnectionAuthenticatorTests
 	{
 		var context = new AuthenticatorContext();
 		context.Presence
-			.BindAsync("user-1", "conn-new", Arg.Any<CancellationToken>())
+			.BindConnectionAsync("user-1", "conn-new", Arg.Any<CancellationToken>())
 			.Returns("conn-old");
 
 		await context.Authenticator.BindConnectionAsync("user-1", "conn-new");
@@ -61,7 +61,7 @@ public class ConnectionAuthenticatorTests
 	{
 		var context = new AuthenticatorContext();
 		context.Presence
-			.BindAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
+			.BindConnectionAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
 			.Returns((string?)null);
 
 		await context.Authenticator.BindConnectionAsync("user-1", "conn-new");
@@ -79,7 +79,7 @@ public class ConnectionAuthenticatorTests
 		await context.Authenticator.UnbindConnectionAsync("user-1", "conn-1");
 
 		// connectionId 必須傳下去：Supersede 時新連線已經先綁好，舊連線的解綁不能把它蓋掉
-		await context.Presence.Received(1).UnbindAsync("user-1", "conn-1", Arg.Any<CancellationToken>());
+		await context.Presence.Received(1).UnbindConnectionAsync("user-1", "conn-1", Arg.Any<CancellationToken>());
 	}
 
 	private sealed class AuthenticatorContext

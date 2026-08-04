@@ -11,10 +11,14 @@ public interface IPresenceDirectory
 {
 	// 綁定，並回傳「被這次綁定取代掉的舊 connectionId」（沒有則 null）。
 	// 呼叫端拿它去終止舊連線；這個介面本身不知道「終止連線」這件事。
-	ValueTask<string?> BindAsync(string userId, string connectionId, CancellationToken cancellationToken = default);
+	//
+	// **不要改名成 BindAsync / UnbindAsync**：ASP.NET Core 把參數型別上任何叫 BindAsync 的
+	// 成員當成 minimal API 的自訂參數繫結慣例，簽章不符會在 routing 階段丟例外（症狀是每個
+	// 請求都 500，而且應用程式自己的 try/catch 攔不到）。這個介面遲早會被注入某個 endpoint。
+	ValueTask<string?> BindConnectionAsync(string userId, string connectionId, CancellationToken cancellationToken = default);
 
 	// 解除綁定。只有當目前值等於 connectionId 時才生效（fencing，見實作）。
-	ValueTask UnbindAsync(string userId, string connectionId, CancellationToken cancellationToken = default);
+	ValueTask UnbindConnectionAsync(string userId, string connectionId, CancellationToken cancellationToken = default);
 
 	// 房間 fan-out 用：一間房可能很多成員，逐筆查會變成 N 次來回。
 	// 查不到的 userId（不在線）直接省略，沿用 ResolveNodesAsync 的既有慣例。

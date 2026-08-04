@@ -4,6 +4,7 @@
     <ProjectReference Include="..\Gateway\Gateway.csproj" />
     <ProjectReference Include="..\Dispatcher\Dispatcher.csproj" />
     <ProjectReference Include="..\CommandRouter\CommandRouter.csproj" />
+    <ProjectReference Include="..\WebClient\WebClient.csproj" />
   </ItemGroup>
 
   <ItemGroup>

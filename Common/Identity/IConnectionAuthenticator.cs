@@ -23,4 +23,11 @@ public interface IConnectionAuthenticator
 
 	// 連線關閉後：解除綁定。只有目前綁的就是這條連線時才會生效（fencing）。
 	ValueTask UnbindConnectionAsync(string principal, string connectionId, CancellationToken cancellationToken = default);
+
+	// 登出：把這個身分目前的連線全部終止。
+	//
+	// 放在這個介面而不是讓呼叫端自己組（查 IPresenceDirectory 再呼叫 IConnectionTerminator），
+	// 是因為 Supersede 已經在做同一件事——「這個身分的連線」這個概念屬於這裡。
+	// 副作用是登出的 endpoint 只需要認識這一個介面。
+	ValueTask TerminateConnectionsAsync(string principal, CancellationToken cancellationToken = default);
 }

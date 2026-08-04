@@ -43,16 +43,17 @@
 | 層 | 涵蓋範圍 | 狀態 |
 |---|---|---|
 | 連線層（Gateway/Dispatcher） | 一條 WebSocket 連線怎麼被持有、定址、投遞 | 已完成核心設計與實作，收尾中 |
-| 身分/使用者管理層 | Google OAuth 登入、Session、ConnectionId 對應使用者身分、重複登入 Supersede 規則 | **設計已定案、待實作**，見 [identity-layer.md](architecture/identity-layer.md) |
+| 身分/使用者管理層 | Google OAuth 登入、Session、ConnectionId 對應使用者身分、重複登入 Supersede 規則 | **已實作**（含登入/登出 endpoint），只剩 Google client id 這個外部前置作業，見 [identity-layer.md](architecture/identity-layer.md) |
 | 房間層 | 建立/加入房間、密碼房、房間成員管理、房間後台 | 設計中，見 [room-layer.md](architecture/room-layer.md) |
 | 聊天層 | 訊息收發、訊息歷史記錄 | 待設計 |
-| WebClient | 前端重做 | 待設計/待實作 |
+| WebClient | 前端重做；**同時是登入流程的後端**（BFF，見 [identity-layer.md](architecture/identity-layer.md) ADR-10） | 專案骨架與登入 endpoint 已實作，前端本身待設計（工具鏈未定） |
 
 ## 6. 待確認事項
 
 - 規模目標沒有具體數字，會影響後續每一層的儲存/擴展決策
 - ~~房間後台管理功能具體要管理什麼~~ 已確認四項：踢出成員、封鎖使用者、關閉／刪除房間、修改房間設定（見 [room-layer.md](architecture/room-layer.md)）。「監看訊息」不在其中
 - 訊息記錄要保留多久、要不要分頁查詢、要不要搜尋，還沒討論
+- **使用者的顯示名稱**：房間成員名單目前只有 Google `sub`（一串數字），UI 上不能看。登入時已經把 Google 的 `name`／`picture` 存下來（[identity-layer.md](architecture/identity-layer.md) ADR-11），但還沒有查詢介面，也還沒決定「暱稱可不可以自己改」——後者是產品決定，不是技術決定
 - 房間本身與封鎖名單需要持久儲存，這跟訊息記錄是**同一個儲存決定**，建議一起做，不要為房間層單獨選一個
 - 第 3 節的排除清單只是根據目前對話推測，需要你確認是否有遺漏（該做但沒提到／不該做但被列進來）
 

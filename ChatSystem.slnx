@@ -9,4 +9,6 @@
   <Project Path="Dispatcher/Dispatcher.csproj" />
   <Project Path="Gateway.Tests/Gateway.Tests.csproj" />
   <Project Path="Gateway/Gateway.csproj" />
+  <Project Path="WebClient.Tests/WebClient.Tests.csproj" />
+  <Project Path="WebClient/WebClient.csproj" />
 </Solution>

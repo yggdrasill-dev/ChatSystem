@@ -32,7 +32,7 @@ internal sealed class ConnectionAuthenticator(
 		CancellationToken cancellationToken = default)
 	{
 		var superseded = await presenceDirectory
-			.BindAsync(principal, connectionId, cancellationToken)
+			.BindConnectionAsync(principal, connectionId, cancellationToken)
 			.ConfigureAwait(false);
 
 		if (superseded is null)
@@ -55,5 +55,21 @@ internal sealed class ConnectionAuthenticator(
 		string principal,
 		string connectionId,
 		CancellationToken cancellationToken = default) =>
-		presenceDirectory.UnbindAsync(principal, connectionId, cancellationToken);
+		presenceDirectory.UnbindConnectionAsync(principal, connectionId, cancellationToken);
+
+	public async ValueTask TerminateConnectionsAsync(string principal, CancellationToken cancellationToken = default)
+	{
+		var connectionIds = await presenceDirectory
+			.ResolveConnectionsAsync([principal], cancellationToken)
+			.ConfigureAwait(false);
+
+		// 不在線就沒事做。這裡刻意不清 Presence——連線被關掉之後 Gateway 會走
+		// UnbindConnectionAsync 自己清，而且那條路徑有 fencing。
+		if (connectionIds.Count == 0)
+			return;
+
+		await connectionTerminator
+			.TerminateAsync(connectionIds, cancellationToken)
+			.ConfigureAwait(false);
+	}
 }

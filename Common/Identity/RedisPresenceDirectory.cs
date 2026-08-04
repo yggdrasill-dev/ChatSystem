@@ -18,7 +18,7 @@ internal sealed class RedisPresenceDirectory(IConnectionMultiplexer multiplexer)
 	private const string CompareAndDeleteScript =
 		"if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) end return 0";
 
-	public async ValueTask<string?> BindAsync(
+	public async ValueTask<string?> BindConnectionAsync(
 		string userId,
 		string connectionId,
 		CancellationToken cancellationToken = default)
@@ -33,7 +33,7 @@ internal sealed class RedisPresenceDirectory(IConnectionMultiplexer multiplexer)
 		return previous.IsNullOrEmpty ? null : (string?)previous;
 	}
 
-	public ValueTask UnbindAsync(
+	public ValueTask UnbindConnectionAsync(
 		string userId,
 		string connectionId,
 		CancellationToken cancellationToken = default) =>

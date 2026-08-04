@@ -12,7 +12,7 @@ public class RedisPresenceDirectoryTests
 		var (directory, database) = CreateDirectory();
 		StubBind(database, "user-1", (RedisValue)"conn-old");
 
-		var previous = await directory.BindAsync("user-1", "conn-new");
+		var previous = await directory.BindConnectionAsync("user-1", "conn-new");
 
 		// 取回舊值與寫入新值必須是同一個原子操作，否則兩條同時綁定的連線可能都以為自己
 		// 沒有前任，留下一條收不到 fan-out 的孤兒連線
@@ -32,7 +32,7 @@ public class RedisPresenceDirectoryTests
 		var (directory, database) = CreateDirectory();
 		StubBind(database, "user-1", RedisValue.Null);
 
-		Assert.Null(await directory.BindAsync("user-1", "conn-new"));
+		Assert.Null(await directory.BindConnectionAsync("user-1", "conn-new"));
 	}
 
 	[Fact]
@@ -41,7 +41,7 @@ public class RedisPresenceDirectoryTests
 		var (directory, database) = CreateDirectory();
 		StubBind(database, "user-1", RedisValue.Null);
 
-		await directory.BindAsync("user-1", "conn-new");
+		await directory.BindConnectionAsync("user-1", "conn-new");
 
 		// 正向 key 刻意不設 TTL（identity-layer.md ADR-7）：殘留的舊值無害，
 		// 下次綁定會覆寫，而身分層沒有心跳機制可以續期
@@ -59,7 +59,7 @@ public class RedisPresenceDirectoryTests
 	{
 		var (directory, database) = CreateDirectory();
 
-		await directory.UnbindAsync("user-1", "conn-1");
+		await directory.UnbindConnectionAsync("user-1", "conn-1");
 
 		// fencing：Supersede 時舊連線的解綁會晚於新連線的綁定，無條件刪除會讓一個在線的
 		// 使用者從 fan-out 名單消失。單一 key 是 Cluster 的要求（Presence 沒有 hash tag）

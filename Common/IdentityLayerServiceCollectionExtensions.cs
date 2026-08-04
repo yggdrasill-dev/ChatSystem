@@ -21,6 +21,9 @@ public static class IdentityLayerServiceCollectionExtensions
 		services.AddSingleton<ILoginNonceStore>(sp =>
 			new RedisLoginNonceStore(sp.GetRequiredKeyedService<IConnectionMultiplexer>(redisServiceKey)));
 
+		services.AddSingleton<IUserProfileStore>(sp =>
+			new RedisUserProfileStore(sp.GetRequiredKeyedService<IConnectionMultiplexer>(redisServiceKey)));
+
 		return services.AddSingleton<IPresenceDirectory>(sp =>
 			new RedisPresenceDirectory(sp.GetRequiredKeyedService<IConnectionMultiplexer>(redisServiceKey)));
 	}
