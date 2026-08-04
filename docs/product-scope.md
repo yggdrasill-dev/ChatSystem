@@ -43,7 +43,7 @@
 | 層 | 涵蓋範圍 | 狀態 |
 |---|---|---|
 | 連線層（Gateway/Dispatcher） | 一條 WebSocket 連線怎麼被持有、定址、投遞 | 已完成核心設計與實作，收尾中 |
-| 身分/使用者管理層 | Google OAuth 登入、Session、ConnectionId 對應使用者身分、重複登入 Supersede 規則 | 設計中，見 [identity-layer.md](architecture/identity-layer.md) |
+| 身分/使用者管理層 | Google OAuth 登入、Session、ConnectionId 對應使用者身分、重複登入 Supersede 規則 | **設計已定案、待實作**，見 [identity-layer.md](architecture/identity-layer.md) |
 | 房間層 | 建立/加入房間、密碼房、房間成員管理、房間後台 | 設計中，見 [room-layer.md](architecture/room-layer.md) |
 | 聊天層 | 訊息收發、訊息歷史記錄 | 待設計 |
 | WebClient | 前端重做 | 待設計/待實作 |
@@ -60,3 +60,6 @@
 
 - 一個使用者**一次只能在一間房**。加入新房間會自動離開舊房間
 - WebSocket 斷線重連（網路抖動、換分頁、重複登入被 Supersede）時，房間裡其他成員**什麼都看不到**——成員資格保留一段寬限期，設計見 [room-layer.md](architecture/room-layer.md) ADR-2
+- **未登入的使用者連不上 WebSocket**：身分驗證在 handshake 就完成（[identity-layer.md](architecture/identity-layer.md) ADR-8），沒有「先連上、之後再登入」這種狀態。前端必須先完成 Google 登入拿到 session cookie，才有辦法建立連線
+- **登入服務與 WebSocket 入口必須同源部署**（同一個網域，正式環境靠同一個 ingress 分路徑）。這是 cookie 認證的技術約束，但會影響部署拓樸的選擇，見 [identity-layer.md](architecture/identity-layer.md) ADR-10
+- **同一帳號不能同時開兩個分頁**：後開的連線會把先開的踢斷（Supersede，[identity-layer.md](architecture/identity-layer.md) ADR-4）。目前被踢的分頁只會看到連線斷掉、不知道原因，如果它自動重連就會反過來踢掉新分頁——要不要讓 client 收到明確的原因還沒決定（見該文件第 9 節）

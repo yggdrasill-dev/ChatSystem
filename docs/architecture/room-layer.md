@@ -1,6 +1,6 @@
 # 房間層架構設計（Room Layer）
 
-狀態：討論中 draft，尚未實作
+狀態：設計 draft；持久層（`IRoomStore`／`IRoomBanList` + Redis 實作）**已實作**，`IRoomMembership`、handler、sweeper 尚未，見第 9 節
 技術棧：延續既有的 .NET + NATS（Adaptare）+ Redis；房間本身的持久儲存待決（見第 9 節）
 範圍：**房間的生命週期、成員名單、房間後台管理，以及「這個房間該通知哪些連線」**，不含訊息內容與歷史記錄
 依賴：命令的解析與分派由協定層負責（[protocol-layer.md](protocol-layer.md)）；「這個使用者現在在哪條連線上」向身分層查（[identity-layer.md](identity-layer.md)）
@@ -88,8 +88,8 @@ sequenceDiagram
     participant PP as IPacketPublisher
 
     WC->>CR: room.join { roomId, password }
-    CR->>CR: filter pipeline（未綁定身分者在此被擋掉）
-    CR->>H: HandleAsync(connectionId, JoinRoomRequest)
+    CR->>H: HandleAsync(CommandContext{connectionId, principal}, JoinRoomRequest)
+    Note over CR,H: userId 就是 context.Principal——連線在 handshake 就驗過身分，<br/>沒有「未綁定」的連線存在，也不需要查表（protocol-layer.md ADR-9）
     H->>RS: GetAsync(roomId)
     RS-->>H: Room（不存在或已關閉 → 回錯誤訊息並結束）
     H->>BL: IsBannedAsync(roomId, userId)
@@ -132,8 +132,8 @@ sequenceDiagram
     participant SW as RoomGraceSweeper
     participant PP as IPacketPublisher
 
-    GW->>EV: 連線關閉（connectionId）
-    EV->>H: OnDisconnected(connectionId)
+    GW->>EV: 連線關閉（connectionId + principal）
+    EV->>H: OnDisconnected(connectionId, principal)
     H->>MS: MarkDisconnectedAsync(connectionId, now)
     Note over MS: 只有當成員的 CurrentConnectionId 等於這個 connectionId 才寫入（ADR-4 的 fencing）
 
@@ -261,16 +261,17 @@ public interface IRoomMembership
 
 ### 6.3 房間層需要身分層提供的能力
 
-fan-out 的名單是 `userId` 的集合，所以需要**批次**的正向解析：
+fan-out 的名單是 `userId` 的集合，所以需要**批次**的正向解析。這個方法**已經確定歸身分層的 `IPresenceDirectory`**（`identity-layer.md` 6.2）：
 
 ```csharp
-// 身分層 IPresenceDirectory 需要新增（原設計只有單筆 GetCurrentConnectionIdAsync）
 ValueTask<IReadOnlyCollection<string>> ResolveConnectionsAsync(
 	IReadOnlyCollection<string> userIds,
 	CancellationToken cancellationToken = default);
 ```
 
-一間房可能有很多成員，逐筆查會變成 N 次來回。這個介面的擁有者目前還在討論中（身分層的 `IPresenceDirectory` 或協定層的 `IConnectionPrincipals`），但**形狀是確定的**——批次進、批次出、查不到的直接省略。詳見第 10 節。
+一間房可能有很多成員，逐筆查會變成 N 次來回，所以批次進、批次出、查不到的（不在線／寬限期中）直接省略。歸屬之所以塵埃落定，是因為協定層那個競爭選項（`IConnectionPrincipals`）已經不存在了——principal 隨封包走，協定層不存任何身分對照表（`protocol-layer.md` ADR-9）。
+
+**反方向的查詢房間層不需要**：handler 要知道「這則命令是誰送的」，答案在 `CommandContext.Principal` 裡；斷線事件也直接帶 principal。所以房間層完全不需要 `connectionId → userId` 的反查。
 
 ### 6.4 命令與訊息型別
 
@@ -334,7 +335,7 @@ internal sealed class RoomGraceSweeper(
 
 - **Context**：成員名單可以記 `userId` 也可以記 `connectionId`。記 `connectionId` 的話 fan-out 不需要任何額外查詢（名單直接就是投遞目標），比較省。
 - **Decision**：記 `userId`。
-- **Consequences**：這是「斷線重連對其他成員無感」（ADR-2）逼出來的——寬限期內連線已經不存在，只有 `userId` 能代表這個成員。代價是每次 fan-out 都要多一次 `userId → connectionId` 的批次解析，而且那個索引必須存在（見第 10 節：這件事同時解決了先前懸而未決的 principal 歸屬討論缺乏依據的問題）。另一個好處是後台名單顯示的是「誰」而不是一串連線 id，而且身分層的 Supersede（同一身分換連線）對房間層完全透明。
+- **Consequences**：這是「斷線重連對其他成員無感」（ADR-2）逼出來的——寬限期內連線已經不存在，只有 `userId` 能代表這個成員。代價是每次 fan-out 都要多一次 `userId → connectionId` 的批次解析，而且那個索引必須存在（這正是身分層 `IPresenceDirectory.ResolveConnectionsAsync` 的存在理由，見 6.3 與第 10 節）。另一個好處是後台名單顯示的是「誰」而不是一串連線 id，而且身分層的 Supersede（同一身分換連線）對房間層完全透明。
 
 ### ADR-2：斷線後保留 30 秒寬限期，用「讀取時過濾 + 低頻掃描」實作
 
@@ -390,25 +391,28 @@ internal sealed class RoomGraceSweeper(
 - **已完成**：持久層的抽象與 Redis 實作。`Common/Rooms/`（`Room`、`IRoomStore`、`IRoomBanList`、`RedisRoomStore`、`RedisRoomBanList`、`RoomKeys`）與 `Common/RoomLayerServiceCollectionExtensions.cs` 的 `AddRoomStore(redisServiceKey)`。過程中把 6.1 的介面從 `Get` + `Update` 改成意圖式操作（見該節），並確認了 hash tag 的取捨。**`IRoomMembership` 還沒實作**——它是暫時狀態不是持久層，會跟 handler 一起做。
 - **待做**：AppHost 的 `room-store` Redis 資源與 `CommandRouter` 的 `AddKeyedRedisClient` 註冊。刻意還沒加——目前沒有任何東西消費 `IRoomStore`，先加只會是死接線（而且 Aspire 會多起一個沒人用的容器）。等 handler 落地時一起接。
 
-- ~~**硬前置：連線層的斷線事件**（ADR-3）。~~ **已實作**：`events.connection.disconnected`，設計見 `connection-layer.md` 第 6.7 節與 ADR-8。房間層要訂閱它並在 handler 裡呼叫 `MarkDisconnectedAsync`。注意該 ADR 明確把事件定為 best-effort——本層 ADR-2 的「讀取時過濾」正確性不依賴它，這個前提要繼續維持，不要改成「只在收到事件時才清理」。
+- ~~**硬前置：連線層的斷線事件**（ADR-3）。~~ **已實作**：`events.connection.disconnected`，設計見 `connection-layer.md` 第 6.7 節與 ADR-8。房間層要訂閱它並在 handler 裡呼叫 `MarkDisconnectedAsync`。注意該 ADR 明確把事件定為 best-effort——本層 ADR-2 的「讀取時過濾」正確性不依賴它，這個前提要繼續維持，不要改成「只在收到事件時才清理」。事件會帶 `principal`（`connection-layer.md` ADR-9），所以本層不需要任何 `connectionId → userId` 的反查。
+- **訂閱時的 queue group 名稱要跟其他訂閱端區隔**。NATS 的規則是不同 queue group 各收到一份、同一個 group 內互相分攤。目前預期只有房間層訂閱 `events.connection.disconnected`（身分層的解綁在 Gateway 內直接完成，不繞事件），但未來多一個訂閱端時如果沿用同一個 group 名，兩邊會互搶事件，症狀是「有時候有處理、有時候沒有」——這種錯誤在 diff 上看不出來，所以一開始就用有層次的名字（例如 `room.membership`）。
 - **房間本身的持久儲存選擇**。`IRoomStore` 與 `IRoomBanList` 是持久資料（房間關掉之後歷史訊息還要能查），不該只放 Redis。但這個決定跟聊天層的訊息記錄是**同一個決定**（同一個資料庫、同一套 migration/備份策略），建議一起做，不要為房間層單獨選一個。介面設計刻意不綁任何儲存技術，所以先實作 Redis 版本再換也可以，只是要接受一次資料遷移。
 - **後台權限模型**：目前只認 `OwnerUserId`。要不要有「多位管理員」或「全站管理員」（例如你自己要能關掉任何房間）？後者會需要一個房間層之外的角色概念。
-- **`ResolveConnectionsAsync` 的擁有者**（見 6.3、第 10 節）：形狀確定，歸屬待定。
+- ~~**`ResolveConnectionsAsync` 的擁有者**：形狀確定，歸屬待定。~~ **已定案**：身分層的 `IPresenceDirectory`（見 6.3）。
 - 寬限期 30 秒與 sweeper 10 秒間隔都是暫定值，未經負載測試。
 - 「關閉房間」之後歷史訊息要保留多久、還能不能查——聊天層的決定，但會回頭影響 `IsClosed` 而非真刪的設計是否足夠。
 
 ## 10. 對既有文件的影響
 
-### `identity-layer.md`
+### `identity-layer.md`（已同步修訂）
 
-- **6.2 節 `IPresenceDirectory` 要新增批次的 `ResolveConnectionsAsync(userIds)`**。原設計只有單筆 `GetCurrentConnectionIdAsync`，那是為 Supersede（查一筆舊連線）設計的；房間 fan-out 是批次查詢，逐筆會變成 N 次來回。
+- **6.2 節 `IPresenceDirectory` 已新增批次的 `ResolveConnectionsAsync(userIds)`**，歸屬定案在身分層。原設計只有單筆 `GetCurrentConnectionIdAsync`，那是為 Supersede（查一筆舊連線）設計的；房間 fan-out 是批次查詢，逐筆會變成 N 次來回。（那個單筆方法後來也被移除了——`BindAsync` 改成用 `GETSET` 直接回傳被取代的舊連線。）
 - **ADR-4 的單值 Presence 剛好夠用**。「一次只能在一間房」＋「同一身分同時只有一條連線」兩個決定疊起來，`userId → connectionId` 維持單一值不需要改成集合。
-- **ADR-8 的反向索引（`connectionId → userId`）與房間層無關**。房間層需要的是正向；反向是命令脈絡用的（「這則命令是誰送的」），兩者的使用者不同，不要混在一起討論。
+- **前一版的反向索引（`connectionId → userId`）已整條刪除**，房間層本來也不需要它：本層要的是正向解析，而「這則命令是誰送的」現在由 `CommandContext.Principal` 直接給（`protocol-layer.md` ADR-9），斷線事件也帶 principal。
+- **房間層 ADR-4 的 fencing 與身分層 ADR-4 的 fencing 是同一個 race 的兩半**，都源自 Supersede 造成的「事件遲到」：房間層防的是把在線成員標記成離線，身分層防的是把在線成員的 Presence 刪掉。兩邊都用 `connectionId` 比對，改任何一邊都要看另一邊。
 
-### `protocol-layer.md`
+### `protocol-layer.md`（已同步修訂）
 
-- **先前懸而未決的 principal 歸屬討論現在有依據了**。房間層確認了兩件事：正向解析（principal → connections）**確實需要存在**，而且**必須是批次的**；至於它該由協定層的 `IConnectionPrincipals` 擁有還是身分層的 `IPresenceDirectory` 擁有，仍然是那個決定。房間層的呼叫端只會有一處，所以事後搬家成本很低。
-- **值得在 ADR-8 補一句**：因為協定層對內容錯誤採取「記 log + 忽略」，業務層的失敗（密碼錯、被封鎖、權限不足）**必須**用明確的下行訊息回覆，否則 client 會收不到任何東西。這是 ADR-8 對上層的隱含要求，目前沒寫出來。
+- **principal 歸屬懸案已結束**：不由任何一層存表，principal 隨 `InboundPacket` 走（該文件 ADR-9）。房間層 handler 因此**少一次 Redis 查詢**——原本要為每則命令查一次「這條連線是誰」。
+- **ADR-8 已補上對上層的隱含要求**：因為協定層對內容錯誤採取「記 log + 忽略」，業務層的失敗（密碼錯、被封鎖、權限不足）必須用明確的下行訊息回覆，否則 client 會收不到任何東西。本層的 `RoomOperationReply` 就是照這條設計的。
+- **handler 簽章**：`IPacketHandler<TMessage>.HandleAsync` 改收 `CommandContext`，所以本文件 6.4 節註冊範例底下的 handler 全部是 `HandleAsync(CommandContext context, XxxRequest message, ...)`，`userId` 取自 `context.Principal`。
 
 ### `connection-layer.md`
 
