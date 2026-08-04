@@ -105,6 +105,12 @@ public class GatewayWebSocketEndpointTests
 
 			using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
 
+			// 先掛上 receive 再開始送。Gateway 送出 close frame 之後 receive loop 就結束、
+			// socket 被 dispose，如果這邊還沒在讀，收到的會是 abort 而不是乾淨的 close frame
+			// ——這不是測試的巧合，是系統真實的性質（identity-layer.md 第 9 節記過同一件事），
+			// 而症狀是這個測試在多組件平行執行時偶發失敗。
+			var closing = ReceiveUntilCloseAsync(client, cts.Token);
+
 			// 模擬「永不結束的分片訊息」這個攻擊：每片 32 KB，全部 endOfMessage = false。
 			// 累積超過 256 KB 時就該被攔下來，不必等訊息結束、也不必是合法的 Packet。
 			var chunk = new byte[32 * 1024];
@@ -121,10 +127,8 @@ public class GatewayWebSocketEndpointTests
 				}
 			}
 
-			var closeStatus = await ReceiveUntilCloseAsync(client, cts.Token);
-
 			Assert.Empty(m_ServerErrors);
-			Assert.Equal(WebSocketCloseStatus.MessageTooBig, closeStatus);
+			Assert.Equal(WebSocketCloseStatus.MessageTooBig, await closing);
 
 			// 訊息從頭到尾沒有完整收完，不該有任何東西被交給上層
 			await inbound.DidNotReceive().HandleAsync(
