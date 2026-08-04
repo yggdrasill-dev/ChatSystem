@@ -9,8 +9,11 @@ namespace Common.Connections;
 // 所以訂閱端必須設計成「沒收到事件也會正確」（見 connection-layer.md ADR-8）。
 public interface IConnectionEventPublisher
 {
+	// principal 是 handshake 驗證通過的不透明字串（連線層轉手、不解讀）。帶上它，訂閱端
+	// 就不需要為了知道「是誰斷線了」而維護 connectionId -> 身分的反向索引。
 	ValueTask PublishDisconnectedAsync(
 		string connectionId,
 		string nodeId,
+		string principal,
 		CancellationToken cancellationToken = default);
 }

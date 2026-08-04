@@ -15,12 +15,14 @@ internal sealed class ConnectionEventPublisher(IMessageSender messageSender) : I
 	public ValueTask PublishDisconnectedAsync(
 		string connectionId,
 		string nodeId,
+		string principal,
 		CancellationToken cancellationToken = default)
 	{
 		var message = new ConnectionDisconnected
 		{
 			ConnectionId = connectionId,
-			NodeId = nodeId
+			NodeId = nodeId,
+			Principal = principal
 		};
 
 		return messageSender.PublishAsync(DisconnectedSubject, message.ToByteArray(), cancellationToken);

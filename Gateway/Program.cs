@@ -18,6 +18,19 @@ var builder = WebApplication.CreateBuilder(args);
 	// 交給 Adaptare.Nats 管理訂閱生命週期
 	builder.AddNatsClient("message-bus");
 
+	// 身分層（identity-store 是它自己的 Redis，不共用 connection-directory）：
+	// handshake 時驗 cookie 換出 principal，並在 Supersede 時踢掉舊連線——後者要
+	// IConnectionTerminator，所以 Gateway 這裡也需要它的發送端。
+	builder.AddKeyedRedisClient("identity-store");
+	builder.Services.AddIdentityStores("identity-store");
+	builder.Services.AddConnectionTerminator();
+	builder.Services.AddConnectionAuthenticator();
+
+	// handshake 的 Origin allowlist。空的 allowlist 代表全部拒絕——這是刻意的 fail-closed：
+	// 漏設定的症狀是「連不上」，而不是「任何網站都連得上」。
+	builder.Services.AddSingleton(new AllowedOrigins(
+		builder.Configuration.GetSection("Gateway:AllowedOrigins").Get<string[]>() ?? []));
+
 	// 這個 process 自己的節點識別碼，啟動時產生一次
 	var nodeId = new GatewayNodeId(Guid.NewGuid().ToString("N"));
 	builder.Services.AddSingleton(nodeId);

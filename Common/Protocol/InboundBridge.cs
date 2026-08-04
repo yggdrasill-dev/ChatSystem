@@ -6,8 +6,7 @@ using Microsoft.Extensions.Logging;
 namespace Common.Protocol;
 
 // 協定層的元件，但寄宿在 Gateway process：取代 NoOpInboundMessageHandler 的 DI 註冊，
-// 把連線層交出來的 (connectionId, subject, payload) 送給 CommandRouter。
-// 連線層程式碼不需要任何修改。
+// 把連線層交出來的 (connectionId, principal, subject, payload) 送給 CommandRouter。
 internal sealed class InboundBridge(
 	IMessageSender messageSender,
 	ILogger<InboundBridge> logger) : IInboundMessageHandler
@@ -21,6 +20,7 @@ internal sealed class InboundBridge(
 
 	public async ValueTask HandleAsync(
 		string connectionId,
+		string principal,
 		string subject,
 		ByteString payload,
 		CancellationToken cancellationToken = default)
@@ -28,6 +28,9 @@ internal sealed class InboundBridge(
 		var packet = new InboundPacket
 		{
 			ConnectionId = connectionId,
+			// 連線層在 handshake 驗到的不透明字串，這裡只轉手；CommandRouter 因此不必查表
+			// 就知道這則命令是誰送的。
+			Principal = principal,
 			Subject = subject,
 			Payload = payload
 		};

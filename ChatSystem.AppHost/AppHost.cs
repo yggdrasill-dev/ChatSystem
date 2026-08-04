@@ -6,6 +6,12 @@ var connectionDirectory = builder.AddRedis("connection-directory");
 // 訊息匯流排：Gateway <-> Dispatcher 之間的 NATS pub/sub（dispatch.deliver / connect.deliver.{nodeId}）
 var messageBus = builder.AddNats("message-bus");
 
+// 身分層自己的 Redis：Session 是持久資料（7 天），跟 connection-directory 那個純快取用途的
+// 需求不同，所以開持久化並掛 volume——不然 AppHost 重啟一次就得重新登入。
+var identityStore = builder.AddRedis("identity-store")
+	.WithDataVolume()
+	.WithPersistence();
+
 builder.AddProject<Projects.Dispatcher>("dispatcher")
 	.WithReference(connectionDirectory)
 	.WithReference(messageBus)
@@ -23,8 +29,10 @@ builder.AddProject<Projects.CommandRouter>("command-router")
 builder.AddProject<Projects.Gateway>("gateway")
 	.WithReference(connectionDirectory)
 	.WithReference(messageBus)
+	.WithReference(identityStore)
 	.WaitFor(connectionDirectory)
 	.WaitFor(messageBus)
+	.WaitFor(identityStore)
 	.WithReplicas(2);
 
 builder.Build().Run();

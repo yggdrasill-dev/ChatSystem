@@ -60,13 +60,13 @@ public class PacketRegistryTests
 	}
 
 	[Fact]
-	public async Task DispatchAsync_InvokesTheRegisteredDispatch()
+	public async Task DispatchAsync_InvokesTheRegisteredDispatch_WithTheCommandContext()
 	{
-		var calls = new List<(string ConnectionId, string Payload)>();
+		var calls = new List<(CommandContext Context, string Payload)>();
 		var registry = new PacketRegistry([
-			new PacketRegistration("test.command", typeof(Packet), (_, connectionId, payload, _) =>
+			new PacketRegistration("test.command", typeof(Packet), (_, context, payload, _) =>
 			{
-				calls.Add((connectionId, payload.ToStringUtf8()));
+				calls.Add((context, payload.ToStringUtf8()));
 				return ValueTask.CompletedTask;
 			}),
 		]);
@@ -74,10 +74,10 @@ public class PacketRegistryTests
 		await registry.DispatchAsync(
 			EmptyServiceProvider.Instance,
 			"test.command",
-			"conn-1",
+			new CommandContext("conn-1", "user-1"),
 			Google.Protobuf.ByteString.CopyFromUtf8("hi"));
 
-		Assert.Equal(("conn-1", "hi"), Assert.Single(calls));
+		Assert.Equal((new CommandContext("conn-1", "user-1"), "hi"), Assert.Single(calls));
 	}
 
 	[Fact]
@@ -88,7 +88,7 @@ public class PacketRegistryTests
 		await Assert.ThrowsAsync<InvalidOperationException>(async () => await registry.DispatchAsync(
 			EmptyServiceProvider.Instance,
 			"test.reply",
-			"conn-1",
+			new CommandContext("conn-1", "user-1"),
 			Google.Protobuf.ByteString.Empty));
 	}
 

@@ -5,7 +5,7 @@ using Google.Protobuf;
 namespace Gateway.Models;
 
 // 封裝單一 socket 的生命週期與送封包行為，框裝邏輯只在這裡寫一次。
-public sealed class Connection(string connectionId, WebSocket socket)
+public sealed class Connection(string connectionId, string principal, WebSocket socket)
 {
 	// WebSocket 同一時間只能有一個 outstanding 的 send 呼叫，SendAsync/CloseAsync
 	// 都會送出 frame，兩者也要互相排隊，否則並行呼叫會噴 InvalidOperationException
@@ -13,6 +13,10 @@ public sealed class Connection(string connectionId, WebSocket socket)
 	private readonly SemaphoreSlim m_SendLock = new(1, 1);
 
 	public string ConnectionId { get; } = connectionId;
+
+	// handshake 驗證通過的不透明字串。連線層不解讀它，只在每則 inbound 訊息與斷線事件上
+	// 轉交出去——存在這裡的意義就是「不用為每則命令查一次 Redis」。
+	public string Principal { get; } = principal;
 
 	public WebSocketState State => socket.State;
 

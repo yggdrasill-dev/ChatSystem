@@ -24,4 +24,10 @@ public static class IdentityLayerServiceCollectionExtensions
 		return services.AddSingleton<IPresenceDirectory>(sp =>
 			new RedisPresenceDirectory(sp.GetRequiredKeyedService<IConnectionMultiplexer>(redisServiceKey)));
 	}
+
+	// 連線層在 handshake 呼叫的 hook。需要先呼叫 AddIdentityStores(...) 與
+	// AddConnectionTerminator()——後者是 Supersede 踢掉舊連線用的，會 publish 到
+	// dispatch.terminate，所以呼叫端也需要 NATS。
+	public static IServiceCollection AddConnectionAuthenticator(this IServiceCollection services) =>
+		services.AddSingleton<IConnectionAuthenticator, ConnectionAuthenticator>();
 }

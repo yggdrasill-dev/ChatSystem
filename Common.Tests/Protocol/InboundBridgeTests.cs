@@ -18,11 +18,12 @@ public class InboundBridgeTests
 
 		var bridge = new InboundBridge(sender, NullLogger<InboundBridge>.Instance);
 
-		await bridge.HandleAsync("conn-1", "identity.bind", ByteString.CopyFromUtf8("token"));
+		await bridge.HandleAsync("conn-1", "user-1", "room.join", ByteString.CopyFromUtf8("body"));
 
+		// principal 一起帶上去，CommandRouter 因此不必查「這條連線是誰」
 		await sender.Received(1).RequestAsync<byte[], byte[]>(
 			"command.inbound",
-			Arg.Is<byte[]>(bytes => Matches(bytes, "conn-1", "identity.bind", "token")),
+			Arg.Is<byte[]>(bytes => Matches(bytes, "conn-1", "user-1", "room.join", "body")),
 			Arg.Any<IEnumerable<MessageHeaderValue>>(),
 			Arg.Any<CancellationToken>());
 	}
@@ -36,7 +37,7 @@ public class InboundBridgeTests
 		var bridge = new InboundBridge(sender, NullLogger<InboundBridge>.Instance);
 
 		// 未知 subject / payload 畸形都不該讓連線斷掉（ADR-8），bridge 只記 log
-		await bridge.HandleAsync("conn-1", "nope", ByteString.Empty);
+		await bridge.HandleAsync("conn-1", "user-1", "nope", ByteString.Empty);
 	}
 
 	[Fact]
@@ -56,7 +57,7 @@ public class InboundBridgeTests
 		// 逾時往上丟會讓連線關閉（client 重連重送）。刻意不吞掉：只記 log 然後繼續讀下一個
 		// frame 的話，這則訊息可能稍後才被處理，單連線順序保證就破了。
 		await Assert.ThrowsAsync<OperationCanceledException>(
-			async () => await bridge.HandleAsync("conn-1", "identity.bind", ByteString.Empty));
+			async () => await bridge.HandleAsync("conn-1", "user-1", "room.join", ByteString.Empty));
 	}
 
 	private static void StubReply(IMessageSender sender, InboundAck ack) =>
@@ -68,11 +69,12 @@ public class InboundBridgeTests
 				Arg.Any<CancellationToken>())
 			.Returns(ack.ToByteArray());
 
-	private static bool Matches(byte[]? bytes, string connectionId, string subject, string payloadText)
+	private static bool Matches(byte[]? bytes, string connectionId, string principal, string subject, string payloadText)
 	{
 		var packet = InboundPacket.Parser.ParseFrom(bytes);
 
 		return packet.ConnectionId == connectionId
+			&& packet.Principal == principal
 			&& packet.Subject == subject
 			&& packet.Payload.ToStringUtf8() == payloadText;
 	}

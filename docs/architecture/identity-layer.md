@@ -1,6 +1,6 @@
 # 身分/使用者管理層架構設計（Identity Layer）
 
-狀態：設計已定案（**handshake cookie 驗證**，見 ADR-8）；`Common/Identity/` 的三個 store 已實作，`IConnectionAuthenticator`、連線層接線與 Identity 服務尚未（見第 9 節）
+狀態：設計已定案（**handshake cookie 驗證**，見 ADR-8）；`Common/Identity/` 的 store、`IConnectionAuthenticator` 與連線層接線都已實作，**Identity 服務（`POST /login` 那組 endpoint）尚未**（見第 9 節）
 技術棧：延續連線層的 .NET + NATS + Redis；登入改用 Google OAuth（Google Identity Services，前端直接取得 ID Token，見 ADR-1）
 範圍：**使用者怎麼證明身分、登入狀態怎麼被系統記住、一個身分目前繫結在哪一條 ConnectionId 上**，不含房間、聊天等業務語意
 依賴：驗證發生在 WebSocket handshake，所以本層需要連線層開一個 hook（見 ADR-8 與 `connection-layer.md` 第 6.8 節、ADR-9）；命令的解析與分派仍由協定層負責（[protocol-layer.md](protocol-layer.md)），但本層**不再註冊任何 handler 或 filter**
@@ -97,7 +97,7 @@ graph TB
     WS -- "ResolveAsync(sessionToken)" --> CA
     CA -- "驗證 + 續期" --> SS
     WS -- "通過才 Accept，否則 401" --> CL
-    CL -- "BindAsync / UnbindAsync" --> CA
+    CL -- "BindConnectionAsync / UnbindConnectionAsync" --> CA
     CA -- "GETSET 取得被取代的舊連線" --> PD
     CA -- "終止舊連線（Supersede）" --> CT
 
@@ -154,7 +154,7 @@ sequenceDiagram
     CA-->>GW: principal（null → 回 401，連線不被接受）
     GW->>GW: AcceptWebSocketAsync → ConnectionLifecycle.OnConnectedAsync(socket, principal)
     Note over GW: 產生 ConnectionId、registry.Add、ConnectionDirectory.Register
-    GW->>CA: BindAsync(principal, connectionId)
+    GW->>CA: BindConnectionAsync(principal, connectionId)
     CA->>PD: GETSET Presence:{userId} = connectionId
     PD-->>CA: 被取代的舊 connectionId（可能沒有）
     CA->>CT: TerminateAsync([舊 connectionId])
@@ -189,7 +189,7 @@ sequenceDiagram
     participant EV as events.connection.disconnected
 
     GW->>GW: ConnectionLifecycle.OnDisconnectedAsync（registry / ConnectionDirectory 清理）
-    GW->>CA: UnbindAsync(principal, connectionId)
+    GW->>CA: UnbindConnectionAsync(principal, connectionId)
     CA->>PD: compare-and-delete（只有目前值等於 connectionId 才刪，見 ADR-4）
     GW->>EV: ConnectionDisconnected { connection_id, node_id, principal }
     Note over EV: 房間層訂閱這個事件；因為事件帶了 principal，<br/>房間層不需要任何 connectionId → userId 反查
@@ -274,16 +274,20 @@ public interface IConnectionAuthenticator
 	ValueTask<string?> ResolveAsync(string? sessionToken, CancellationToken cancellationToken = default);
 
 	// 連線建立後：綁定 principal → connectionId，並終止被取代的舊連線（Supersede）。
-	ValueTask BindAsync(string principal, string connectionId, CancellationToken cancellationToken = default);
+	ValueTask BindConnectionAsync(string principal, string connectionId, CancellationToken cancellationToken = default);
 
 	// 連線關閉後：解除綁定（fencing）。
-	ValueTask UnbindAsync(string principal, string connectionId, CancellationToken cancellationToken = default);
+	ValueTask UnbindConnectionAsync(string principal, string connectionId, CancellationToken cancellationToken = default);
 }
 ```
 
-實作是三個薄方法：`ResolveAsync` = `ResolveUserIdAsync` + `RefreshAsync`；`BindAsync` = `IPresenceDirectory.BindAsync` 後把回傳的舊 `connectionId` 丟給 `IConnectionTerminator.TerminateAsync`；`UnbindAsync` 直接轉呼叫。
+**方法名不能叫 `BindAsync` / `UnbindAsync`**（實作時踩到的坑，寫在這裡以免日後被「修正」回去）：這個介面會被注入到 Gateway 的 minimal API endpoint，而 ASP.NET Core 把參數型別上任何叫 `BindAsync` 的成員當成自訂參數繫結慣例（必須是 `static` 且回傳 `ValueTask<T>`）。簽章不符時 **routing 階段**就丟 `InvalidOperationException`，症狀是每個請求都拿到 500；而且那個例外發生在 routing middleware 裡，應用程式自己包的 try/catch 攔不到，只看得到「狀態碼跟預期不符」。`IPresenceDirectory.BindAsync` 不受影響（它不會出現在 endpoint 參數上），所以名字保留。
 
-呼叫點在連線層（`connection-layer.md` 第 6.8 節）：endpoint 在 `AcceptWebSocketAsync` **之前**呼叫 `ResolveAsync`（否則沒辦法回 401），`ConnectionLifecycle` 在 registry/directory 註冊完之後呼叫 `BindAsync`、在清理完之後呼叫 `UnbindAsync`。
+實作是三個薄方法：`ResolveAsync` = `ResolveUserIdAsync` + `RefreshAsync`；`BindConnectionAsync` = `IPresenceDirectory.BindAsync` 後把回傳的舊 `connectionId` 丟給 `IConnectionTerminator.TerminateAsync`；`UnbindConnectionAsync` 直接轉呼叫。
+
+呼叫點在連線層（`connection-layer.md` 第 6.8 節）：endpoint 在 `AcceptWebSocketAsync` **之前**呼叫 `ResolveAsync`（否則沒辦法回 401），`ConnectionLifecycle` 在 registry/directory 註冊完之後呼叫 `BindConnectionAsync`、在清理完之後呼叫 `UnbindConnectionAsync`。
+
+cookie 的名字（`chat_session`）放在 `Common.Identity.SessionCookie.Name`：簽發端（Identity 服務）與讀取端（Gateway）必須一致，不該各自寫死一份字面值。cookie 的屬性由簽發端決定，讀取端不需要知道。
 
 **已知的小窗口**：連線被 accept、但 `BindAsync` 還沒完成的那幾毫秒內，`Presence:{userId}` 還指向舊連線（或不存在），房間 fan-out 找不到這條新連線。後果是「剛連上的瞬間可能漏收一則廣播」，跟房間層 ADR-2 明確不做補送的立場一致（重連後靠聊天層歷史記錄補齊），不特別處理。
 
@@ -428,7 +432,9 @@ var sessionToken = await sessionStore.CreateSessionAsync(payload.Subject);
 ## 9. 待確認 / 後續事項
 
 - **已完成**：`Common/Identity/` 的三個 store 與 DI 註冊。`ISessionStore`／`RedisSessionStore`、`ILoginNonceStore`／`RedisLoginNonceStore`、`IPresenceDirectory`／`RedisPresenceDirectory`、`IdentityKeys`、`OpaqueToken`、`Common/IdentityLayerServiceCollectionExtensions.cs` 的 `AddIdentityStores(redisServiceKey)`，測試在 `Common.Tests/Identity/`。刻意先只做這一層——不動任何 process，可以獨立驗證。實作時確認的兩件事：`StringSetAndGetAsync` 在 StackExchange.Redis 3.x 只剩帶 `keepTtl` 的多載；`KeyExpireAsync(key, ttl)` 解析到的是帶 `ExpireWhen` 的多載（測試的 `Received` 斷言必須對上實際被呼叫的那一個，否則會出現「明明呼叫了卻說沒收到」）。
-- **待做**：`IConnectionAuthenticator`（6.3）與連線層的接線。它需要 `IConnectionTerminator`，而後者要 NATS——所以那一步會同時動到 Gateway 的 DI 與 AppHost，跟本層第一步刻意分開。
+- **已完成**：`IConnectionAuthenticator`／`ConnectionAuthenticator`（6.3）、`SessionCookie`、`AddConnectionAuthenticator()`，以及連線層的接線（`connection-layer.md` 第 6.8 節、ADR-9）。AppHost 新增 `identity-store`（開 `WithDataVolume()` + `WithPersistence()`，不然 AppHost 重啟一次就得重新登入），Gateway 掛上 `AddKeyedRedisClient("identity-store")` 與 `Gateway:AllowedOrigins` 設定。實作時踩到的坑寫在 6.3（`BindAsync` 這個名字會被 minimal API 的參數繫結慣例攔截）。
+- **待做**：Identity 服務（`GET /login/nonce`、`POST /login`、`POST /logout`）。在它存在之前**沒有任何辦法拿到 session cookie**，所以現在 WebSocket 一律連不上（401）——這是預期狀態，跟協定層當時「registry 是空的、一律回 UNKNOWN_SUBJECT」同一種中間態。
+- **`Gateway:AllowedOrigins` 目前是佔位值**（`appsettings.Development.json` 裡的 `http://localhost:5173`）。WebClient 還不存在，真正的 dev server port 要等它決定；正式環境的值走設定注入。空 allowlist 代表全部拒絕，是刻意的 fail-closed。
 - ~~`POST /login` endpoint 的部署位置尚未決定。~~ **已決定**：獨立 `Identity` 專案，但必須與 Gateway 同源（ADR-10）。
 - ~~Session 的 sliding 續期實際觸發時機還沒定案。~~ **已決定**：在 handshake 的 `ResolveAsync` 內續期（ADR-3）。
 - ~~連線層需要新增的 `IConnectionTerminator`。~~ 已實作完成。

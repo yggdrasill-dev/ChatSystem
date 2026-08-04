@@ -35,7 +35,11 @@ message TerminatePacket {
 
 // Gateway -> 上層：某條連線已經關閉。
 // best-effort，不保證送達（process 被 kill 時發不出來），訂閱端不能只依賴它。
+//
+// principal 是 handshake 驗證通過的不透明字串。帶上它，訂閱端就不需要為了知道「是誰
+// 斷線了」而維護一張 connectionId -> 身分的反向索引。
 message ConnectionDisconnected {
 	string connection_id = 1;
 	string node_id = 2;
+	string principal = 3;
 }

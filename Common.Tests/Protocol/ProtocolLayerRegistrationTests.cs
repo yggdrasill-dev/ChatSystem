@@ -27,10 +27,14 @@ public class ProtocolLayerRegistrationTests
 		var message = new Packet { Subject = "inner", Payload = ByteString.CopyFromUtf8("hi") };
 
 		using var scope = provider.CreateScope();
-		await registry.DispatchAsync(scope.ServiceProvider, "test.command", "conn-1", message.ToByteString());
+		await registry.DispatchAsync(
+			scope.ServiceProvider,
+			"test.command",
+			new CommandContext("conn-1", "user-1"),
+			message.ToByteString());
 
-		// handler 拿到的是已經解析好的訊息，不是 bytes
-		Assert.Equal(("conn-1", "inner", "hi"), Assert.Single(sink.Calls));
+		// handler 拿到的是已經解析好的訊息，不是 bytes；principal 隨 context 一起到
+		Assert.Equal(("conn-1", "user-1", "inner", "hi"), Assert.Single(sink.Calls));
 	}
 
 	[Fact]
@@ -93,14 +97,14 @@ public class ProtocolLayerRegistrationTests
 
 	private sealed class CallSink
 	{
-		public List<(string ConnectionId, string Subject, string Payload)> Calls { get; } = [];
+		public List<(string ConnectionId, string Principal, string Subject, string Payload)> Calls { get; } = [];
 	}
 
 	private sealed class RecordingHandler(CallSink sink) : IPacketHandler<Packet>
 	{
-		public ValueTask HandleAsync(string connectionId, Packet message, CancellationToken cancellationToken = default)
+		public ValueTask HandleAsync(CommandContext context, Packet message, CancellationToken cancellationToken = default)
 		{
-			sink.Calls.Add((connectionId, message.Subject, message.Payload.ToStringUtf8()));
+			sink.Calls.Add((context.ConnectionId, context.Principal, message.Subject, message.Payload.ToStringUtf8()));
 
 			return ValueTask.CompletedTask;
 		}

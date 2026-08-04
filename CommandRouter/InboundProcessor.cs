@@ -26,6 +26,10 @@ public sealed class InboundProcessor(
 		// 刻意讓它往上丟：吞掉只會變成沉默的資料遺失。
 		var packet = InboundPacket.Parser.ParseFrom(data);
 
+		// principal 隨封包一起到，不查表。Gateway 已經在 handshake 驗過身分，這裡無條件相信
+		// 它——前提是 command.inbound 只有 Gateway 能 publish。
+		var context = new CommandContext(packet.ConnectionId, packet.Principal);
+
 		// 一則命令 = 一個 scope，對應 ASP.NET Core 的 per-request 心智模型（見第 9 節決議）。
 		using var scope = scopeFactory.CreateScope();
 
@@ -36,7 +40,7 @@ public sealed class InboundProcessor(
 		foreach (var filter in filters)
 		{
 			var decision = await filter
-				.EvaluateAsync(packet.ConnectionId, packet.Subject, cancellationToken)
+				.EvaluateAsync(context, packet.Subject, cancellationToken)
 				.ConfigureAwait(false);
 
 			if (decision == FilterDecision.Allow)
@@ -60,7 +64,7 @@ public sealed class InboundProcessor(
 		try
 		{
 			await registry
-				.DispatchAsync(scope.ServiceProvider, packet.Subject, packet.ConnectionId, packet.Payload, cancellationToken)
+				.DispatchAsync(scope.ServiceProvider, packet.Subject, context, packet.Payload, cancellationToken)
 				.ConfigureAwait(false);
 		}
 		catch (InvalidProtocolBufferException ex)

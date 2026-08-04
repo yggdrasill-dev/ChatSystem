@@ -23,8 +23,31 @@ public class InboundProcessorTests
 		var ack = await host.HandleAsync("conn-1", TestSubject, command.ToByteString());
 
 		Assert.Equal(InboundAck.Types.Status.Ok, ack.Status);
-		Assert.Equal(("conn-1", "inner"), Assert.Single(host.Sink.Calls));
+		Assert.Equal(("conn-1", "user-1", "inner"), Assert.Single(host.Sink.Calls));
 		await host.Terminator.DidNotReceive().TerminateAsync(Arg.Any<IReadOnlyCollection<string>>(), Arg.Any<CancellationToken>());
+	}
+
+	[Fact]
+	public async Task HandleAsync_PassesThePrincipalFromThePacket_ToBothFiltersAndHandlers()
+	{
+		var seenPrincipals = new List<string>();
+		using var host = CreateHost(services =>
+		{
+			services.AddPacketHandler<Packet, RecordingHandler>(TestSubject);
+			services.AddSingleton(new FilterScript
+			{
+				Order = 0,
+				Decision = FilterDecision.Allow,
+				SeenPrincipals = seenPrincipals
+			});
+			services.AddInboundFilter<ScriptedFilter>();
+		});
+
+		await host.HandleAsync("conn-1", TestSubject, new Packet().ToByteString(), principal: "user-42");
+
+		// 「這則命令是誰送的」隨封包一起到，CommandRouter 不查任何對照表（ADR-9）
+		Assert.Equal(["user-42"], seenPrincipals);
+		Assert.Equal("user-42", Assert.Single(host.Sink.Calls).Principal);
 	}
 
 	[Fact]
@@ -164,11 +187,16 @@ public class InboundProcessorTests
 
 		public IConnectionTerminator Terminator => terminator;
 
-		public async Task<InboundAck> HandleAsync(string connectionId, string subject, ByteString payload)
+		public async Task<InboundAck> HandleAsync(
+			string connectionId,
+			string subject,
+			ByteString payload,
+			string principal = "user-1")
 		{
 			var packet = new InboundPacket
 			{
 				ConnectionId = connectionId,
+				Principal = principal,
 				Subject = subject,
 				Payload = payload
 			};
@@ -183,14 +211,14 @@ public class InboundProcessorTests
 
 	private sealed class CallSink
 	{
-		public List<(string ConnectionId, string Subject)> Calls { get; } = [];
+		public List<(string ConnectionId, string Principal, string Subject)> Calls { get; } = [];
 	}
 
 	private sealed class RecordingHandler(CallSink sink) : IPacketHandler<Packet>
 	{
-		public ValueTask HandleAsync(string connectionId, Packet message, CancellationToken cancellationToken = default)
+		public ValueTask HandleAsync(CommandContext context, Packet message, CancellationToken cancellationToken = default)
 		{
-			sink.Calls.Add((connectionId, message.Subject));
+			sink.Calls.Add((context.ConnectionId, context.Principal, message.Subject));
 
 			return ValueTask.CompletedTask;
 		}
@@ -198,7 +226,7 @@ public class InboundProcessorTests
 
 	private sealed class ThrowingHandler : IPacketHandler<Packet>
 	{
-		public ValueTask HandleAsync(string connectionId, Packet message, CancellationToken cancellationToken = default) =>
+		public ValueTask HandleAsync(CommandContext context, Packet message, CancellationToken cancellationToken = default) =>
 			throw new InvalidOperationException("boom");
 	}
 
@@ -209,6 +237,8 @@ public class InboundProcessorTests
 		public FilterDecision Decision { get; init; }
 
 		public List<int>? Evaluated { get; init; }
+
+		public List<string>? SeenPrincipals { get; init; }
 	}
 
 	// 兩個 filter 型別是為了讓 DI 能同時註冊兩個 IInboundFilter 實作；
@@ -221,9 +251,13 @@ public class InboundProcessorTests
 
 		public int Order => Script.Order;
 
-		public ValueTask<FilterDecision> EvaluateAsync(string connectionId, string subject, CancellationToken cancellationToken = default)
+		public ValueTask<FilterDecision> EvaluateAsync(
+			CommandContext context,
+			string subject,
+			CancellationToken cancellationToken = default)
 		{
 			Script.Evaluated?.Add(Script.Order);
+			Script.SeenPrincipals?.Add(context.Principal);
 
 			return ValueTask.FromResult(Script.Decision);
 		}

@@ -22,7 +22,7 @@ public class ConnectionRegistryTests
 	public async Task TryDeliverAsync_ReturnsTrue_AndSendsPacket_WhenConnectionExists()
 	{
 		var socket = new RecordingFakeWebSocket();
-		var connection = new Connection("conn-1", socket);
+		var connection = new Connection("conn-1", "user-1", socket);
 		var registry = new ConnectionRegistry();
 		registry.Add(connection);
 
@@ -38,7 +38,7 @@ public class ConnectionRegistryTests
 	public async Task Remove_MakesConnectionNoLongerDeliverable()
 	{
 		var registry = new ConnectionRegistry();
-		registry.Add(new Connection("conn-1", new RecordingFakeWebSocket()));
+		registry.Add(new Connection("conn-1", "user-1", new RecordingFakeWebSocket()));
 
 		registry.Remove("conn-1");
 		var delivered = await registry.TryDeliverAsync("conn-1", "subject", ByteString.Empty);
@@ -61,7 +61,7 @@ public class ConnectionRegistryTests
 	{
 		var socket = new RecordingFakeWebSocket();
 		var registry = new ConnectionRegistry();
-		registry.Add(new Connection("conn-1", socket));
+		registry.Add(new Connection("conn-1", "user-1", socket));
 
 		var closed = await registry.TryCloseAsync("conn-1");
 
@@ -75,7 +75,7 @@ public class ConnectionRegistryTests
 	public async Task TryCloseAsync_LeavesRemovalToTheReceiveLoop()
 	{
 		var registry = new ConnectionRegistry();
-		registry.Add(new Connection("conn-1", new RecordingFakeWebSocket()));
+		registry.Add(new Connection("conn-1", "user-1", new RecordingFakeWebSocket()));
 
 		await registry.TryCloseAsync("conn-1");
 
@@ -88,8 +88,8 @@ public class ConnectionRegistryTests
 	public void ConnectionIds_ReflectsCurrentlyRegisteredConnections()
 	{
 		var registry = new ConnectionRegistry();
-		registry.Add(new Connection("a", new RecordingFakeWebSocket()));
-		registry.Add(new Connection("b", new RecordingFakeWebSocket()));
+		registry.Add(new Connection("a", "user-a", new RecordingFakeWebSocket()));
+		registry.Add(new Connection("b", "user-b", new RecordingFakeWebSocket()));
 
 		Assert.Equal(["a", "b"], registry.ConnectionIds.OrderBy(id => id));
 		Assert.Equal(2, registry.Count);

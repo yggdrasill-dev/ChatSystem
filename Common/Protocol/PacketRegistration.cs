@@ -8,4 +8,4 @@ public sealed record PacketRegistration(
 	string Subject,
 	Type MessageType,
 	// 只用於下行的訊息型別沒有 handler，這裡是 null。
-	Func<IServiceProvider, string, ByteString, CancellationToken, ValueTask>? Dispatch);
+	Func<IServiceProvider, CommandContext, ByteString, CancellationToken, ValueTask>? Dispatch);

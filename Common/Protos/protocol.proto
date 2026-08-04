@@ -3,11 +3,16 @@ syntax = "proto3";
 option csharp_namespace = "Chat.Protos";
 package chat;
 
-// Gateway（InboundBridge）-> CommandRouter：一則來自 client 的封包，附上它來自哪條連線。
+// Gateway（InboundBridge）-> CommandRouter：一則來自 client 的封包，附上它來自哪條連線、
+// 以及那條連線在 handshake 驗證通過的 principal。
+//
+// principal 由 Gateway 填寫、CommandRouter 無條件相信。這個信任假設成立的前提是
+// command.inbound 只有 Gateway 能 publish（叢集內部的 NATS，未對外開放）。
 message InboundPacket {
 	string connection_id = 1;
 	string subject = 2;
 	bytes payload = 3;
+	string principal = 4;
 }
 
 // CommandRouter -> Gateway（InboundBridge）：處理結果。

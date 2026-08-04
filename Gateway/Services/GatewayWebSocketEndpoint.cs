@@ -1,6 +1,7 @@
 using System.Net.WebSockets;
 using Chat.Protos;
 using Common;
+using Common.Identity;
 using Gateway.Models;
 
 namespace Gateway.Services;
@@ -19,6 +20,8 @@ public static class GatewayWebSocketEndpoint
 	{
 		app.Map(pattern, async (
 			HttpContext context,
+			AllowedOrigins allowedOrigins,
+			IConnectionAuthenticator authenticator,
 			ConnectionLifecycle lifecycle,
 			IInboundMessageHandler inbound,
 			ILogger<Connection> logger,
@@ -30,8 +33,32 @@ public static class GatewayWebSocketEndpoint
 				return;
 			}
 
+			// WebSocket handshake 不受 CORS 約束，所以 Origin 必須自己驗，否則任何網站都能
+			// 帶著受害者的 cookie 開一條連線（CSWSH）。見 AllowedOrigins。
+			var origin = context.Request.Headers.Origin.ToString();
+
+			if (!allowedOrigins.IsAllowed(origin))
+			{
+				logger.LogWarning("Rejected a websocket handshake from origin '{Origin}'.", origin);
+
+				context.Response.StatusCode = StatusCodes.Status403Forbidden;
+				return;
+			}
+
+			// 驗證必須在 accept 之前——一旦 accept 就沒辦法回 HTTP 狀態碼了，client 只會看到
+			// 「連上又立刻被踢」而分不出是 session 過期還是網路問題。
+			var principal = await authenticator
+				.ResolveAsync(context.Request.Cookies[SessionCookie.Name], cancellationToken)
+				.ConfigureAwait(false);
+
+			if (principal is null)
+			{
+				context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+				return;
+			}
+
 			using var socket = await context.WebSockets.AcceptWebSocketAsync();
-			var connection = await lifecycle.OnConnectedAsync(socket, cancellationToken);
+			var connection = await lifecycle.OnConnectedAsync(socket, principal, cancellationToken);
 
 			logger.LogInformation("{ConnectionId} connected.", connection.ConnectionId);
 
@@ -49,7 +76,7 @@ public static class GatewayWebSocketEndpoint
 			}
 			finally
 			{
-				await lifecycle.OnDisconnectedAsync(connection.ConnectionId, cancellationToken);
+				await lifecycle.OnDisconnectedAsync(connection.ConnectionId, connection.Principal, cancellationToken);
 				logger.LogInformation("{ConnectionId} disconnected.", connection.ConnectionId);
 			}
 		});
@@ -104,7 +131,11 @@ public static class GatewayWebSocketEndpoint
 
 			var packet = Packet.Parser.ParseFrom(stream);
 
-			await inbound.HandleAsync(connection.ConnectionId, packet.Subject, packet.Payload, cancellationToken).ConfigureAwait(false);
+			// principal 從連線本身取，不是每則訊息重查一次——這是把它存在 Connection 上的
+			// 全部理由。
+			await inbound
+				.HandleAsync(connection.ConnectionId, connection.Principal, packet.Subject, packet.Payload, cancellationToken)
+				.ConfigureAwait(false);
 		}
 	}
 }

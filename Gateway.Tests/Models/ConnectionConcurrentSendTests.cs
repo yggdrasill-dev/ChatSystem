@@ -35,7 +35,7 @@ public class ConnectionConcurrentSendTests
 		app.Map("/ws", async (HttpContext context) =>
 		{
 			var socket = await context.WebSockets.AcceptWebSocketAsync();
-			var connection = new Connection("test-conn", socket);
+			var connection = new Connection("test-conn", "user-1", socket);
 
 			var buffer = new byte[64];
 			await socket.ReceiveAsync(buffer, CancellationToken.None); // 等 client 的 "go"

@@ -47,13 +47,13 @@ public sealed class PacketRegistry
 	public ValueTask DispatchAsync(
 		IServiceProvider services,
 		string subject,
-		string connectionId,
+		CommandContext context,
 		ByteString payload,
 		CancellationToken cancellationToken = default)
 	{
 		if (!m_BySubject.TryGetValue(subject, out var registration) || registration.Dispatch is null)
 			throw new InvalidOperationException($"Subject '{subject}' has no inbound handler. Check IsInboundSubject first.");
 
-		return registration.Dispatch(services, connectionId, payload, cancellationToken);
+		return registration.Dispatch(services, context, payload, cancellationToken);
 	}
 }

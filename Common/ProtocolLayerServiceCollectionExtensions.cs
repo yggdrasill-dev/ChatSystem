@@ -37,14 +37,14 @@ public static class ProtocolLayerServiceCollectionExtensions
 		return services.AddSingleton(new PacketRegistration(
 			subject,
 			typeof(TMessage),
-			(serviceProvider, connectionId, payload, cancellationToken) =>
+			(serviceProvider, context, payload, cancellationToken) =>
 			{
 				// 先解析再取 handler：payload 壞掉時不必白白建出 handler。
 				var message = parser.ParseFrom(payload);
 
 				return serviceProvider
 					.GetRequiredService<THandler>()
-					.HandleAsync(connectionId, message, cancellationToken);
+					.HandleAsync(context, message, cancellationToken);
 			}));
 	}
 

@@ -1,6 +1,6 @@
 # 協定層架構設計（Protocol Layer）
 
-狀態：機制已實作（`Common/Protocol/` + `CommandRouter/`），尚未有任何層註冊命令——registry 目前是空的
+狀態：機制已實作（`Common/Protocol/` + `CommandRouter/`，含 ADR-9 的 `CommandContext`），尚未有任何層註冊命令——registry 目前是空的
 技術棧：延續連線層的 .NET + NATS（Adaptare）+ protobuf
 範圍：**client 封包內容的解析、subject 與型別的對應、分派給對的 handler**，不含任何具體命令的業務語意
 
@@ -443,7 +443,7 @@ var builder = Host.CreateApplicationBuilder(args);
 ## 9. 待確認 / 後續事項
 
 - **已完成**：協定層機制全部實作。`Common/Protocol/`（`IPacketHandler`、`IInboundFilter`、`PacketRegistration`、`PacketRegistry`、`IPacketPublisher`/`PacketPublisher`、`InboundBridge`）、`Common/Protos/protocol.proto`、`Common/ProtocolLayerServiceCollectionExtensions.cs`、`CommandRouter/`（`InboundProcessor` + `Program.cs`）。`Gateway/Program.cs` 的 `NoOpInboundMessageHandler` 註冊換成 `AddInboundBridge()`（該檔案已刪除），AppHost 新增 `command-router` 資源。**尚未有任何層註冊命令**，所以現在任何 client 命令都會被回 `UNKNOWN_SUBJECT`——這是預期狀態。原本預期第一批註冊來自身分層，`identity-layer.md` ADR-8 之後改為**房間層**（身分層不再有任何 inbound 命令）。
-- **待實作（ADR-9）**：`InboundPacket` 加 `principal` 欄位、`CommandContext` 型別、`IPacketHandler`／`IInboundFilter` 改收 `CommandContext`、`InboundBridge.HandleAsync` 多一個參數、`InboundProcessor` 組出 context。連帶要改的測試：`Common.Tests/Protocol/`（`InboundBridgeTests`、`PacketRegistryTests`、`ProtocolLayerRegistrationTests`）與 `CommandRouter.Tests/InboundProcessorTests`。這批跟連線層的 handshake 驗證是同一次跨層變更，見 `connection-layer.md` 第 9 節。
+- **已完成（ADR-9）**：`InboundPacket.principal`、`Common/Protocol/CommandContext.cs`、`IPacketHandler`／`IInboundFilter` 改收 `CommandContext`、`InboundBridge.HandleAsync` 多一個 `principal` 參數、`InboundProcessor` 組出 context 並傳給 filter 與 dispatch。跟連線層的 handshake 驗證是同一次跨層變更（`connection-layer.md` 第 9 節）。
 - **已完成**：`AddOutboundGateway()`／`AddConnectionTerminator()`／`AddInboundBridge()` 共用的 Adaptare 設定移到 `Common/NatsMessagingRegistration.cs` 的 `AddNatsMessaging()`（原本叫 `AddConnectionLayerMessaging()`，現在協定層也要用，名字不該再綁連線層）。共用設定用 marker 只跑一次，但那個 marker 擋不住「應用程式為了註冊自己的 handler 又呼叫一次 `AddNatsMessageQueue`」——Gateway 與 Dispatcher 正是這樣。實測 Adaptare 容許這種重複呼叫、`IMessageSender` 仍解得出來，`Common.Tests/Protocol/NatsMessagingRegistrationTests.cs` 把 Gateway 與 CommandRouter 兩種註冊組合都釘住了。
 - **已驗證**：端到端跑過一次真的 AppHost（Redis + NATS 容器 + 兩個 Gateway 複本 + Dispatcher + CommandRouter）。WebSocket client 連上 Gateway、送出 `Packet`，連線在超過 bridge 的 10 秒 timeout 之後仍然是 `Open` 且能繼續送第二則訊息，最後乾淨完成 close handshake——證明 `AddProcessor` 的 request/reply 在真的 NATS 上有來有回（若 ack 沒回來，連線會在 10 秒被關掉）。順帶確認 NATS server 回報的 `MaxPayload` 就是 1048576，跟第 9 節限流那條引用的 1MB 一致。
 - **已決定**：服務專案名為 `CommandRouter`，NATS subject 前綴為 `command.inbound`（沿用「前綴對應目標角色」的既有慣例：`dispatch.*` 給 `Dispatcher`、`connect.*` 給 Gateway 節點）。`Command` 這個字是用來跟 `Dispatcher` 區隔——`Dispatcher` 搬的是不理解內容的投遞封包，這個服務處理的是已解析成型別的命令；單獨叫 `Router` 會跟 `Dispatcher` 語意撞車（兩者幾乎同義，光看專案清單 `Gateway / Dispatcher / Router / Common` 猜不出哪個是上行哪個是下行）。排除 `Ingress`：k8s Ingress 有既定含義（HTTP 反向代理／入口控制器），會被誤認成基礎設施元件。排除 `Protocol`：協定層的共用抽象已經用 `Common.Protocol` 命名空間，服務同名會打架。**保留的風險**：ADR-1 預期未來某個業務會拆成自己的宿主 process，屆時「唯一的 CommandRouter」這個命名會變尷尬（不會有 `CommandRouter2`）。真要拆時再改名，subject 前綴要一起改，成本不小但可控。
