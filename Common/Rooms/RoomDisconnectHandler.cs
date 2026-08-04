@@ -32,6 +32,10 @@ public sealed class RoomDisconnectHandler(
 			return;
 		}
 
+		logger.LogInformation(
+			"Marking {ConnectionId} disconnected for the grace period.",
+			message.ConnectionId);
+
 		// 標記失敗（不在任何房間、或 fencing 不符）是常態，不是錯誤：多數連線根本沒進過房間。
 		await membership
 			.MarkDisconnectedAsync(message.Principal, message.ConnectionId, cancellationToken)

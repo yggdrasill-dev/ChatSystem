@@ -19,11 +19,18 @@ message InboundPacket {
 // 只用於順序控制與觀測，Gateway 不依據它做任何動作（見 protocol-layer.md ADR-5）。
 message InboundAck {
 	enum Status {
-		OK = 0;
-		UNKNOWN_SUBJECT = 1;
-		MALFORMED_PAYLOAD = 2;
-		REJECTED_BY_FILTER = 3;
-		HANDLER_FAILED = 4;
+		// OK 刻意不是 0。proto3 不序列化預設值，所以 status=OK + detail="" 的 ack 會是
+		// **0 bytes**，而一個空 payload 的回覆跟「根本沒有人回覆」（NATS no-responders）
+		// 無法區分——而後者代表這則命令根本沒被處理，是必須讓連線斷掉的情況。
+		//
+		// 這個 bug 在 registry 還是空的時候完全看不到：那時每則命令的 ack 都是
+		// UNKNOWN_SUBJECT（非預設值），有 bytes。第一個成功的命令才會踩到。
+		UNSPECIFIED = 0;
+		OK = 1;
+		UNKNOWN_SUBJECT = 2;
+		MALFORMED_PAYLOAD = 3;
+		REJECTED_BY_FILTER = 4;
+		HANDLER_FAILED = 5;
 	}
 
 	Status status = 1;

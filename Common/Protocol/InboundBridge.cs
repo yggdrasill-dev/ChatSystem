@@ -61,6 +61,21 @@ internal sealed class InboundBridge(
 			throw;
 		}
 
+		// 空回覆代表沒有人處理這則命令（NATS 的 no-responders 會立刻回一個空訊息，Adaptare
+		// 把它交出來時是 null）。這跟逾時是同一類問題、要同樣處理：往上丟讓連線關閉，client
+		// 重連重送。不能當成成功——那則命令根本沒被處理，而 ADR-2 保住的順序就破了。
+		//
+		// 「成功的 ack 一定非空」是靠 InboundAck.Status 的 OK 不等於 0 撐住的，見 protocol.proto。
+		if (reply is null || reply.Length == 0)
+		{
+			logger.LogError(
+				"{ConnectionId} {Subject} got an empty ack, which means nothing handled it.",
+				connectionId,
+				subject);
+
+			throw new InvalidOperationException($"No responder handled '{InboundSubject}' for {connectionId}.");
+		}
+
 		var ack = InboundAck.Parser.ParseFrom(reply);
 
 		if (ack.Status != InboundAck.Types.Status.Ok)

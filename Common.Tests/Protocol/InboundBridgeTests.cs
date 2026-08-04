@@ -41,6 +41,34 @@ public class InboundBridgeTests
 	}
 
 	[Fact]
+	public void InboundAck_ForASuccessfulCommand_IsNotEmptyOnTheWire()
+	{
+		// 這是 InboundAck.Status 的 OK 不等於 0 的唯一理由：proto3 不序列化預設值，
+		// 全預設值的訊息會變成 0 bytes，而空回覆跟「沒有人回覆」在 NATS 上分不出來。
+		Assert.NotEmpty(new InboundAck { Status = InboundAck.Types.Status.Ok }.ToByteArray());
+	}
+
+	[Fact]
+	public async Task HandleAsync_Throws_WhenTheReplyIsEmpty()
+	{
+		var sender = Substitute.For<IMessageSender>();
+		sender
+			.RequestAsync<byte[], byte[]>(
+				Arg.Any<string>(),
+				Arg.Any<byte[]>(),
+				Arg.Any<IEnumerable<MessageHeaderValue>>(),
+				Arg.Any<CancellationToken>())
+			.Returns((byte[])null!);
+
+		var bridge = new InboundBridge(sender, NullLogger<InboundBridge>.Instance);
+
+		// 空回覆 = NATS 的 no-responders = 這則命令根本沒被處理。當成成功的話 ADR-2 保住的
+		// 順序就破了，所以跟逾時一樣往上丟讓連線關閉。
+		await Assert.ThrowsAsync<InvalidOperationException>(
+			async () => await bridge.HandleAsync("conn-1", "user-1", "room.join", ByteString.Empty));
+	}
+
+	[Fact]
 	public async Task HandleAsync_Rethrows_WhenTheCommandRouterNeverReplies()
 	{
 		var sender = Substitute.For<IMessageSender>();

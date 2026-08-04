@@ -412,6 +412,12 @@ internal sealed class RoomGraceSweeper(
   - **`room.close` 先讀名單、再關房、廣播後才清成員**。不清成員的話 `GetMembersAsync` 會一直回一群不該存在的人。
   - **`room.list` 的人數用 `GetMembersAsync().Count`** 而不是數 hash 的欄位數，否則會把寬限期已過、還沒被 sweeper 清掉的幽靈算進去。代價是在 `ListOpenAsync` 的 N+1 之上又多一輪 N——§8 把分頁列為「先不做」時心裡有數的成本又長了一點。
   - **`RoomBroadcaster` 的回覆直接送回 `context.ConnectionId`**，不查 Presence：那條連線就在 context 裡，而且 Presence 可能已經指向別的連線（Supersede），查了反而回錯人。
+- **端到端驗證（跑真的 AppHost，兩個 client 分別連到兩個 Gateway 複本，所以每次廣播都必須跨節點）**：10 項通過、3 項失敗，失敗全部指向**協定層/messaging 的接線**而不是房間層的邏輯。
+  - **通過**：`room.create`；`room.join` 的密碼房驗證與名單回覆；**alice 跨節點收到 bob 的 `RoomMemberJoined`**（`IPacketPublisher` → `Dispatcher` → 另一個節點這條下行 fan-out 第一次被真的走到）；`room.list` 的人數與 `has_password`；非房主踢人被拒；寬限期內重連拿回完整名單。
+  - **修好的**：`InboundAck` 的空 ack bug（見 `protocol-layer.md` 第 9 節）。修好之前**任何成功的命令都會殺掉連線**，所以房間層一行都跑不動。
+  - **still broken ①：每個下行訊息被投遞兩次。** client 收到兩份 `room.joined`、兩份 `room.reply`。Dispatcher 的 log 顯示它只 publish 一次，所以重複發生在 **Gateway 的訂閱側**。最可能的原因是 `AddMessageQueue()`／`AddNatsMessageQueue()` 在同一個 process 被呼叫兩次——一次來自 `NatsMessagingRegistration.AddNatsMessaging()`（marker 只擋共用設定，擋不住這個），一次來自 Gateway 自己註冊 handler 的那條鏈。`protocol-layer.md` 第 9 節早就記下「實測 Adaptare 容許這種重複呼叫」，當時的結論是「`IMessageSender` 仍解得出來」——**但沒有檢查訂閱有沒有因此被建立兩份**。在房間層出現之前這個 bug 是隱形的：下行只有 terminate（重複關同一條連線是 no-op）與 ack（request/reply 只取第一個回覆）。
+  - **still broken ②：`RoomDisconnectHandler` 從來沒被呼叫過。** 加了一行 log 之後確認 0 次。所以沒有人被標記進寬限期、`{rooms}:grace` 永遠是空的、`RoomGraceSweeper` 永遠沒事做——ADR-2 的整個寬限期機制目前是死的。CommandRouter 的 `AddNatsMessageQueue` 鏈同時有 `AddProcessor`（`command.inbound`，會動）與 `AddHandler`（`events.connection.disconnected`，不會動），懷疑是同一個重複註冊問題的另一面。
+  - **下一步**：把 messaging 的註冊改成「每個 host 只呼叫一次 `AddNatsMessageQueue`，handler 的註冊透過參數傳進去」，拿掉 `AddNatsMessaging()` 的 marker hack。這兩個 bug 都不是房間層的問題，修完要重跑這個驗證。
 - **待確認**：`room.ban` 目前**不會**順手把人踢出房間，照 ADR-5 的「後台正常用法是踢出＋封鎖，UI 上做成一個動作」。但這代表封鎖一個正在房間裡的人，他會留在裡面直到自己離開——對一個管理工具來說很奇怪。要嘛 ban 順手 remove（那 ban 就有兩種副作用，而且沒辦法只封鎖一個不在房間裡的人），要嘛維持現狀並在 UI 上強制兩個命令一起送。**這條沒有定案，只是照文件實作**。
 
 - ~~**硬前置：連線層的斷線事件**（ADR-3）。~~ **已實作**：`events.connection.disconnected`，設計見 `connection-layer.md` 第 6.7 節與 ADR-8。房間層要訂閱它並在 handler 裡呼叫 `MarkDisconnectedAsync`。注意該 ADR 明確把事件定為 best-effort——本層 ADR-2 的「讀取時過濾」正確性不依賴它，這個前提要繼續維持，不要改成「只在收到事件時才清理」。事件會帶 `principal`（`connection-layer.md` ADR-9），所以本層不需要任何 `connectionId → userId` 的反查。
