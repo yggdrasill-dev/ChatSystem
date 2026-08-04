@@ -141,7 +141,7 @@ public class RoomHandlerTests
 		await harness.JoinHandler().HandleAsync(_Alice, new JoinRoomRequest { RoomId = "room-1" });
 
 		// 寬限期內重連：ADR-2 承諾「其他成員什麼都看不到」，所以不能有 joined 廣播
-		Assert.Empty(harness.Sent.Where(sent => sent.Message is RoomMemberJoined));
+		Assert.DoesNotContain(harness.Sent, sent => sent.Message is RoomMemberJoined);
 		Assert.NotNull(harness.Single<RoomJoined>());
 	}
 
@@ -299,7 +299,7 @@ public class RoomHandlerTests
 			.HandleAsync(_Alice, new CloseRoomRequest { RoomId = "room-1" });
 
 		Assert.Equal(Status.RoomClosed, harness.Single<RoomOperationReply>().Status);
-		Assert.Empty(harness.Sent.Where(sent => sent.Message is RoomClosed));
+		Assert.DoesNotContain(harness.Sent, sent => sent.Message is RoomClosed);
 	}
 
 	// ---- update ----
@@ -401,7 +401,7 @@ public class RoomHandlerTests
 			Presence
 				.ResolveConnectionsAsync(Arg.Any<IReadOnlyCollection<string>>(), Arg.Any<CancellationToken>())
 				.Returns(call => (IReadOnlyCollection<string>)
-					[.. call.Arg<IReadOnlyCollection<string>>().Select(userId => $"conn-{userId}")]);
+					[.. (call.Arg<IReadOnlyCollection<string>>() ?? []).Select(userId => $"conn-{userId}")]);
 
 			Broadcaster = new RoomBroadcaster(Presence, Publisher);
 		}

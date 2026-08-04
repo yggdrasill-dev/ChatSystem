@@ -37,7 +37,9 @@ public static class RoomLayerServiceCollectionExtensions
 	// AddIdentityStores(...)——fan-out 要靠 IPresenceDirectory 把 userId 換成 connectionId。
 	public static IServiceCollection AddRoomPackets(this IServiceCollection services)
 	{
-		services.AddScoped<RoomBroadcaster>();
+		// 沒有 per-command 狀態（context 是參數傳進去的），而且 sweeper 這個 singleton
+		// 的 BackgroundService 也要用它，所以是 singleton 不是 scoped。
+		services.AddSingleton<RoomBroadcaster>();
 
 		services.AddPacketHandler<CreateRoomRequest, RoomCreateHandler>("room.create");
 		services.AddPacketHandler<JoinRoomRequest, RoomJoinHandler>("room.join");
@@ -57,4 +59,9 @@ public static class RoomLayerServiceCollectionExtensions
 
 		return services.AddOutboundPacket<RoomList>("room.list.reply");
 	}
+
+	// 寬限期到期成員的清理與廣播。需要先呼叫 AddRoomPackets()——sweeper 用同一個
+	// RoomBroadcaster，而且它廣播的 RoomMemberLeft 要靠 registry 才反查得到 subject。
+	public static IServiceCollection AddRoomGraceSweeper(this IServiceCollection services) =>
+		services.AddHostedService<RoomGraceSweeper>();
 }

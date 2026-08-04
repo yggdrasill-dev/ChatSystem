@@ -1,6 +1,6 @@
 # 房間層架構設計（Room Layer）
 
-狀態：設計 draft；持久層（`IRoomStore`／`IRoomBanList` + Redis 實作）**已實作**，`IRoomMembership`、handler、sweeper 尚未，見第 9 節
+狀態：**已實作**（持久層、`IRoomMembership`、8 個 handler、`RoomGraceSweeper`、斷線事件訂閱端）。實作時偏離文件的地方與剩下的待確認事項見第 9 節
 技術棧：延續既有的 .NET + NATS（Adaptare）+ Redis；房間本身的持久儲存待決（見第 9 節）
 範圍：**房間的生命週期、成員名單、房間後台管理，以及「這個房間該通知哪些連線」**，不含訊息內容與歷史記錄
 依賴：命令的解析與分派由協定層負責（[protocol-layer.md](protocol-layer.md)）；「這個使用者現在在哪條連線上」向身分層查（[identity-layer.md](identity-layer.md)）
@@ -250,12 +250,24 @@ public interface IRoomMembership
 	ValueTask RemoveAsync(string roomId, string userId, CancellationToken cancellationToken = default);
 
 	// 只有當該成員的 CurrentConnectionId 等於傳入值時才寫入 DisconnectedAt（ADR-4 的 fencing）。
-	ValueTask MarkDisconnectedAsync(string connectionId, DateTimeOffset at, CancellationToken cancellationToken = default);
+	ValueTask MarkDisconnectedAsync(string userId, string connectionId, CancellationToken cancellationToken = default);
 
 	// 給 sweeper 用：寬限期已過、還沒被移除的成員。
 	ValueTask<IReadOnlyCollection<(string RoomId, string UserId)>> ListExpiredAsync(CancellationToken cancellationToken = default);
 }
 ```
+
+**`MarkDisconnectedAsync` 為什麼要帶 `userId`**（初版只有 `connectionId`）：成員以 `userId` 為鍵存放，只給 `connectionId` 就必須維護一張 `connectionId → (roomId, userId)` 的反向索引——正是身分層刪掉的那種表。斷線事件會帶 principal（`connection-layer.md` ADR-9），所以那張表不需要存在。`connectionId` 仍然要傳，因為 fencing 要靠它。
+
+**時間戳由 store 自己蓋**（初版的 `at` 參數已移除）：`RedisRoomMembership` 注入 `TimeProvider`，讀取時的過濾與寬限期到期時間都用同一個時鐘，呼叫端不必管。
+
+**沒有 `LeaveCurrentRoomAsync`**（5.1 的序列圖原本有）：handler 需要舊房間的 `roomId` 才能對舊房間廣播 `RoomMemberLeft`，包進 store 方法裡就拿不到。改成 `GetCurrentRoomAsync` + `RemoveAsync` 在 handler 裡組合。
+
+**`RemoveAsync` 需要 fencing**：`userId → roomId` 的指向只在還指向這個房間時才刪，否則會把使用者剛加入的新房間指向蓋掉。這是同一個 race 的第三個實例（另兩個是本層 ADR-4 的斷線標記與 `identity-layer.md` ADR-4 的 Presence 解綁），用單 key 的 compare-and-delete Lua 解決。
+
+**Redis 資料結構**：`{rooms}:members:{roomId}`（Hash，field = userId、value 是 `joinedAt|connectionId|disconnectedAt?` 打包成一個字串，fan-out 一次 HGETALL 就拿完整間房）、`{rooms}:userroom:{userId}`（String）、`{rooms}:grace`（Sorted Set，score = 到期時間、member = `roomId|userId`）。
+
+有了 `{rooms}:grace`，「掃出寬限期已過的成員」就是一次 `ZRANGEBYSCORE`，不必掃過所有房間。而 `MarkDisconnectedAsync` 的「檢查 fencing + 寫 `DisconnectedAt` + 排進 sweeper 待辦」是一段跨兩個 key 的 Lua——**這正是 6.1 的 hash tag 當初付代價換來的東西**（那節寫「換來的是同一個操作可以跨 key 保持一致，例如未來真的需要 Lua 時」）。只做前兩件事 sweeper 永遠不知道，只做第三件讀取時的過濾會漏掉。
 
 `JoinAsync` 同時做三件事：寫入 `Room:{roomId}:members`、寫入 `UserRoom:{userId} → roomId`、清掉可能存在的 `DisconnectedAt`。因為「一次只能在一間」，`UserRoom:{userId}` 是單一值，`JoinAsync` 直接覆寫。
 
@@ -342,6 +354,7 @@ internal sealed class RoomGraceSweeper(
 - **Context**：斷線重連（網路抖動、換分頁、Supersede）不該讓其他成員看到「離開又加入」。但「N 秒後做一件事」需要排程能力，而目前是 core NATS、沒有延遲投遞、也沒有引入 JetStream。
 - **Decision**：成員記錄帶 `DisconnectedAt`。**讀取名單時就把寬限期已過的濾掉**（保證 fan-out 與名單查詢的正確性，不依賴任何排程）；另外跑一個低頻的 `RoomGraceSweeper` 負責真正移除與廣播 `RoomMemberLeft`。
 - **Consequences**：正確性不依賴 sweeper——就算 sweeper 掛了，名單查詢與 fan-out 仍然正確，只是「離開」的廣播會遲到、Redis 裡會累積幽靈成員。sweeper 只負責「讓別人知道」與清理。代價是多一個 `BackgroundService`，而且它在多複本下會重複執行，所以移除與廣播都必須 idempotent。30 秒與 10 秒掃描間隔都是憑經驗抓的暫定值，未經負載測試（同 `connection-layer.md` 第 9 節那兩個值的處理方式）。
+- **實作時發現的必要條件**：client 重連之後會**再送一次 `room.join`**（它得重新建立狀態），所以 `RoomJoinHandler` 必須先判斷「這個人已經在名單上了嗎」，是的話**不廣播 `RoomMemberJoined`**。少了這個判斷，其他成員每次對方網路抖動都會看到一次加入事件，本 ADR 承諾的「什麼都看不到」就是空的。判斷依據是 join 之前的名單（含寬限期中的成員），有測試釘住。
 - **不做的事**：寬限期內送出的訊息**不補送**。使用者重連後靠聊天層的歷史記錄補齊——`product-scope.md` 已經把訊息記錄列入範疇，歷史記錄就是真相來源，即時投遞掉一則不是致命問題。這也讓 `protocol-layer.md` 第 8 節「不引入 JetStream／retry」的決定更站得住腳。
 
 ### ADR-3：斷線退房不能寫在 Gateway 裡
@@ -389,7 +402,17 @@ internal sealed class RoomGraceSweeper(
 ## 9. 待確認 / 後續事項
 
 - **已完成**：持久層的抽象與 Redis 實作。`Common/Rooms/`（`Room`、`IRoomStore`、`IRoomBanList`、`RedisRoomStore`、`RedisRoomBanList`、`RoomKeys`）與 `Common/RoomLayerServiceCollectionExtensions.cs` 的 `AddRoomStore(redisServiceKey)`。過程中把 6.1 的介面從 `Get` + `Update` 改成意圖式操作（見該節），並確認了 hash tag 的取捨。**`IRoomMembership` 還沒實作**——它是暫時狀態不是持久層，會跟 handler 一起做。
-- **待做**：AppHost 的 `room-store` Redis 資源與 `CommandRouter` 的 `AddKeyedRedisClient` 註冊。刻意還沒加——目前沒有任何東西消費 `IRoomStore`，先加只會是死接線（而且 Aspire 會多起一個沒人用的容器）。等 handler 落地時一起接。
+- **已完成**：`IRoomMembership`／`RedisRoomMembership`（6.2）、`room.proto`、8 個 handler、`RoomBroadcaster`、`RoomPassword`（PBKDF2-SHA256、per-room salt、固定時間比較）、`RoomGraceSweeper`、`RoomDisconnectHandler`，以及 `AddRoomPackets()`／`AddRoomGraceSweeper()`。`CommandRouter` 掛上 `room-store` 與 `identity-store` 兩個 keyed Redis，AppHost 新增 `room-store`。**協定層的 registry 從此有內容**——「任何 client 命令都回 `UNKNOWN_SUBJECT`」那個中間態結束了。
+- **文件原本缺的兩件事**（兩件都會直接壞掉，已補上並有測試）：
+  1. **切換房間時要對舊房間廣播 `RoomMemberLeft`**。5.1 的序列圖只畫了退舊房與加入新房，沒有通知舊房間的成員——少了它，舊房間的 client 名單上會留一個永遠不會消失的幽靈（sweeper 只處理寬限期到期，明確離開不走那條路）。
+  2. **重連時不能廣播 `RoomMemberJoined`**（見 ADR-2 的補充）。
+- **實作時的其他決定**：
+  - **建房不順便加入**。`room.join` 有自己一整套流程（退舊房、廣播、回名單），複製一份只會讓兩邊行為漂移；client 建完房自己送 `room.join`。要不要改成自動加入是產品決定。
+  - **`room.leave` 會檢查「你真的在這間房嗎」**，不是無條件 `RemoveAsync`：無條件的話 client 傳錯 `roomId` 會靜默成功，而且我們會對一間他不在的房間廣播他離開。新增 `NOT_A_MEMBER` 狀態。
+  - **`room.close` 先讀名單、再關房、廣播後才清成員**。不清成員的話 `GetMembersAsync` 會一直回一群不該存在的人。
+  - **`room.list` 的人數用 `GetMembersAsync().Count`** 而不是數 hash 的欄位數，否則會把寬限期已過、還沒被 sweeper 清掉的幽靈算進去。代價是在 `ListOpenAsync` 的 N+1 之上又多一輪 N——§8 把分頁列為「先不做」時心裡有數的成本又長了一點。
+  - **`RoomBroadcaster` 的回覆直接送回 `context.ConnectionId`**，不查 Presence：那條連線就在 context 裡，而且 Presence 可能已經指向別的連線（Supersede），查了反而回錯人。
+- **待確認**：`room.ban` 目前**不會**順手把人踢出房間，照 ADR-5 的「後台正常用法是踢出＋封鎖，UI 上做成一個動作」。但這代表封鎖一個正在房間裡的人，他會留在裡面直到自己離開——對一個管理工具來說很奇怪。要嘛 ban 順手 remove（那 ban 就有兩種副作用，而且沒辦法只封鎖一個不在房間裡的人），要嘛維持現狀並在 UI 上強制兩個命令一起送。**這條沒有定案，只是照文件實作**。
 
 - ~~**硬前置：連線層的斷線事件**（ADR-3）。~~ **已實作**：`events.connection.disconnected`，設計見 `connection-layer.md` 第 6.7 節與 ADR-8。房間層要訂閱它並在 handler 裡呼叫 `MarkDisconnectedAsync`。注意該 ADR 明確把事件定為 best-effort——本層 ADR-2 的「讀取時過濾」正確性不依賴它，這個前提要繼續維持，不要改成「只在收到事件時才清理」。事件會帶 `principal`（`connection-layer.md` ADR-9），所以本層不需要任何 `connectionId → userId` 的反查。
 - **訂閱時的 queue group 名稱要跟其他訂閱端區隔**。NATS 的規則是不同 queue group 各收到一份、同一個 group 內互相分攤。目前預期只有房間層訂閱 `events.connection.disconnected`（身分層的解綁在 Gateway 內直接完成，不繞事件），但未來多一個訂閱端時如果沿用同一個 group 名，兩邊會互搶事件，症狀是「有時候有處理、有時候沒有」——這種錯誤在 diff 上看不出來，所以一開始就用有層次的名字（例如 `room.membership`）。

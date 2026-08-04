@@ -1,5 +1,6 @@
 using CommandRouter;
 using Common.Protocol;
+using Common.Rooms;
 using NATS.Client.Core;
 
 var builder = Host.CreateApplicationBuilder(args);
@@ -25,12 +26,16 @@ var builder = Host.CreateApplicationBuilder(args);
 	builder.Services.AddRoomStore("room-store");
 	builder.Services.AddIdentityStores("identity-store");
 	builder.Services.AddRoomPackets();
+	builder.Services.AddRoomGraceSweeper();
 
 	builder.Services
 		.AddMessageQueue()
 		.AddNatsMessageQueue(config => config
 			.ConfigureResolveConnection(sp => (NatsConnection)sp.GetRequiredService<INatsConnection>())
-			.AddProcessor<InboundProcessor>("command.inbound", "command.inbound"));
+			.AddProcessor<InboundProcessor>("command.inbound", "command.inbound")
+			// queue group 用有層次的名字：不同 group 各收到一份事件，未來第二個訂閱端沿用
+			// 同一個名字就會跟房間層互搶（見 RoomDisconnectHandler 的註解）。
+			.AddHandler<RoomDisconnectHandler>("events.connection.disconnected", "room.membership"));
 }
 
 var host = builder.Build();
