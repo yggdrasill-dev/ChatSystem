@@ -468,6 +468,17 @@ allowlist 從設定讀（AppHost 注入，開發與正式環境各自的來源�
 - **已完成**：`Common/Identity/` 的三個 store 與 DI 註冊。`ISessionStore`／`RedisSessionStore`、`ILoginNonceStore`／`RedisLoginNonceStore`、`IPresenceDirectory`／`RedisPresenceDirectory`、`IdentityKeys`、`OpaqueToken`、`Common/IdentityLayerServiceCollectionExtensions.cs` 的 `AddIdentityStores(redisServiceKey)`，測試在 `Common.Tests/Identity/`。刻意先只做這一層——不動任何 process，可以獨立驗證。實作時確認的兩件事：`StringSetAndGetAsync` 在 StackExchange.Redis 3.x 只剩帶 `keepTtl` 的多載；`KeyExpireAsync(key, ttl)` 解析到的是帶 `ExpireWhen` 的多載（測試的 `Received` 斷言必須對上實際被呼叫的那一個，否則會出現「明明呼叫了卻說沒收到」）。
 - **已完成**：`IConnectionAuthenticator`／`ConnectionAuthenticator`（6.3）、`SessionCookie`、`AddConnectionAuthenticator()`，以及連線層的接線（`connection-layer.md` 第 6.8 節、ADR-9）。AppHost 新增 `identity-store`（開 `WithDataVolume()` + `WithPersistence()`，不然 AppHost 重啟一次就得重新登入），Gateway 掛上 `AddKeyedRedisClient("identity-store")` 與 `Gateway:AllowedOrigins` 設定。實作時踩到的坑寫在 6.3（`BindAsync` 這個名字會被 minimal API 的參數繫結慣例攔截）。
 - **已完成**：`WebBff` 專案骨架與登入流程的四個 endpoint（6.5）、`IIdTokenValidator`／`GoogleIdTokenValidator`／`FakeIdTokenValidator`（ADR-12）、`IUserProfileStore`（ADR-11）、`IConnectionAuthenticator.TerminateConnectionsAsync`。AppHost 新增 `web-bff`（`WithExternalHttpEndpoints()`），Gateway 的 allowlist 指向它。
+- **已驗證（端到端，跑真的 AppHost）**：Redis ×2 + NATS 容器、Dispatcher、CommandRouter、WebBff、兩個 Gateway 複本全部起來，用 `Login:AllowFakeIdTokens` 走完整條路徑，18 項檢查全通過：
+  - 登入流程：nonce 配發 → `POST /login` 回 204 且 `Set-Cookie` 帶齊 `httponly; secure; samesite=lax; path=/; max-age`；**同一個 nonce 重放回 401**；`GET /login/session` 回 `userId`；沒 cookie 回 401
+  - handshake 兩道關卡：錯誤 Origin → 403、沒有 Origin → 403、有 Origin 但沒 cookie → 401、都齊全 → 連線成功
+  - Supersede：第二條連線讓第一條收到 `Close/PolicyViolation`；`Presence:{userId}` 由舊 connectionId 換成新的（fencing 沒有誤刪剛綁好的那條）
+  - **跨節點 Supersede**：兩條連線分別落在兩個不同的 Gateway 複本時，踢人請求經 `dispatch.terminate` → Dispatcher → `connect.terminate.{nodeId}` 送到**另一個**節點並關閉連線。這是 `connection-layer.md` ADR-7 那條 fan-out 路徑第一次被真的走到
+  - 登出：`POST /logout` 回 204、連線被終止、舊 cookie 之後連 WS 回 401、`GET /login/session` 回 401
+  - Redis 收尾狀態：`Session:*` 與 `Presence:*` 都被清乾淨（斷線時的 compare-and-delete 有生效），只剩 `Profile:alice`（`display_name` = `Dev alice`、`picture_url` 空字串，符合 ADR-11 的空字串慣例）
+- **驗證環境的三個坑**（下次要重跑 e2e 時會再撞到）：
+  1. **Aspire 13 的 Redis 容器預設只開 TLS**（`--tls-port 6379 --port 0 --tls-auth-clients no`），密碼在容器的 `$REDIS_PASSWORD` 環境變數裡。要用 `redis-cli` 排查得寫成 `docker exec <c> sh -c 'redis-cli --tls --insecure -a "$REDIS_PASSWORD" ...'`——不加 `--tls` 的症狀是 `I/O error` 加 server log 的 `SSL routines::wrong version number`，看起來很像連不到但其實是協定不對。
+  2. **Aspire 的 proxy 不會 per-connection 輪替到不同複本**。同一時間開的兩條 WebSocket 會落在同一個複本，所以「跨節點」這件事**不能靠 proxy 隨機分配來驗**——要直接連到複本自己的 port（用 `Get-NetTCPConnection -OwningProcess` 找 Gateway 程序的 listening port，其中只有 http 那個連得上，https 那個要憑證）。
+  3. **被 Supersede 踢掉的 client 如果沒有立刻在讀，收到的可能是 abort 而不是乾淨的 close frame**（Gateway 送出 close frame 之後 receive loop 就結束、socket 被 dispose）。這讓下面那條「要不要給 client 一個明確的 reason」更站得住腳：**close code 本身不可靠，reason 必須走 in-band 訊息**。
 - **待做（不在 code 裡）**：Google Cloud 的 OAuth client id 與 authorized JavaScript origins。設定進 `Login:GoogleClientId` 之前 `POST /login` 一律回 503；要在那之前跑端到端驗證，把 `Login:AllowFakeIdTokens` 打開（ADR-12）。
 - **待做**：Angular 前端本身（專案名 `webClient`，沿用 `main` 的資料夾名）。`WebBff` 這邊已經準備好——build 產物落到 `wwwroot` 就能用，`MapFallbackToFile("index.html")` 也替 SPA 深層路由備好了。接上之前有四件事要決定，全部跟名字無關但都會影響部署：
   1. **Gateway 的 allowlist 要改成 dev server 的 origin**（`ng serve` 預設 `http://localhost:4200`），理由見 6.4。
