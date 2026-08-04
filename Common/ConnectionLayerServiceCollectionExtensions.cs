@@ -27,6 +27,8 @@ public static class ConnectionLayerServiceCollectionExtensions
 	public static IServiceCollection AddConnectionTerminator(this IServiceCollection services) =>
 		services.AddSingleton<IConnectionTerminator, ConnectionTerminator>();
 
+	// 這一個不需要 Adaptare，它直接用原生 INatsConnection（由 builder.AddNatsClient(...) 註冊）。
+	// 理由是要跟訂閱端對稱——見 ConnectionEventPublisher 的註解。
 	public static IServiceCollection AddConnectionEventPublisher(this IServiceCollection services) =>
 		services.AddSingleton<IConnectionEventPublisher, ConnectionEventPublisher>();
 }
