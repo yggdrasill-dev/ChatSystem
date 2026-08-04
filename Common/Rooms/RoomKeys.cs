@@ -18,6 +18,16 @@ internal static class RoomKeys
 
 	public static RedisKey Ban(string roomId) => $"{{rooms}}:ban:{roomId}";
 
+	// 成員名單：field = userId、value = packed（見 RedisRoomMembership）。
+	public static RedisKey Members(string roomId) => $"{{rooms}}:members:{roomId}";
+
+	// 一次只能在一間房，所以是單一值而不是集合。
+	public static RedisKey UserRoom(string userId) => $"{{rooms}}:userroom:{userId}";
+
+	// sweeper 的待辦清單：score = 寬限期到期時間、member = "roomId|userId"。
+	// 有這個 sorted set，「掃出過期成員」就是一次 ZRANGEBYSCORE，不必掃過所有房間。
+	public static readonly RedisKey Grace = "{rooms}:grace";
+
 	public static class Fields
 	{
 		public const string Name = "name";

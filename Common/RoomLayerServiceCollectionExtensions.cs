@@ -1,4 +1,5 @@
 using Common.Rooms;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using StackExchange.Redis;
 
 namespace Microsoft.Extensions.DependencyInjection;
@@ -16,7 +17,16 @@ public static class RoomLayerServiceCollectionExtensions
 		services.AddSingleton<IRoomStore>(sp =>
 			new RedisRoomStore(sp.GetRequiredKeyedService<IConnectionMultiplexer>(redisServiceKey)));
 
-		return services.AddSingleton<IRoomBanList>(sp =>
+		services.AddSingleton<IRoomBanList>(sp =>
 			new RedisRoomBanList(sp.GetRequiredKeyedService<IConnectionMultiplexer>(redisServiceKey)));
+
+		// 成員名單是暫時狀態、不是持久資料，但仍然放房間層自己的 Redis：它跟房間資料要
+		// 跨 key 一起操作（斷線標記那段 Lua），分開兩個 instance 就辦不到。
+		services.TryAddSingleton(TimeProvider.System);
+
+		return services.AddSingleton<IRoomMembership>(sp =>
+			new RedisRoomMembership(
+				sp.GetRequiredKeyedService<IConnectionMultiplexer>(redisServiceKey),
+				sp.GetRequiredService<TimeProvider>()));
 	}
 }
