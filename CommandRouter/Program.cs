@@ -17,11 +17,14 @@ var builder = Host.CreateApplicationBuilder(args);
 	// 協定層本身：subject ↔ 型別的對應表與出口
 	builder.Services.AddPacketRegistry();
 
-	// 各層在這裡註冊自己的命令與 filter，例如身分層會加上：
-	//   builder.Services.AddPacketHandler<BindRequest, IdentityBindHandler>("identity.bind");
-	//   builder.Services.AddOutboundPacket<BindReply>("identity.bind.reply");
-	//   builder.Services.AddInboundFilter<IdentityBoundFilter>();
-	// 身分層尚未實作，所以目前 registry 是空的——任何 client 命令都會被回 UNKNOWN_SUBJECT。
+	// 房間層：房間/封鎖名單/成員名單住在自己的 Redis（room-store）。
+	// fan-out 要把 userId 換成 connectionId，所以也需要身分層的 IPresenceDirectory
+	// ——它住在 identity-store，跟 room-store 是兩個不同的 Redis 資源。
+	builder.AddKeyedRedisClient("room-store");
+	builder.AddKeyedRedisClient("identity-store");
+	builder.Services.AddRoomStore("room-store");
+	builder.Services.AddIdentityStores("identity-store");
+	builder.Services.AddRoomPackets();
 
 	builder.Services
 		.AddMessageQueue()

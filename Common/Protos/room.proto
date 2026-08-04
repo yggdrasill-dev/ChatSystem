@@ -1,0 +1,103 @@
+syntax = "proto3";
+
+option csharp_namespace = "Chat.Protos";
+package chat;
+
+// 房間層自己的命令與下行訊息。協定層不認識這些型別，對應表由 AddRoomPackets() 註冊。
+
+// ---- 上行 ----
+
+message CreateRoomRequest {
+	string name = 1;
+	// 空字串 = 公開房。
+	string password = 2;
+}
+
+message JoinRoomRequest {
+	string room_id = 1;
+	string password = 2;
+}
+
+message LeaveRoomRequest {
+	string room_id = 1;
+}
+
+message ListRoomsRequest {
+}
+
+message KickMemberRequest {
+	string room_id = 1;
+	string target_user_id = 2;
+}
+
+message BanMemberRequest {
+	string room_id = 1;
+	string target_user_id = 2;
+	bool unban = 3;
+}
+
+message CloseRoomRequest {
+	string room_id = 1;
+}
+
+message UpdateRoomRequest {
+	string room_id = 1;
+	string name = 2;
+	// 空字串 = 不改密碼；要改成公開房請用 clear_password。
+	string password = 3;
+	bool clear_password = 4;
+}
+
+// ---- 下行 ----
+
+// 業務失敗一定要用明確的下行訊息回覆：協定層對內容錯誤是「記 log + 忽略」，
+// 沉默的話 client 會什麼都收不到、看起來像卡住（protocol-layer.md ADR-8）。
+message RoomOperationReply {
+	enum Status {
+		OK = 0;
+		ROOM_NOT_FOUND = 1;
+		WRONG_PASSWORD = 2;
+		BANNED = 3;
+		NOT_OWNER = 4;
+		ROOM_CLOSED = 5;
+		NOT_A_MEMBER = 6;
+	}
+
+	Status status = 1;
+	string room_id = 2;
+}
+
+message RoomJoined {
+	string room_id = 1;
+	repeated string member_user_ids = 2;
+}
+
+message RoomMemberJoined {
+	string room_id = 1;
+	string user_id = 2;
+}
+
+message RoomMemberLeft {
+	string room_id = 1;
+	string user_id = 2;
+}
+
+message RoomKicked {
+	string room_id = 1;
+}
+
+message RoomClosed {
+	string room_id = 1;
+}
+
+message RoomSummary {
+	string room_id = 1;
+	string name = 2;
+	// 只揭露有沒有密碼，不揭露密碼本身（room-layer.md ADR-6）。
+	bool has_password = 3;
+	int32 member_count = 4;
+}
+
+message RoomList {
+	repeated RoomSummary rooms = 1;
+}

@@ -1,4 +1,6 @@
+using Chat.Protos;
 using Common.Rooms;
+using Common.Rooms.Handlers;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using StackExchange.Redis;
 
@@ -28,5 +30,31 @@ public static class RoomLayerServiceCollectionExtensions
 			new RedisRoomMembership(
 				sp.GetRequiredKeyedService<IConnectionMultiplexer>(redisServiceKey),
 				sp.GetRequiredService<TimeProvider>()));
+	}
+
+	// 房間層向協定層註冊自己的命令與下行訊息型別。每個 subject 字面值在整個 codebase 只出現
+	// 這一次。需要先呼叫 AddRoomStore(...)、AddPacketRegistry()，以及身分層的
+	// AddIdentityStores(...)——fan-out 要靠 IPresenceDirectory 把 userId 換成 connectionId。
+	public static IServiceCollection AddRoomPackets(this IServiceCollection services)
+	{
+		services.AddScoped<RoomBroadcaster>();
+
+		services.AddPacketHandler<CreateRoomRequest, RoomCreateHandler>("room.create");
+		services.AddPacketHandler<JoinRoomRequest, RoomJoinHandler>("room.join");
+		services.AddPacketHandler<LeaveRoomRequest, RoomLeaveHandler>("room.leave");
+		services.AddPacketHandler<ListRoomsRequest, RoomListHandler>("room.list");
+		services.AddPacketHandler<KickMemberRequest, RoomKickHandler>("room.kick");
+		services.AddPacketHandler<BanMemberRequest, RoomBanHandler>("room.ban");
+		services.AddPacketHandler<CloseRoomRequest, RoomCloseHandler>("room.close");
+		services.AddPacketHandler<UpdateRoomRequest, RoomUpdateHandler>("room.update");
+
+		services.AddOutboundPacket<RoomOperationReply>("room.reply");
+		services.AddOutboundPacket<RoomJoined>("room.joined");
+		services.AddOutboundPacket<RoomMemberJoined>("room.member.joined");
+		services.AddOutboundPacket<RoomMemberLeft>("room.member.left");
+		services.AddOutboundPacket<RoomKicked>("room.kicked");
+		services.AddOutboundPacket<RoomClosed>("room.closed");
+
+		return services.AddOutboundPacket<RoomList>("room.list.reply");
 	}
 }

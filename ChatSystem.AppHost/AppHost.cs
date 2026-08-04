@@ -18,12 +18,22 @@ builder.AddProject<Projects.Dispatcher>("dispatcher")
 	.WaitFor(connectionDirectory)
 	.WaitFor(messageBus);
 
+// 房間層自己的 Redis：房間與封鎖名單是持久資料（ADR-7 標為 provisional，將來跟聊天層的
+// 訊息記錄一起遷到正式儲存），成員名單是暫時狀態但要跟房間資料跨 key 一起操作。
+var roomStore = builder.AddRedis("room-store")
+	.WithDataVolume()
+	.WithPersistence();
+
 // 協定層：訂閱 command.inbound，解析 client 命令後分派給各層註冊的 handler
 builder.AddProject<Projects.CommandRouter>("command-router")
 	.WithReference(connectionDirectory)
 	.WithReference(messageBus)
+	.WithReference(roomStore)
+	.WithReference(identityStore)
 	.WaitFor(connectionDirectory)
-	.WaitFor(messageBus);
+	.WaitFor(messageBus)
+	.WaitFor(roomStore)
+	.WaitFor(identityStore);
 
 // 多開複本模擬多個 Gateway 節點，驗證 ConnectionDirectory + Dispatcher 的跨節點路由
 // 前端的 BFF：出靜態檔（未來 Angular 的 build 產物）並簽發 session cookie。
