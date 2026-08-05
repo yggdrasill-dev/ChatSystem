@@ -11,6 +11,7 @@ using Google.Protobuf;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Status = Chat.Protos.RoomOperationReply.Types.Status;
 
 namespace Integration.Tests;
@@ -143,6 +144,195 @@ public class RoomCommandFlowTests
 	}
 
 	[Fact]
+	public async Task Leave_RepliesNotAMember_WhenTheUserIsSomewhereElse()
+	{
+		await using var host = await RoomFlowHost.StartAsync();
+		var roomId = await host.CreateRoomAsync("alice", "Lobby", string.Empty);
+		host.Clear();
+
+		await host.SendAsync("bob", "room.leave", new LeaveRoomRequest { RoomId = roomId });
+
+		// 無條件 Remove 的話，client 傳錯 roomId 會靜默成功，還會對一間他不在的房間廣播離開
+		Assert.Equal(Status.NotAMember, host.Single<RoomOperationReply>().Status);
+		Assert.DoesNotContain(host.Delivered, delivery => delivery.Message is RoomMemberLeft);
+	}
+
+	[Fact]
+	public async Task Leave_TellsTheRemainingMembers()
+	{
+		await using var host = await RoomFlowHost.StartAsync();
+		var roomId = await host.CreateRoomAsync("alice", "Lobby", string.Empty);
+
+		await host.SendAsync("alice", "room.join", new JoinRoomRequest { RoomId = roomId });
+		await host.SendAsync("bob", "room.join", new JoinRoomRequest { RoomId = roomId });
+		host.Clear();
+
+		await host.SendAsync("bob", "room.leave", new LeaveRoomRequest { RoomId = roomId });
+
+		Assert.Equal("bob", host.Single<RoomMemberLeft>().UserId);
+		Assert.Equal([host.ConnectionOf("alice")], host.TargetsOf<RoomMemberLeft>());
+	}
+
+	[Fact]
+	public async Task List_ExposesOnlyWhetherARoomHasAPassword_AndCountsLiveMembers()
+	{
+		await using var host = await RoomFlowHost.StartAsync();
+		var locked = await host.CreateRoomAsync("alice", "Locked", "hunter2");
+		await host.CreateRoomAsync("alice", "Open", string.Empty);
+
+		await host.SendAsync("alice", "room.join", new JoinRoomRequest { RoomId = locked, Password = "hunter2" });
+		await host.SendAsync("bob", "room.join", new JoinRoomRequest { RoomId = locked, Password = "hunter2" });
+		host.Clear();
+
+		await host.SendAsync("carol", "room.list", new ListRoomsRequest());
+
+		var rooms = host.Single<RoomList>().Rooms.ToDictionary(room => room.Name);
+
+		// 只揭露有沒有密碼，不揭露密碼本身（ADR-6）
+		Assert.True(rooms["Locked"].HasPassword);
+		Assert.False(rooms["Open"].HasPassword);
+		Assert.Equal(2, rooms["Locked"].MemberCount);
+		Assert.Equal(0, rooms["Open"].MemberCount);
+	}
+
+	[Fact]
+	public async Task Ban_KeepsTheMemberButBlocksRejoining_AndUnbanReversesIt()
+	{
+		await using var host = await RoomFlowHost.StartAsync();
+		var roomId = await host.CreateRoomAsync("alice", "Lobby", string.Empty);
+
+		await host.SendAsync("bob", "room.join", new JoinRoomRequest { RoomId = roomId });
+		host.Clear();
+
+		await host.SendAsync("alice", "room.ban", new BanMemberRequest { RoomId = roomId, TargetUserId = "bob" });
+
+		// ADR-5 的立場：封鎖不順手踢人，UI 要把兩者合成一個動作
+		Assert.Equal(Status.Ok, host.Single<RoomOperationReply>().Status);
+		Assert.DoesNotContain(host.Delivered, delivery => delivery.Message is RoomMemberLeft);
+
+		host.Clear();
+		await host.SendAsync("bob", "room.join", new JoinRoomRequest { RoomId = roomId });
+		Assert.Equal(Status.Banned, host.Single<RoomOperationReply>().Status);
+
+		host.Clear();
+		await host.SendAsync(
+			"alice",
+			"room.ban",
+			new BanMemberRequest { RoomId = roomId, TargetUserId = "bob", Unban = true });
+
+		host.Clear();
+		await host.SendAsync("bob", "room.join", new JoinRoomRequest { RoomId = roomId });
+		Assert.NotNull(host.Single<RoomJoined>());
+	}
+
+	[Fact]
+	public async Task Close_TellsTheMembers_ThenTheRoomCannotBeJoined()
+	{
+		await using var host = await RoomFlowHost.StartAsync();
+		var roomId = await host.CreateRoomAsync("alice", "Lobby", string.Empty);
+
+		await host.SendAsync("alice", "room.join", new JoinRoomRequest { RoomId = roomId });
+		await host.SendAsync("bob", "room.join", new JoinRoomRequest { RoomId = roomId });
+		host.Clear();
+
+		await host.SendAsync("alice", "room.close", new CloseRoomRequest { RoomId = roomId });
+
+		Assert.Equal(roomId, host.Single<RoomClosed>().RoomId);
+		Assert.Equal([host.ConnectionOf("alice"), host.ConnectionOf("bob")], host.TargetsOf<RoomClosed>());
+
+		// 關閉之後成員被清掉，房間也不再出現在列表上
+		Assert.Empty(await host.Membership.GetMembersAsync(roomId));
+
+		host.Clear();
+		await host.SendAsync("carol", "room.join", new JoinRoomRequest { RoomId = roomId });
+		Assert.Equal(Status.RoomClosed, host.Single<RoomOperationReply>().Status);
+	}
+
+	[Fact]
+	public async Task Update_CanClearThePassword_AndCanSetANewOne()
+	{
+		await using var host = await RoomFlowHost.StartAsync();
+		var roomId = await host.CreateRoomAsync("alice", "Lobby", "hunter2");
+
+		await host.SendAsync(
+			"alice",
+			"room.update",
+			new UpdateRoomRequest { RoomId = roomId, Name = "Open Lobby", ClearPassword = true });
+		host.Clear();
+
+		await host.SendAsync("bob", "room.join", new JoinRoomRequest { RoomId = roomId });
+		Assert.NotNull(host.Single<RoomJoined>());
+
+		host.Clear();
+		await host.SendAsync(
+			"alice",
+			"room.update",
+			new UpdateRoomRequest { RoomId = roomId, Name = "Locked Again", Password = "s3cret" });
+		host.Clear();
+
+		await host.SendAsync("carol", "room.join", new JoinRoomRequest { RoomId = roomId, Password = "hunter2" });
+		Assert.Equal(Status.WrongPassword, host.Single<RoomOperationReply>().Status);
+
+		host.Clear();
+		await host.SendAsync("carol", "room.join", new JoinRoomRequest { RoomId = roomId, Password = "s3cret" });
+		Assert.NotNull(host.Single<RoomJoined>());
+	}
+
+	[Fact]
+	public async Task GracePeriod_KeepsTheMember_ThenTheSweeperAnnouncesTheLeaveOnceItExpires()
+	{
+		await using var host = await RoomFlowHost.StartAsync();
+		var roomId = await host.CreateRoomAsync("alice", "Lobby", string.Empty);
+
+		await host.SendAsync("alice", "room.join", new JoinRoomRequest { RoomId = roomId });
+		await host.SendAsync("bob", "room.join", new JoinRoomRequest { RoomId = roomId });
+		host.Clear();
+
+		// 等同斷線事件抵達房間層（RoomDisconnectSubscriber 做的就是這一步）
+		await host.Membership.MarkDisconnectedAsync("bob", host.ConnectionOf("bob"));
+
+		// 寬限期內：還算成員，sweeper 沒事做
+		Assert.Equal(2, (await host.Membership.GetMembersAsync(roomId)).Count);
+		await host.SweepAsync();
+		Assert.DoesNotContain(host.Delivered, delivery => delivery.Message is RoomMemberLeft);
+
+		host.Advance(InMemoryRoomMembership.GracePeriod + TimeSpan.FromSeconds(1));
+
+		// 正確性來自「讀取時過濾」，不是 sweeper——時間一到，名單立刻就對了（ADR-2）
+		Assert.Equal(1, (await host.Membership.GetMembersAsync(roomId)).Count);
+
+		// sweeper 只負責讓別人知道，以及真的清掉
+		await host.SweepAsync();
+
+		var left = host.Single<RoomMemberLeft>();
+		Assert.Equal("bob", left.UserId);
+		Assert.Equal([host.ConnectionOf("alice")], host.TargetsOf<RoomMemberLeft>());
+	}
+
+	[Fact]
+	public async Task GracePeriod_IsClearedByReconnecting_SoTheSweeperNeverFires()
+	{
+		await using var host = await RoomFlowHost.StartAsync();
+		var roomId = await host.CreateRoomAsync("alice", "Lobby", string.Empty);
+
+		await host.SendAsync("alice", "room.join", new JoinRoomRequest { RoomId = roomId });
+		await host.SendAsync("bob", "room.join", new JoinRoomRequest { RoomId = roomId });
+		await host.Membership.MarkDisconnectedAsync("bob", host.ConnectionOf("bob"));
+		host.Clear();
+
+		// 重連（client 會再送一次 room.join）→ 標記被清掉
+		await host.SendAsync("bob", "room.join", new JoinRoomRequest { RoomId = roomId });
+		host.Advance(InMemoryRoomMembership.GracePeriod + TimeSpan.FromSeconds(1));
+
+		host.Clear();
+		await host.SweepAsync();
+
+		// 其他成員全程什麼都沒看到
+		Assert.Empty(host.Delivered);
+		Assert.Equal(2, (await host.Membership.GetMembersAsync(roomId)).Count);
+	}
+
+	[Fact]
 	public async Task ProcessorAndHandler_CoexistInOneDirectQueue()
 	{
 		// 這個 harness 本身就是那個組合：command.inbound 是 AddProcessor，
@@ -164,6 +354,10 @@ public class RoomCommandFlowTests
 		public DeliveryCapture Capture { get; } = new();
 
 		public InMemoryPresenceDirectory Presence { get; } = new();
+
+		public MutableTimeProvider Clock { get; } = new(DateTimeOffset.FromUnixTimeMilliseconds(1_700_000_000_000));
+
+		public IRoomMembership Membership => m_Host.Services.GetRequiredService<IRoomMembership>();
 
 		public List<(IReadOnlyCollection<string> ConnectionIds, IMessage Message)> Delivered => Capture.Delivered;
 
@@ -199,6 +393,18 @@ public class RoomCommandFlowTests
 
 		public void Clear() => Capture.Delivered.Clear();
 
+		public void Advance(TimeSpan amount) => Clock.Advance(amount);
+
+		// 直接呼叫 sweeper 的一輪，不等它自己的 10 秒計時器——真 NATS 的端到端要為這一項等
+		// 60 秒，這裡是毫秒級而且不依賴真實時間。
+		public Task SweepAsync() =>
+			new RoomGraceSweeper(
+					Membership,
+					m_Host.Services.GetRequiredService<RoomBroadcaster>(),
+					NullLogger<RoomGraceSweeper>.Instance)
+				.SweepAsync(CancellationToken.None)
+				.AsTask();
+
 		public TMessage Single<TMessage>() where TMessage : IMessage =>
 			Assert.Single(Delivered.Select(delivery => delivery.Message).OfType<TMessage>());
 
@@ -219,7 +425,7 @@ public class RoomCommandFlowTests
 			var connections = new InMemoryConnectionDirectory();
 
 			builder.Services.AddSingleton(Capture);
-			builder.Services.AddSingleton(TimeProvider.System);
+			builder.Services.AddSingleton<TimeProvider>(Clock);
 
 			// store 全部換成替身；其餘都是真的註冊路徑
 			builder.Services.AddSingleton<IConnectionDirectory>(connections);
@@ -252,6 +458,16 @@ public class RoomCommandFlowTests
 				await connections.RegisterAsync(ConnectionOf(userId), NodeId);
 			}
 		}
+	}
+
+	// 寬限期是「現在減掉 DisconnectedAt」，所以測試要能推時間而不是等時間。
+	internal sealed class MutableTimeProvider(DateTimeOffset start) : TimeProvider
+	{
+		private DateTimeOffset m_Now = start;
+
+		public override DateTimeOffset GetUtcNow() => m_Now;
+
+		public void Advance(TimeSpan amount) => m_Now += amount;
 	}
 
 	private sealed class DeliveryCapture
