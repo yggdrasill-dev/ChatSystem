@@ -1,19 +1,21 @@
+using Adaptare;
 using Chat.Protos;
 using Google.Protobuf;
-using NATS.Client.Core;
 
 namespace Common.Connections;
 
-// 直接用原生 NATS client 發，不經過 Adaptare 的 IMessageSender。
+// 跟系統裡其他每一條通道一樣走 Adaptare 的 IMessageSender。
 //
-// 理由是**對稱**，不是「這條通道必須用原生」：訂閱端（房間層的 RoomDisconnectSubscriber）
-// 是原生訂的，而實測 Adaptare 的 publish 不是「把 payload 原樣發到字面 subject」——所以
-// 「Adaptare 發、原生訂」這個組合收不到任何東西。兩端一致就會通，用哪一套都行。
+// 這裡曾經改用原生 INatsConnection，理由寫的是「Adaptare 的 publish 不會落在字面 subject」
+// ——**那個診斷是錯的**。用一個原生 ">" 全捕捉訂閱實測過：Adaptare 發出來的訊息 subject 是
+// 字面值、payload 是原封不動的 byte[]、落在正確那台 server，跟原生發的唯一差別是多帶一個
+// 空的 headers 集合。
 //
-// Adaptare 到底在 wire 上送什麼**目前不知道**（sniffer 沒連上，wire 沒被看到）。
-// dispatch.* / connect.* 仍走 Adaptare，因為那些路徑兩端都是 Adaptare，不管它怎麼改寫都
-// 對得上。完整的排除過程與留下的未解問題見 room-layer.md 第 9 節。
-internal sealed class ConnectionEventPublisher(INatsConnection connection) : IConnectionEventPublisher
+// 真正的原因在呼叫端：斷線清理把「已經取消的 CancellationToken」傳了進來（見
+// GatewayWebSocketEndpoint 的 finally）。Adaptare 尊重取消，所以丟 OperationCanceledException、
+// 訊息沒上 wire；原生 client 對已取消的 token 不理會，所以照樣送出去。換成原生只是把
+// 取消 bug 蓋掉，並沒有修掉它。
+internal sealed class ConnectionEventPublisher(IMessageSender messageSender) : IConnectionEventPublisher
 {
 	// 刻意不放在 connect.* 家族裡：那個前綴目前的意思是「投遞給某個 Gateway 節點」
 	// （connect.deliver.{nodeId}、connect.terminate.{nodeId}），而這是反方向的事件廣播，
@@ -34,9 +36,6 @@ internal sealed class ConnectionEventPublisher(INatsConnection connection) : ICo
 			Principal = principal
 		};
 
-		return connection.PublishAsync(
-			DisconnectedSubject,
-			message.ToByteArray(),
-			cancellationToken: cancellationToken);
+		return messageSender.PublishAsync(DisconnectedSubject, message.ToByteArray(), cancellationToken);
 	}
 }

@@ -34,10 +34,11 @@ var builder = Host.CreateApplicationBuilder(args);
 		.AddNatsGlobPatternExchange("*")
 		.AddNatsMessageQueue(config => config
 			.ConfigureResolveConnection(sp => (NatsConnection)sp.GetRequiredService<INatsConnection>())
-			// 這裡刻意只有 processor。實測「同一條鏈裡混用 AddProcessor 與 AddHandler」時
-			// handler 完全收不到訊息，所以房間層的斷線事件訂閱改用 NATS client 自己訂
-			// （見 Common/Rooms/RoomDisconnectSubscriber.cs）。
-			.AddProcessor<InboundProcessor>("command.inbound", "command.inbound"));
+			// processor 與 handler 在同一條鏈裡共存沒有問題（實測過兩者都會被呼叫）。用哪一種
+			// 取決於語意：command.inbound 要回 ack 所以是 processor，斷線事件是
+			// fire-and-forget 所以是 handler。
+			.AddProcessor<InboundProcessor>("command.inbound", "command.inbound")
+			.AddHandler<RoomDisconnectHandler>(RoomDisconnectHandler.Subject, RoomDisconnectHandler.QueueGroup));
 }
 
 var host = builder.Build();

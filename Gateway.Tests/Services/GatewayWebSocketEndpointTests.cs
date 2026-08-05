@@ -31,6 +31,8 @@ public class GatewayWebSocketEndpointTests
 	// 完全看不到。這個 harness 本身就是踩過那個坑之後加的。
 	private readonly ConcurrentBag<string> m_ServerErrors = [];
 
+	private readonly IConnectionEventPublisher m_Events = Substitute.For<IConnectionEventPublisher>();
+
 	[Fact]
 	public async Task Handshake_IsForbidden_WhenTheOriginIsNotOnTheAllowlist()
 	{
@@ -196,6 +198,55 @@ public class GatewayWebSocketEndpointTests
 		}
 	}
 
+	[Fact]
+	public async Task Disconnect_StillPublishesTheEvent_WhenTheClientAbortsTheConnection()
+	{
+		// 回歸測試，守住一個活過兩輪端到端驗證的 bug：斷線清理原本吃 minimal API 注入的
+		// CancellationToken，而那就是 HttpContext.RequestAborted——client 一斷線它就已經取消，
+		// 於是 publish 直接被取消掉，房間層的寬限期整組是死的，而且一行 log 都沒有。
+		//
+		// 這裡刻意斷言「收到事件時那個 token 還沒被取消」，而不只是「有收到事件」：後者在
+		// mock 上永遠會過（mock 不理會取消），正是原本 175 條單元測試全綠卻沒抓到的原因。
+		var published = new TaskCompletionSource<(string NodeId, string Principal, bool TokenAlreadyCancelled)>();
+
+		m_Events
+			.When(events => events.PublishDisconnectedAsync(
+				Arg.Any<string>(),
+				Arg.Any<string>(),
+				Arg.Any<string>(),
+				Arg.Any<CancellationToken>()))
+			.Do(call => published.TrySetResult((
+				call.ArgAt<string>(1),
+				call.ArgAt<string>(2),
+				call.ArgAt<CancellationToken>(3).IsCancellationRequested)));
+
+		var (app, wsUri, _) = await StartGatewayAsync(Substitute.For<IInboundMessageHandler>());
+
+		try
+		{
+			using var client = new ClientWebSocket();
+			client.Options.SetRequestHeader("Origin", AllowedOrigin);
+			await client.ConnectAsync(wsUri, CancellationToken.None);
+
+			using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+
+			// 用 Abort 而不是 CloseAsync：真實世界的斷線（關分頁、網路斷、行程被殺）都是這一種，
+			// 而它才會讓 RequestAborted 觸發。
+			client.Abort();
+
+			var result = await published.Task.WaitAsync(cts.Token);
+
+			Assert.Empty(m_ServerErrors);
+			Assert.Equal("test-node", result.NodeId);
+			Assert.Equal(Principal, result.Principal);
+			Assert.False(result.TokenAlreadyCancelled);
+		}
+		finally
+		{
+			await app.StopAsync();
+		}
+	}
+
 	private async Task<(WebApplication App, Uri WsUri, IConnectionAuthenticator Authenticator)> StartGatewayAsync(
 		IInboundMessageHandler inbound)
 	{
@@ -211,7 +262,7 @@ public class GatewayWebSocketEndpointTests
 		builder.Services.AddSingleton(new AllowedOrigins([AllowedOrigin]));
 		builder.Services.AddSingleton<ConnectionRegistry>();
 		builder.Services.AddSingleton(Substitute.For<IConnectionDirectory>());
-		builder.Services.AddSingleton(Substitute.For<IConnectionEventPublisher>());
+		builder.Services.AddSingleton(m_Events);
 		builder.Services.AddSingleton(authenticator);
 		builder.Services.AddSingleton<ConnectionLifecycle>();
 		builder.Services.AddSingleton(inbound);

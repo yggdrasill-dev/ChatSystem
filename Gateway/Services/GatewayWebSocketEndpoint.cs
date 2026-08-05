@@ -16,6 +16,9 @@ public static class GatewayWebSocketEndpoint
 	//    收得下也送不出去，不如在這裡就拒絕。
 	private const int MaxMessageBytes = 256 * 1024;
 
+	// 斷線清理自己的期限，跟請求的存活無關——理由見下面 finally 的註解。
+	private static readonly TimeSpan _CleanupTimeout = TimeSpan.FromSeconds(5);
+
 	public static void MapGatewayWebSocket(this WebApplication app, string pattern = "/ws")
 	{
 		app.Map(pattern, async (
@@ -76,7 +79,16 @@ public static class GatewayWebSocketEndpoint
 			}
 			finally
 			{
-				await lifecycle.OnDisconnectedAsync(connection.ConnectionId, connection.Principal, cancellationToken);
+				// **不能用請求的 cancellationToken**：它就是 HttpContext.RequestAborted，而 client
+				// 一斷線（關分頁、網路斷、行程被殺）它就已經被取消了。拿它去做斷線清理等於
+				// 「因為連線斷了，所以不清理連線」。真實症狀是 events.connection.disconnected
+				// 從來沒被送出去，房間層的寬限期整組是死的——而且完全沒有 log。
+				//
+				// 給清理一個自己的期限而不是 CancellationToken.None：關站時所有連線同時收尾，
+				// 沒有上界會把 shutdown 拖住。
+				using var cleanup = new CancellationTokenSource(_CleanupTimeout);
+
+				await lifecycle.OnDisconnectedAsync(connection.ConnectionId, connection.Principal, cleanup.Token);
 				logger.LogInformation("{ConnectionId} disconnected.", connection.ConnectionId);
 			}
 		});

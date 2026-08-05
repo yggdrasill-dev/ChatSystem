@@ -62,8 +62,12 @@ public sealed class ConnectionLifecycle(
 		}
 		catch (OperationCanceledException)
 		{
-			// 關站時每條連線都會走到這裡，不是異常狀況，不能用 Error 把 log 洗掉。
-			logger.LogDebug("Disconnected event for {ConnectionId} was cancelled, likely shutdown.", connectionId);
+			// 呼叫端刻意不再傳請求的 token 進來（見 GatewayWebSocketEndpoint 的 finally），
+			// 所以走到這裡代表清理自己的期限到了——訂閱端不會知道這條連線斷了，是真的異常狀況。
+			//
+			// 這一行原本記 Debug，理由寫的是「關站時每條連線都會走到這裡」。結果它把一個
+			// 「事件從來沒發出去」的 bug 藏了整整兩輪端到端驗證。
+			logger.LogWarning("Disconnected event for {ConnectionId} timed out before it was published.", connectionId);
 		}
 		catch (Exception ex)
 		{

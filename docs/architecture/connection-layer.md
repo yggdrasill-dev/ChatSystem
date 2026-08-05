@@ -445,7 +445,9 @@ public interface IConnectionEventPublisher
 }
 ```
 
-**這個 publisher 用原生 `INatsConnection` 而不是 Adaptare 的 `IMessageSender`**——理由是要跟訂閱端（房間層，原生訂）**對稱**，不是「這條通道必須用原生」。實測 Adaptare 的 publish 不是「把 payload 原樣發到字面 subject」，所以「Adaptare 發、原生訂」收不到任何東西；兩端一致就會通，用哪一套都行。Adaptare 實際在 wire 上送什麼目前不知道，完整的排除過程與未解問題見 `room-layer.md` 第 9 節。
+這個 publisher 跟系統裡其他每一條通道一樣走 Adaptare 的 `IMessageSender`。它曾經短暫改用原生 `INatsConnection`，理由寫的是「Adaptare 的 publish 不會落在字面 subject」——**那個診斷是錯的，已推翻**（實測 subject、payload、目標 server 全部一致），完整過程見 `room-layer.md` 第 9 節。
+
+**這條事件通道有一個必須守住的性質：發布它的 cancellation token 不能是那條正在死掉的連線自己的 token。** 這不是 messaging 元件的問題，而是這個事件的本質——它**只在連線已經斷掉之後才發**，所以任何「連線還活著」才有效的 token 拿到這裡都必然已經取消。`GatewayWebSocketEndpoint` 的 `finally` 因此用自己的有界 `CancellationTokenSource`（5 秒）而不是請求注入的 `CancellationToken`（那就是 `HttpContext.RequestAborted`）。原本傳請求 token 的版本讓這個事件**從來沒有被送出去過**，而且沒有 log。
 
 subject 是 `events.connection.disconnected`，**刻意不放在 `connect.*` 家族**：那個前綴目前的意思是「投遞給某個 Gateway 節點」（`connect.deliver.{nodeId}`、`connect.terminate.{nodeId}`），而這是反方向的事件廣播、沒有特定目標角色。用 `events.*` 開一個明確的事件命名空間，也避免 `connect.` 跟 `connection.` 只差三個字母的辨識風險。
 

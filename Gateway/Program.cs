@@ -44,14 +44,17 @@ var builder = WebApplication.CreateBuilder(args);
 
 	// 這個 process 唯一一次 Adaptare message queue 註冊。多一次就會讓每個訂閱被建立兩份、
 	// 每則下行訊息被投遞兩次——理由見 Common/NatsMessagingRegistration.cs。
+	//
+	// exchange 只註冊一次、位置也不重要：這裡曾經前後各放一個，是在追斷線事件時猜「順序有影響」
+	// 留下的。實測 exchange 註冊在 queue 之前或之後都送得到，而沒有匹配的 exchange 會直接丟
+	// MessageSenderNotFoundException 而不是靜默丟掉訊息。
 	builder.Services
 		.AddMessageQueue()
 		.AddNatsGlobPatternExchange("*")
 		.AddNatsMessageQueue(config => config
 			.ConfigureResolveConnection(sp => (NatsConnection)sp.GetRequiredService<INatsConnection>())
 			.AddHandler<DeliverPacketHandler>($"connect.deliver.{nodeId.Value}")
-			.AddHandler<TerminatePacketHandler>($"connect.terminate.{nodeId.Value}"))
-		.AddNatsGlobPatternExchange("*");
+			.AddHandler<TerminatePacketHandler>($"connect.terminate.{nodeId.Value}"));
 
 	builder.Services.AddHostedService<ConnectionHeartbeatService>();
 }
