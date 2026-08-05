@@ -6,6 +6,7 @@
   <Project Path="Common.Tests/Common.Tests.csproj" />
   <Project Path="Common/Common.csproj" />
   <Project Path="Dispatcher.Tests/Dispatcher.Tests.csproj" />
+  <Project Path="E2E.Tests/E2E.Tests.csproj" />
   <Project Path="Dispatcher/Dispatcher.csproj" />
   <Project Path="Gateway.Tests/Gateway.Tests.csproj" />
   <Project Path="Gateway/Gateway.csproj" />

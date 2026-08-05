@@ -402,7 +402,7 @@ internal sealed class RoomGraceSweeper(
 ## 9. 待確認 / 後續事項
 
 - **已完成**：持久層的抽象與 Redis 實作。`Common/Rooms/`（`Room`、`IRoomStore`、`IRoomBanList`、`RedisRoomStore`、`RedisRoomBanList`、`RoomKeys`）與 `Common/RoomLayerServiceCollectionExtensions.cs` 的 `AddRoomStore(redisServiceKey)`。過程中把 6.1 的介面從 `Get` + `Update` 改成意圖式操作（見該節），並確認了 hash tag 的取捨。**`IRoomMembership` 還沒實作**——它是暫時狀態不是持久層，會跟 handler 一起做。
-- **已完成**：`IRoomMembership`／`RedisRoomMembership`（6.2）、`room.proto`、8 個 handler、`RoomBroadcaster`、`RoomPassword`（PBKDF2-SHA256、per-room salt、固定時間比較）、`RoomGraceSweeper`、`RoomDisconnectHandler`，以及 `AddRoomPackets()`／`AddRoomGraceSweeper()`。`CommandRouter` 掛上 `room-store` 與 `identity-store` 兩個 keyed Redis，AppHost 新增 `room-store`。**協定層的 registry 從此有內容**——「任何 client 命令都回 `UNKNOWN_SUBJECT`」那個中間態結束了。
+- **已完成**：`IRoomMembership`／`RedisRoomMembership`（6.2）、`room.proto`、8 個 handler、`RoomBroadcaster`、`RoomPassword`（PBKDF2-SHA256、per-room salt、固定時間比較）、`RoomGraceSweeper`、`RoomDisconnectHandler`，以及 `AddRoomPackets()`／`AddRoomMembershipMaintenance()`。`CommandRouter` 掛上 `room-store` 與 `identity-store` 兩個 keyed Redis，AppHost 新增 `room-store`。**協定層的 registry 從此有內容**——「任何 client 命令都回 `UNKNOWN_SUBJECT`」那個中間態結束了。
 - **文件原本缺的兩件事**（兩件都會直接壞掉，已補上並有測試）：
   1. **切換房間時要對舊房間廣播 `RoomMemberLeft`**。5.1 的序列圖只畫了退舊房與加入新房，沒有通知舊房間的成員——少了它，舊房間的 client 名單上會留一個永遠不會消失的幽靈（sweeper 只處理寬限期到期，明確離開不走那條路）。
   2. **重連時不能廣播 `RoomMemberJoined`**（見 ADR-2 的補充）。
@@ -413,7 +413,12 @@ internal sealed class RoomGraceSweeper(
   - **`room.list` 的人數用 `GetMembersAsync().Count`** 而不是數 hash 的欄位數，否則會把寬限期已過、還沒被 sweeper 清掉的幽靈算進去。代價是在 `ListOpenAsync` 的 N+1 之上又多一輪 N——§8 把分頁列為「先不做」時心裡有數的成本又長了一點。
   - **`RoomBroadcaster` 的回覆直接送回 `context.ConnectionId`**，不查 Presence：那條連線就在 context 裡，而且 Presence 可能已經指向別的連線（Supersede），查了反而回錯人。
 - **端到端驗證（跑真的 AppHost，兩個 client 分別連到兩個 Gateway 複本，所以每次廣播都必須跨節點）：22 項全部通過。** 涵蓋建房、密碼房（對／錯）、加入與名單、`room.list` 的人數與 `has_password`、非房主被拒、踢人（含 ADR-5 的「連線不關」）、封鎖後不能加入、改設定清掉密碼、關房與已關閉房間、**跨節點的 `RoomMemberJoined`／`RoomMemberLeft`／`RoomClosed` 廣播**，以及**寬限期完整的一輪**（斷線標記 → 重連無感 → 到期後 sweeper 廣播離開，log 確認 `Marking` ×5、`Swept` ×1）。
-  - 驗證腳本在 `scratchpad/RoomE2E`（引用 `Common`，用真的 protobuf 型別），可重複執行。
+  - **驗證已經是 repo 裡的專案：`E2E.Tests`**（10 項，43 秒）。原本那份腳本放在暫存目錄，隨 session 一起蒸發了——而文件上寫著它「可重複執行」，所以那句話有一段時間是假的。現在它用 `Aspire.Hosting.Testing` 自己啟整個 AppHost（4 個服務含 Gateway ×2 replica + 4 個容器），不需要手動抄 Aspire 分配的 port。
+    - **預設會被 Skip**，要 `CHATSYSTEM_E2E=1` 才跑（需要 Docker）：`$env:CHATSYSTEM_E2E='1'; dotnet test E2E.Tests`。理由是它會把 `dotnet test` 從 2 秒變成 1 分鐘——常跑不動的測試等於沒有測試。
+    - **假登入後門只在測試 process 的環境變數裡打開**（`Login__AllowFakeIdTokens=true`），repo 裡不會有一份「後門是開的」設定檔。同時釘住 `ASPNETCORE_ENVIRONMENT=Development`，因為那是後門的第二道鎖，也是 Gateway 讀到 Origin allowlist 的條件（allowlist 空的是 fail-closed，會全部 403）。
+    - **跨節點是被斷言的，不是被推論的**：連線前後各照一張 `Conn:*` 的快照，差集就是這個測試自己開的兩條連線，然後斷言它們的 `nodeId` 不同。如果兩條剛好落在同一個 Gateway，測試會紅——因為那時它就沒有驗到它宣稱要驗的東西。
+    - 這一組刻意**不**重跑 `Integration.Tests` 已經釘住的每一條 handler 行為，而是偏重下面那三件 Direct 蓋不到的事。
+  - **`38a8716` 之後重跑過一次全綠**（那個 commit 把事件通道從原生 NATS 收回 Adaptare、`CommandRouter` 的鏈裡多掛一個 `AddHandler`、`Gateway` 少一個 exchange——三處都落在「只有真 NATS 蓋得到」的範圍）。寬限期那一條實測 **39 秒**（5 秒確認沒有動靜 + 30 秒寬限期 + sweeper 間隔），時間對得上真實機制而不是提早收到。
   - **功能面已經搬進 `Integration.Tests`**（跑在 `Adaptare.Direct` 上，不需要 NATS／Redis／AppHost，全部 0.6 秒跑完）。那條路徑上是真的元件：`InboundBridge` → `InboundProcessor` → `PacketRegistry` → 房間層 handler → `RoomBroadcaster` → `PacketPublisher` → `OutboundGateway` → 真的 `DispatchHandler`，只有 store 換成 in-memory 替身、最末端換成記錄用的 handler。**寬限期那一輪也在裡面**（用可推進的 `TimeProvider` + 直接呼叫 `SweepAsync`，把真 NATS 要等 60 秒的那一項變成毫秒級）。
   - 真 NATS 的端到端仍然不可取代的三件事：**production 的 messaging 接線**（每個 `Program.cs` 那條鏈綁 transport，換不成 Direct）、**wire format**（Direct 傳同一個參考，不會像 NATS 把 0 bytes 變成 null——第一個 bug 正是那類）、**跨節點 fan-out**（一個 process 只有一個 Direct queue）。
   - 到達全綠之前修了三個 bug，全部**不在房間層**：`InboundAck` 的空 ack（任何成功的命令都會殺掉連線）、`AddNatsMessaging()` 造成的下行訊息重複投遞、以及斷線事件被自己的 cancellation token 掐死。前兩個見 `protocol-layer.md` 第 9 節，第三個見下面。

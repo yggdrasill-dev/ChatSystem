@@ -1,0 +1,146 @@
+using Aspire.Hosting;
+using Aspire.Hosting.ApplicationModel;
+using Aspire.Hosting.Testing;
+using StackExchange.Redis;
+
+namespace E2E.Tests;
+
+// 啟動真的 AppHost 一次，整組測試共用。
+//
+// 為什麼要有這一組測試：`Integration.Tests` 跑在 Adaptare.Direct 上、0.6 秒跑完，功能面已經
+// 蓋得比這裡密。但有三件事它結構上蓋不到，而三個真實 bug 全都落在那三件事裡：
+//   1. **production 的 messaging 接線**——每個 Program.cs 那條 AddNatsMessageQueue 鏈綁 transport，
+//      換不成 Direct。重複註冊、handler 沒掛上，都只在這裡看得見。
+//   2. **wire format**——Direct 傳的是同一個物件參考，不會像 NATS 把 0 bytes 變成 null。
+//   3. **跨節點 fan-out**——一個 process 只有一個 Direct queue，跨 Gateway 節點的投遞無法模擬。
+// 所以這裡刻意偏重那三件事，不重複 Integration.Tests 已經釘住的每一條 handler 行為。
+public sealed class AppHostFixture : IAsyncLifetime
+{
+	// 容器可能要下載，第一次跑給寬鬆一點。
+	private static readonly TimeSpan _StartupTimeout = TimeSpan.FromMinutes(5);
+
+	private DistributedApplication? m_App;
+
+	public DistributedApplication App => m_App ?? throw new InvalidOperationException("AppHost 沒有啟動。");
+
+	public Uri GatewayHttp { get; private set; } = null!;
+
+	public Uri WebBffHttp { get; private set; } = null!;
+
+	private string ConnectionDirectoryConnectionString { get; set; } = null!;
+
+	public async Task InitializeAsync()
+	{
+		// 閘門關著就不要花一分鐘啟容器——所有測試都會被 Skip，fixture 也不該做事。
+		if (!E2EFactAttribute.Enabled)
+			return;
+
+		var builder = await DistributedApplicationTestingBuilder
+			.CreateAsync<Projects.ChatSystem_AppHost>()
+			.ConfigureAwait(false);
+
+		// 開發用的假登入後門有兩道鎖，這裡兩道都要處理：
+		//   - Login:AllowFakeIdTokens：appsettings 裡刻意留 false，只在這個 process 的環境變數打開，
+		//     所以 repo 裡不會有一份「後門是開的」設定檔
+		//   - Development 環境：同時也是 Gateway 讀到 Origin allowlist 的條件
+		//     （allowlist 在 appsettings.Development.json；空 allowlist 是 fail-closed，會全部 403）
+		Configure(builder, "web-bff", ("Login__AllowFakeIdTokens", "true"));
+		Configure(builder, "gateway");
+
+		m_App = await builder.BuildAsync().ConfigureAwait(false);
+		await m_App.StartAsync().ConfigureAwait(false);
+
+		GatewayHttp = m_App.GetEndpoint("gateway", "http");
+		WebBffHttp = m_App.GetEndpoint("web-bff", "http");
+		ConnectionDirectoryConnectionString =
+			await m_App.GetConnectionStringAsync("connection-directory").ConfigureAwait(false)
+			?? throw new InvalidOperationException("拿不到 connection-directory 的連線字串。");
+
+		// 不用 WaitForResourceAsync：Gateway 開了 replica，資源名稱會變成 gateway-0/gateway-1 之類的
+		// 衍生名字，猜名字比直接問傳輸層脆弱。這裡直接打 endpoint，能回應就是真的可以用了。
+		await WaitUntilReachableAsync(GatewayHttp, "/").ConfigureAwait(false);
+		await WaitUntilReachableAsync(WebBffHttp, "/login/nonce").ConfigureAwait(false);
+	}
+
+	public async Task DisposeAsync()
+	{
+		if (m_App is not null)
+			await m_App.DisposeAsync().ConfigureAwait(false);
+	}
+
+	public HttpClient CreateWebBffClient() =>
+		// 明確指定 "http"：這些專案 http/https 兩個 endpoint 都有，不指定會分不出要哪一個。
+		// 用 http 是刻意的——session cookie 帶 Secure，走 https 時 CookieContainer 的行為會多一層
+		// 變數，而我們本來就打算自己從 Set-Cookie 把 token 抽出來（見 ChatClient）。
+		App.CreateHttpClient("web-bff", "http");
+
+	// connectionId -> nodeId 的快照。key 前綴跟 RedisConnectionDirectory.Key 綁在一起（`Conn:{id}`），
+	// 那是 internal 的實作細節，改了這裡要一起改——換來的是「兩條連線真的落在不同節點」可以被
+	// 精確斷言，而不是靠「廣播收到了」去推論。
+	public async Task<IReadOnlyDictionary<string, string>> SnapshotConnectionsAsync()
+	{
+		await using var redis = await ConnectionMultiplexer
+			.ConnectAsync(ConnectionDirectoryConnectionString)
+			.ConfigureAwait(false);
+
+		var database = redis.GetDatabase();
+		var snapshot = new Dictionary<string, string>();
+
+		foreach (var key in redis.GetServer(redis.GetEndPoints()[0]).Keys(pattern: "Conn:*"))
+		{
+			var nodeId = await database.StringGetAsync(key).ConfigureAwait(false);
+
+			if (!nodeId.IsNullOrEmpty)
+				snapshot[key.ToString()] = nodeId.ToString();
+		}
+
+		return snapshot;
+	}
+
+	private static void Configure(
+		IDistributedApplicationBuilder builder,
+		string resourceName,
+		params (string Key, string Value)[] environment)
+	{
+		var resource = builder.Resources.OfType<ProjectResource>().Single(r => r.Name == resourceName);
+		var resourceBuilder = builder.CreateResourceBuilder(resource);
+
+		resourceBuilder.WithEnvironment("ASPNETCORE_ENVIRONMENT", "Development");
+
+		foreach (var (key, value) in environment)
+			resourceBuilder.WithEnvironment(key, value);
+	}
+
+	private static async Task WaitUntilReachableAsync(Uri baseUri, string path)
+	{
+		using var http = new HttpClient { BaseAddress = baseUri, Timeout = TimeSpan.FromSeconds(5) };
+
+		var deadline = DateTime.UtcNow + _StartupTimeout;
+		Exception? last = null;
+
+		while (DateTime.UtcNow < deadline)
+		{
+			try
+			{
+				using var response = await http.GetAsync(path).ConfigureAwait(false);
+
+				if (response.IsSuccessStatusCode)
+					return;
+			}
+			catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+			{
+				last = ex;
+			}
+
+			await Task.Delay(500).ConfigureAwait(false);
+		}
+
+		throw new TimeoutException($"{baseUri}{path} 在 {_StartupTimeout} 內沒有起來。", last);
+	}
+}
+
+[CollectionDefinition(Name)]
+public sealed class AppHostCollection : ICollectionFixture<AppHostFixture>
+{
+	public const string Name = "apphost";
+}

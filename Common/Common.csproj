@@ -16,6 +16,8 @@
     <InternalsVisibleTo Include="Common.Tests" />
     <!-- 整合測試要直接呼叫 RoomGraceSweeper.SweepAsync，避免等 10 秒的計時器 -->
     <InternalsVisibleTo Include="Integration.Tests" />
+    <!-- 端到端測試只讀寬限期與 sweeper 間隔這兩個常數，用來算等待時間——不抄一份數字 -->
+    <InternalsVisibleTo Include="E2E.Tests" />
   </ItemGroup>
 
   <ItemGroup>
