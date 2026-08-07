@@ -142,9 +142,19 @@ public class RoomFlowE2ETests(AppHostFixture fixture)
 
 		Assert.Equal(RoomOperationReply.Types.Status.Banned, banned.Status);
 
+		// **必須等 unban 真的完成才能讓 bob 送 join。** 兩個命令來自不同連線，而
+		// protocol-layer.md ADR-2 只保證「單一連線同時只有一則訊息 in-flight」——跨連線沒有
+		// 任何順序保證。不等的話 join 會讀到還沒被清掉的封鎖名單，回 BANNED 而不是 room.joined。
+		//
+		// 上面 ban + kick 那段沒有這個問題，是因為兩者都從 alice 送出（同一條連線＝有序），
+		// 而且測試接著等 bob 的 room.kicked，那等於間接證明 ban 已經生效。
+		alice.Clear();
 		await alice.SendAsync(
 			"room.ban",
 			new BanMemberRequest { RoomId = roomId, TargetUserId = bob.UserId, Unban = true });
+
+		var unbanned = await alice.ExpectAsync("room.reply", RoomOperationReply.Parser);
+		Assert.Equal(RoomOperationReply.Types.Status.Ok, unbanned.Status);
 
 		bob.Clear();
 		await bob.SendAsync("room.join", new JoinRoomRequest { RoomId = roomId });
