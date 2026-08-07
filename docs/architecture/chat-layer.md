@@ -15,7 +15,7 @@
 
 1. **訊息收發**：把一則訊息廣播給房間內所有在線成員。
 2. **訊息記錄**：訊息的持久化、房間內的排序、歷史分頁查詢。
-3. **保留期限**：訊息存多久、過期怎麼清。
+3. **保留期限**：訊息存多久、過期怎麼清，以及**房間被刪掉時怎麼清**（ADR-6 與 ADR-10 是兩條不同的清理路徑）。
 4. **本系統的正式持久儲存選型**，並把房間層 provisional 的部分一起接手。
 
 明確排除：誰該收到（房間層的 `IRoomMembership`）、怎麼投遞（連線層的 `IOutboundGateway` → `Dispatcher`）、身分怎麼證明（身分層的 handshake 驗證）。
@@ -278,7 +278,7 @@ message ChatHistory {
 message ChatOperationReply {
 	enum Status {
 		OK = 0;
-		// 不在任何房間。房間被關掉也走這一條——關房會清空成員名單，
+		// 不在任何房間。房間被刪掉也走這一條——關房＝刪房（ADR-10）且會清空成員名單，
 		// 所以兩件事在這裡是同一個結果（ADR-8）。
 		NOT_IN_ROOM = 1;
 		BODY_EMPTY = 2;
@@ -293,7 +293,7 @@ message ChatOperationReply {
 
 **`OK = 0` 在這裡是安全的**，但理由要寫清楚，因為 `protocol-layer.md` §9 有一條相反方向的教訓（`InboundAck.OK` 原本是 0，序列化成 0 bytes，經過 NATS 回來變 `null`，每個成功的命令都殺掉連線）。差別在於那條教訓只適用於 **request/reply 的 reply**——「0 bytes 的回覆」跟「沒有回覆」在那裡無法區分。`ChatOperationReply` 走的是一般下行投遞（`IPacketPublisher`），沒有「沒有回覆」這個對立面；而且成功路徑上 `room_id` 永遠非空，本來就不會序列化成 0 bytes。與 `RoomOperationReply` 形狀一致比自作聰明重要。
 
-**沒有 `ROOM_CLOSED`**：初稿有，因為初稿的 `UPDATE ... WHERE NOT is_closed` 分得出那兩種情況。改成 append-only 之後不再多讀一次房間，而關房本來就會清空成員名單，所以「房間關了」對送訊息的人來說就是「你不在任何房間」。少一個狀態、少一次 Redis 讀取——**拿掉資料庫中心的設計讓這一層變小了，不是變大**。
+**沒有 `ROOM_CLOSED`**：初稿有，因為初稿的 `UPDATE ... WHERE NOT is_closed` 分得出那兩種情況。改成 append-only 之後不再多讀一次房間，而關房本來就會清空成員名單，所以「房間關了」對送訊息的人來說就是「你不在任何房間」。少一個狀態、少一次 Redis 讀取——**拿掉資料庫中心的設計讓這一層變小了，不是變大**。ADR-10 之後這個決定更強：**「已關閉的房間」這個狀態在系統裡根本不存在了**，所以連「本層剛好不需要區分」這個理由都不必用上；房間層自己的 `RoomOperationReply.ROOM_CLOSED` 也會一起消失。
 
 ### 6.3 `IChatMessageStore`（`Common.Chat`）
 
@@ -381,20 +381,20 @@ CREATE TABLE rooms (
     name          text        NOT NULL,
     password_hash text        NULL,          -- NULL = 公開房
     owner_user_id text        NOT NULL,
-    created_at    timestamptz NOT NULL,
-    is_closed     boolean     NOT NULL DEFAULT false
+    created_at    timestamptz NOT NULL
 );
 -- 沒有 last_seq。排序鍵由應用產生，rooms 完全不在訊息的寫入路徑上（ADR-2）。
+-- 也沒有 is_closed。關房＝刪房，「已關閉的房間」這個狀態不存在（ADR-10）。
 
 CREATE TABLE room_bans (
-    room_id   text        NOT NULL REFERENCES rooms(room_id),
+    room_id   text        NOT NULL REFERENCES rooms(room_id) ON DELETE CASCADE,
     user_id   text        NOT NULL,
     banned_at timestamptz NOT NULL,
     PRIMARY KEY (room_id, user_id)
 );
 
 CREATE TABLE messages (
-    room_id             text        NOT NULL REFERENCES rooms(room_id),
+    room_id             text        NOT NULL REFERENCES rooms(room_id) ON DELETE CASCADE,
     order_key           bigint      NOT NULL,
     sender_user_id      text        NOT NULL,
     sender_display_name text        NOT NULL,
@@ -407,6 +407,7 @@ CREATE TABLE messages (
 CREATE INDEX messages_sent_at_idx ON messages (sent_at);
 ```
 
+- **兩個 FK 都是 `ON DELETE CASCADE`，那不是防禦性寫法而是 ADR-10 的實作**：刪掉一列 `rooms` 就把該房的封鎖名單與全部訊息一起帶走，房間層不需要認識聊天層、聊天層也不需要訂閱任何事件。
 - **主鍵 `(room_id, order_key)` 直接服務唯一的讀取路徑**，不需要任何額外索引。**排序鍵稀疏對 B-tree 完全沒有影響**——`bigint` 不管值多大都是 8 bytes，索引不在乎密度，keyset 分頁在稀疏鍵上行為跟連續鍵完全一樣。稀疏唯一殺掉的是「對鍵做算術」，而那正是 ADR-2 明確放棄的東西。
 - 主鍵同時是**跨 process 碰撞的守門**（6.4）：撞到就是 `23505`，`TryAppendAsync` 回 `false`。
 - **`room_bans` 用複合主鍵而不是 surrogate id**。房間層的 `IRoomBanList` 三個方法分別對應 `SELECT` / `INSERT ... ON CONFLICT DO NOTHING` / `DELETE`，全部靠主鍵，跟 Redis Set 版本的原子性語意一樣，所以 `room-layer.md` 6.1 那句「`IRoomBanList` 因此不需要 Try 語意」遷移後仍然成立。
@@ -535,6 +536,7 @@ AppHost 新增一個 `chat-db` 資源（`builder.AddPostgres("chat-db").WithData
   - **分區的代價是現在就要付的**，而 `DELETE` 的代價是量大了才會痛：分區表的主鍵**必須包含分區鍵**，所以 `(room_id, order_key)` 得變成 `(room_id, order_key, sent_at)`；而 §5.2 的查詢條件裡沒有 `sent_at`，planner 無法做分區裁剪，每次翻頁都要掃過所有分區。換句話說 (a) 會讓**唯一的讀取路徑變慢**，換來一個目前不存在的清理問題被解決。這跟 `room-layer.md` §8「房間列表的分頁先不做，等數量成為問題再說」是同一種判斷。
   - **Sweeper 必須是 idempotent**，理由跟 `RoomGraceSweeper` 完全一樣：`CommandRouter` 是多複本，每個複本都跑自己的 sweeper。`DELETE ... WHERE sent_at < $cutoff` 天生 idempotent，兩個複本同時跑最多是白做工。
   - **正確性不依賴 sweeper**：它掛掉的後果是磁碟成長，不是查詢結果錯誤。所以不需要對應的「讀取時過濾」機制——**過期但還沒被刪的訊息仍然查得到，這是可接受的**。
+  - **sweeper 不負責房間被刪掉時的清理**，那條路徑是 `ON DELETE CASCADE`（ADR-10）。兩者的規模差一到兩個數量級，所以一個要分批、一個可以一次刪完；混在一起會讓 sweeper 需要知道「房間存不存在」，那是它不該認識的事。
   - **90 天是暫定值，未經任何驗證**，處理方式比照 `room-layer.md` 的 30 秒寬限期。
   - **觸發條件**：當單輪清理的時間長到影響正常查詢（鎖競爭、autovacuum 追不上造成的 bloat），就改用 (a)。需要實測數據。
 
@@ -546,7 +548,7 @@ AppHost 新增一個 `chat-db` 資源（`builder.AddPostgres("chat-db").WithData
 - **為什麼不用 filter**：`FilterDecision` 只有 `Allow` / `Drop` / `Terminate`，**沒有辦法回一則訊息給 client**。而 `protocol-layer.md` ADR-8 對上層的隱含要求正是「業務失敗必須用明確的下行訊息回覆，否則 client 會什麼都收不到、看起來像卡住」。被限流的 client 收到 `Drop` 就是沉默——正是那條要求要避免的狀況。
 - **Consequences**：
   - 失去「在 payload 解析之前擋掉」的好處。但那個好處很小：payload 解析是一次小訊息的 protobuf parse，真正的成本是 Postgres 寫入，而那在限流檢查之後。
-  - **`IInboundFilter` 因此仍然沒有使用者**，而它預告的最後一個候選已經用掉了。照 `protocol-layer.md` ADR-6 自己設的條件，**現在應該把它移除**——但那是協定層的變更，不由本文件決定，記在 §10。
+  - **`IInboundFilter` 因此仍然沒有使用者**，而它預告的最後一個候選已經用掉了。照 `protocol-layer.md` ADR-6 自己設的條件，**現在應該把它移除**——但那是協定層的變更，不由本文件決定，記在 §10。**（已執行：整組移除，`CommandRouter` 連帶失去終止連線的能力。）**
   - 限流用 Redis 計數（`CommandRouter` 多複本，記憶體計數器不跨節點）：`INCR Chat:rate:{userId}:{unixSecond}` + `EXPIRE 2`。每則訊息多一次 Redis 往返，加上 ADR-3 那次 `HGET`，熱路徑上總共兩次。
   - **長度上限在領域模型裡**（`ChatMessageDraft.MaxBodyLength`，6.1），不是靠連線層的 256 KB——那個上限防的是記憶體與 NATS `max_payload`，不是「一則聊天訊息該多長」。
 
@@ -554,6 +556,7 @@ AppHost 新增一個 `chat-db` 資源（`builder.AddPostgres("chat-db").WithData
 
 - **Context**：初稿把「房間已關閉不能發言」寫進 `UPDATE rooms SET ... WHERE room_id = $1 AND NOT is_closed`，理由是消除 TOCTOU——先查再寫的話，查完之後房間被關掉，訊息還是進得去。
 - **Decision**：**不消除它**。業務規則回到 handler，`chat.send` 只做 `GetCurrentRoomAsync`，接受「關房正在進行中」那個毫秒級窗口。
+- **ADR-10 之後這條 ADR 的成本又降了一點**：`is_closed` 這個欄位不存在了，所以連「可以把規則寫進 WHERE 子句」這個誘惑都沒有了。殘留的競爭變成「刪房交易已經開始、成員還沒被清」那一瞬間，而那一則訊息會被 `ON DELETE CASCADE` 一起帶走——**後果從「躺在歷史裡」變成「根本不存在」**。
 - **Consequences**：
   - **規則變回看得見的**。藏在 WHERE 子句裡的規則，讀 handler 的人不會知道它存在；而 handler 是所有人排查問題時會先打開的檔案。
   - **窗口比想像中更小**：`room.close` 會清空成員名單（`room-layer.md` §9），所以關房之後 `GetCurrentRoomAsync` 本來就回 `null`。殘留的競爭只有「關房流程跑到一半、成員還沒被清」那一瞬間。
@@ -584,6 +587,24 @@ AppHost 新增一個 `chat-db` 資源（`builder.AddPostgres("chat-db").WithData
   - 落地時本層要改的只有兩處：`IMessageSequencer` 的註冊、以及 `order_key` 語意從「稀疏」變成「連續」。**`IChatMessageStore` 一行都不用改**（append-only 正是 actor 要的形狀）。
   - **語意轉換不會自然銜接**：actor 之前寫入的訊息是稀疏鍵，之後是連續鍵，舊資料無法回溯。缺口偵測只能對「切換點之後」的訊息開啟，那個切換點屆時要明確處理。
 
+### ADR-10：關閉房間＝**刪除**房間，歷史訊息隨之消失
+
+- **Context**：本文件 §9 原本記著一個洞——`room-layer.md` 6.1 刻意用 `IsClosed` 而不真刪，寫下的理由是「歷史訊息如果變成孤兒就麻煩了」；但 `room.close` 會清空成員名單，而 ADR-5 的授權是「你**現在**在這間房嗎」。三者疊起來的結果是**資料還在、保留期內不會被刪、但沒有任何人查得到**。當時列了三個方向都沒定案。
+- **Decision（產品決定，已確認）**：**關房就把訊息清掉**，而且既然訊息不留，房間也不需要留——`IsClosed` 這個狀態整個消失，`room.close` 變成真正的刪除，`messages` 與 `room_bans` 靠 `ON DELETE CASCADE` 一起走。
+- **為什麼這是「刪房」而不是「關房 + 另外清訊息」**：使用者的決定只說訊息不留，技術上仍可以保留 `IsClosed` 再找人來刪訊息。但「找誰來刪」四個答案都比真刪貴：
+  - **(a) `RoomCloseHandler` 直接呼叫聊天層的 store**：房間層就反過來依賴聊天層，而 `room-layer.md` §1 明確把「訊息本身與歷史記錄」排除在該層之外。依賴方向錯了。
+  - **(b) 層間事件（聊天層訂閱「房間已關閉」）**：目前沒有這個機制。`RoomClosed` 是給 client 的**下行封包**，不是內部事件；為此引入一套層間事件是為了一個刪除動作蓋新基礎設施。
+  - **(c) `ChatRetentionSweeper` 順便掃 `is_closed` 的房間**：依賴方向是對的（聊天層本來就依賴房間層），而且 sweeper 已經存在。**但它要求 `is_closed` 這個欄位活著，唯一的目的是告訴清理程序該刪什麼**——那正是「以資料庫為操作中心」的味道，ADR-2 才剛為此推翻過一次設計。
+  - **(d) 真刪 + `ON DELETE CASCADE`**：兩層都不需要認識對方，刪除是原子的，一句 SQL。**選這個。**
+- **而且產品上本來就沒有區分過**：`product-scope.md` §2 與 `room-layer.md` §1 都把這項能力寫成「關閉**／刪除**房間」。`IsClosed` 從來不是產品概念，它是為了避免孤兒訊息而生的實作手段——手段的前提被移除了，手段本身也該走。
+- **Consequences**：
+  - **房間層變小**：`Room.IsClosed` 欄位、`ListOpenAsync` 的過濾、`RoomOperationReply.ROOM_CLOSED`（併入 `ROOM_NOT_FOUND`）、`TryCloseAsync` 的「已經是關閉狀態則回 false」全部消失。`TryCloseAsync` → `TryDeleteAsync`，「房間不存在則回 false」自然保住 idempotency。
+  - **`room-layer.md` 6.1 兩條「刻意接受的競爭」變乾淨**：`TryUpdateSettingsAsync` 與關房併發，改成真刪之後 `UPDATE ... WHERE room_id = $1` 影響 0 列、回 `false`，不再是「改到一間已關閉房間的設定」這種需要解釋為無害的狀態；兩個關房併發也只有一個會刪成功，所以**「`RoomClosed` 被廣播兩次」這條競爭直接消失**。（client 對重複通知仍要 idempotent，理由換成 `RoomMemberLeft` 那個。）
+  - **不可逆，而且沒有救**。誤按「關閉房間」＝該房所有歷史訊息立刻消失，沒有 undo、沒有垃圾桶。**webClient 必須做二次確認**，這是本 ADR 對前端提出的唯一硬要求。
+  - **§9 那個洞消失了**，而且是用最誠實的方式：不是給歷史查詢補一條「曾經是成員」的授權路徑，而是承認資料不該留。`chat.history` 對已刪除的房間回 `NOT_IN_ROOM` 仍然正確——因為使用者確實不在任何房間。
+  - **與 ADR-6 有一個張力，要說清楚**：ADR-6 為了避免長交易與 WAL 暴增，把保留期清理做成分批 `DELETE`；而 CASCADE 是**一次刪完**。兩者不衝突的理由是規模不同——ADR-6 處理的是「全表掃 90 天前的訊息」，這裡是「單一房間的全部訊息」，後者小一到兩個數量級。**觸發條件**：若單一房間的訊息量成長到 CASCADE 造成可觀的鎖等待，就改成 (c)（標記 + sweeper 分批清），屆時 `is_closed` 會以「待清理」的語意回來——**那時它才真的是為清理而存在的欄位，不是為了掩護孤兒訊息**。
+  - **實作時機併入 PostgreSQL 遷移**（ADR-4），不單獨做。`RedisRoomStore` / `RedisRoomBanList` 反正要被 Postgres 版本取代（§9），現在先改 Redis 版本等於同一個 refactor 做兩次。**在遷移完成之前，`IsClosed` 維持現狀——但它已經沒有設計理由了，留著純粹是因為改動不划算。**
+
 ## 8. 明確排除於本階段
 
 - **私訊 / 1-on-1**：`product-scope.md` §3 已排除。`main` 的 `ChatMessage.Scope` 因此不在本層的 proto 裡——**這是刻意不留擴充點**：留一個只有一個值的 enum 只會讓人以為那條路走得通。要做私訊時 fan-out 的名單來源完全不同，本來就不是加一個欄位的事。
@@ -596,15 +617,11 @@ AppHost 新增一個 `chat-db` 資源（`builder.AddPostgres("chat-db").WithData
 
 ## 9. 待確認 / 後續事項
 
-- **關閉的房間，歷史訊息沒有人有權限查**。這是 ADR-5 與房間層互動出來的洞，兩邊各自都合理：
-  - `room-layer.md` 6.1 選「`IsClosed` 而不是真刪」，理由明寫是「歷史訊息如果變成孤兒就麻煩了」；
-  - 但該文件 §9 又寫「`room.close` 先讀名單、再關房、廣播後才清成員」——**關房後成員名單是空的**；
-  - 而 ADR-5 的授權是「你現在在這間房嗎」。三者疊起來：資料還在、保留期內不會被刪、**但沒有任何人查得到**。
-  - 三個方向（都沒定案）：關房時保留成員名單只清 `userRoom` 反向指向；或給歷史查詢一條「曾經是成員」的授權路徑（需要一張參與紀錄表）；或接受現狀並改掉 `room-layer.md` 6.1 那句理由。**第三個最誠實但也最沒用**，那等於承認關房＝歷史消失。
+- ~~**關閉的房間，歷史訊息沒有人有權限查**~~ **已定案（ADR-10）**：關房＝刪房，訊息隨 `ON DELETE CASCADE` 一起刪。原本列的三個方向都沒被選——選的是第四個：**承認這些資料不該留**。這比「補一條曾經是成員的授權路徑」誠實，也讓 `IsClosed` 這個為了掩護孤兒訊息而存在的狀態整個消失。實作併入 PostgreSQL 遷移，理由見 ADR-10 最後一條。
 - **`IUserProfileStore` 只被回答了一半**（ADR-3）。本層需要單筆的 `GetDisplayNameAsync(userId)`；**批次讀 N 個成員的 profile 仍然沒有介面**，而 `RoomJoined.member_user_ids` 要在 UI 上顯示成名字就需要它。答案是**兩個都要**，但批次那個要等 webClient。
 - **房間層的 Redis 遷移完成後，`room-store` 這個資源要怎麼處理**。`rooms` / `room_bans` 搬進 Postgres 之後，`room-store` 只剩 `IRoomMembership`（成員名單、寬限期的 Sorted Set）。保留它（符合 `connection-layer.md` ADR-2 的「每層擁有自己的基礎設施」）或併進 `connection-directory`（同樣是暫時狀態）。傾向後者，但跟 ADR-2 的原則衝突——**沒定案**。
 - **遷移是一次破壞性變更**：`RedisRoomStore` / `RedisRoomBanList` 會被 Postgres 版本取代，`room-layer.md` 6.1 那張 Redis key 設計表會整段作廢。那節的論證仍有保存價值（它解釋了為什麼 `{rooms}` 用 hash tag 而連線層刻意不用），應該改寫成「已被取代」而不是刪掉。**注意：`{rooms}:seq:*` 這個 key 從來沒有存在過**——它只出現在本文件被推翻的第一版設計裡（ADR-2 的 (b)）。
-- **`IInboundFilter` 的去留**（ADR-7）：協定層的變更，需要獨立決定。
+- ~~**`IInboundFilter` 的去留**（ADR-7）：協定層的變更，需要獨立決定。~~ **已移除**，見 `protocol-layer.md` ADR-6 的「執行」段。
 - **暫定值**（全部未經負載測試）：保留期 90 天、清理批次 5000 列 / 每天一輪、每人每秒 10 則、每則 4096 字元、歷史分頁預設 50 則。
 - **測試分層**：
   - `Integration.Tests`（`Adaptare.Direct`、in-memory 替身）可以蓋掉本層**絕大部分**行為——這是 append-only 帶來的好處：初稿的「seq 連續無洞」與「同房序列化」是 Postgres 交易的性質，in-memory 替身怎麼寫都會通過，等於在測自己寫的替身。現在沒有這個問題。
@@ -617,14 +634,17 @@ AppHost 新增一個 `chat-db` 資源（`builder.AddPostgres("chat-db").WithData
 
 - **ADR-7 的 provisional 狀態結束**：`IRoomStore` / `IRoomBanList` 遷入 PostgreSQL（本文件 ADR-4）。
 - **`Room` record 不需要新欄位**。本文件第二版曾要求加一個 `LastSeq`，那隨 ADR-2 的推翻一起取消——**訊息的寫入路徑完全不碰房間資料**。
+- **`Room` 要少一個欄位**：`IsClosed` 刪掉（本文件 ADR-10）。連帶 `IRoomStore.ListOpenAsync` → `ListAsync`、`TryCloseAsync` → `TryDeleteAsync`、`RoomOperationReply.ROOM_CLOSED` 併入 `ROOM_NOT_FOUND`、`Join_RepliesRoomClosed_ForAClosedRoom` 這類測試改寫。**跟遷移同一批做**，不單獨改 Redis 版本。
+- **6.1 那句「用 `IsClosed` 而不是真的刪除」的理由作廢**：它寫的是「房間紀錄如果直接消失，歷史訊息就會變成孤兒（要不要一併刪除是聊天層的決定）」——聊天層的決定就是**一併刪除**（ADR-10），所以那個理由連同它保護的東西一起沒了。
+- **6.1「刻意接受的競爭」有兩條要改寫**：`TryUpdateSettingsAsync` 與關房併發、以及兩個關房併發廣播兩次 `RoomClosed`。真刪之後前者變成「影響 0 列、回 false」，後者**直接消失**。詳見 ADR-10 的 Consequences。
 - **6.1 的 Redis key 設計表作廢**，但論證要保留（見 §9）。
-- **§9 那條「關閉房間之後歷史訊息要保留多久、還能不能查」有答案了，但答案暴露了一個洞**（見 §9 第一條）。該節寫「會回頭影響 `IsClosed` 而非真刪的設計是否足夠」——確實不夠。
+- **§9 那條「關閉房間之後歷史訊息要保留多久、還能不能查」有答案了**：不保留、查不到，因為房間被刪掉時訊息一起刪（ADR-10）。該節寫「會回頭影響 `IsClosed` 而非真刪的設計是否足夠」——答案是**那個設計整個不需要了**。
 - **ADR-2 的 `RoomGraceSweeper` 在本文件 ADR-9 落地時可以消失**（actor reminder 取代輪詢）。該 ADR 明寫輪詢存在的原因就是「沒有排程能力」。
 - `RoomBroadcaster` 多一個使用者（本文件 6.8），行為不變。
 
 ### `protocol-layer.md`
 
-- **ADR-6 的了斷條件到期**：`IInboundFilter` 預告的最後一個候選（per-user 業務限流）確定不放這裡（本文件 ADR-7）。變更本文件不做，但條件已成立。
+- ~~**ADR-6 的了斷條件到期**：`IInboundFilter` 預告的最後一個候選（per-user 業務限流）確定不放這裡（本文件 ADR-7）。變更本文件不做，但條件已成立。~~ **已執行**：`IInboundFilter` 整組移除，連帶 `CommandRouter` 失去終止連線的能力。範圍記在 `protocol-layer.md` ADR-6 的「執行」段。
 - **§9「per-subject／per-user 業務限流：等有業務規則再做」有業務規則了**，但落點是 handler 而不是該節寫的 filter。
 - ADR-2 的「單一連線 1/RTT」第一次有了會實際觸碰它的命令（`chat.history`），觸發條件記在本文件 ADR-5。而它同時也是本文件 ADR-9 成立的前提——單一連線的順序已經被結構性地保證，所以房間 actor 那條路上的「兩跳」不會破壞順序。
 - **ADR-7（依 `connectionId` 分片）與本文件 ADR-9（依 `roomId` 分區）互斥**：分區鍵只能選一個。兩條要一起評估。

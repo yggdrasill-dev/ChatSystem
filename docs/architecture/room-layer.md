@@ -201,14 +201,21 @@ public interface IRoomBanList
 }
 ```
 
-「關閉房間」用 `IsClosed` 而不是真的刪除：歷史訊息屬於聊天層，房間紀錄如果直接消失，歷史訊息就會變成孤兒（要不要一併刪除是聊天層的決定，見第 9 節）。
+~~「關閉房間」用 `IsClosed` 而不是真的刪除：歷史訊息屬於聊天層，房間紀錄如果直接消失，歷史訊息就會變成孤兒（要不要一併刪除是聊天層的決定，見第 9 節）。~~
+
+**這個理由已經作廢。** 聊天層的決定就是一併刪除——關房＝刪房，`messages` 與 `room_bans` 靠 `ON DELETE CASCADE` 跟著走（[chat-layer.md](chat-layer.md) ADR-10，產品決定：這是 demo，歷史訊息沒有長期保留的價值）。`IsClosed` 唯一的存在理由是掩護孤兒訊息，前提消失之後它自己也該消失：
+
+- `Room.IsClosed` 移除，`ListOpenAsync` → `ListAsync`，`TryCloseAsync` → `TryDeleteAsync`（「房間不存在則回 false」自然保住 idempotency），`RoomOperationReply.ROOM_CLOSED` 併入 `ROOM_NOT_FOUND`。
+- **「已關閉的房間」這個狀態在系統裡不再存在**——房間只有「在」與「不在」。
+- **實作併入 PostgreSQL 遷移**（chat-layer ADR-4／ADR-10）：`RedisRoomStore` / `RedisRoomBanList` 反正要被取代，現在先改 Redis 版本等於同一個 refactor 做兩次。**在那之前 `IsClosed` 維持現狀，但它已經沒有設計理由了，留著純粹是因為改動不划算。**
+- **對前端的硬要求**：刪除不可逆、沒有垃圾桶，webClient 的「關閉房間」必須二次確認。
 
 **為什麼不是 `GetAsync` + `UpdateAsync`**：初版設計是那樣，但 read-modify-write 會 lost update——兩個房主同時改設定、或 `room.update` 跟 `room.close` 併發都會出問題。而且**併發語意不是事後可以換掉的東西**，它會滲進每個呼叫端的寫法，所以在還沒有任何實作之前就先改掉。每個變更操作現在都是「一次到位、回傳有沒有生效」。
 
 **刻意接受的競爭**（實作時沒有用 Lua 消除，理由寫在這裡以免日後被「修正」成錯的東西）：
 
-- `TryUpdateSettingsAsync` 與 `TryCloseAsync` 併發：可能改到一個正在被關閉的房間的設定。無害——已關閉的房間，設定沒有意義。
-- 兩個 `TryCloseAsync` 併發：兩邊都可能回 `true`，`RoomClosed` 因此廣播兩次。無害——client 對重複的關閉通知照 idempotent 處理，跟 `RoomMemberLeft` 是同一個要求（見 6.5）。
+- `TryUpdateSettingsAsync` 與 `TryCloseAsync` 併發：可能改到一個正在被關閉的房間的設定。無害——已關閉的房間，設定沒有意義。**遷移後這條會變乾淨**：真刪之後 `UPDATE ... WHERE room_id = $1` 影響 0 列、直接回 `false`，不再需要「無害」這個解釋（[chat-layer.md](chat-layer.md) ADR-10）。
+- 兩個 `TryCloseAsync` 併發：兩邊都可能回 `true`，`RoomClosed` 因此廣播兩次。無害——client 對重複的關閉通知照 idempotent 處理，跟 `RoomMemberLeft` 是同一個要求（見 6.5）。**遷移後這條會消失**：真刪只有一個呼叫刪得到，另一個回 `false` 就不廣播。client 端的 idempotent 要求仍然要留著，但理由換成 `RoomMemberLeft` 那個。
 - `TryCreateAsync` **不能**有競爭：這是唯一需要真正原子的操作，實作用 Redis `SADD` 的回傳值當守門（見下方 key 設計）。
 
 **`OwnerUserId` 不可變更**這件事是刻意的，而且被後台流程依賴：`room.kick` / `room.close` / `room.update` 都是「先讀房間檢查是不是房主、再動作」，看起來像 TOCTOU，但因為房主永遠不會變所以安全。**如果以後要加「轉移房主」功能，這三個流程都要重新檢視。**
@@ -442,7 +449,7 @@ internal sealed class RoomGraceSweeper(
 - **後台權限模型**：目前只認 `OwnerUserId`。要不要有「多位管理員」或「全站管理員」（例如你自己要能關掉任何房間）？後者會需要一個房間層之外的角色概念。
 - ~~**`ResolveConnectionsAsync` 的擁有者**：形狀確定，歸屬待定。~~ **已定案**：身分層的 `IPresenceDirectory`（見 6.3）。
 - 寬限期 30 秒與 sweeper 10 秒間隔都是暫定值，未經負載測試。
-- 「關閉房間」之後歷史訊息要保留多久、還能不能查——聊天層的決定，但會回頭影響 `IsClosed` 而非真刪的設計是否足夠。
+- ~~「關閉房間」之後歷史訊息要保留多久、還能不能查——聊天層的決定，但會回頭影響 `IsClosed` 而非真刪的設計是否足夠。~~ **已定案**：不保留、查不到。關房＝刪房，訊息 CASCADE 一起刪（[chat-layer.md](chat-layer.md) ADR-10）。答案不是「`IsClosed` 不夠」，是**那個設計整個不需要了**，見 6.1。
 
 ## 10. 對既有文件的影響
 

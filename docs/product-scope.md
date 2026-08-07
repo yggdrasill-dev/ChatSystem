@@ -45,7 +45,7 @@
 | 連線層（Gateway/Dispatcher） | 一條 WebSocket 連線怎麼被持有、定址、投遞 | 已完成核心設計與實作，收尾中 |
 | 身分/使用者管理層 | Google OAuth 登入、Session、ConnectionId 對應使用者身分、重複登入 Supersede 規則 | **已實作**（含登入/登出 endpoint），只剩 Google client id 這個外部前置作業，見 [identity-layer.md](architecture/identity-layer.md) |
 | 房間層 | 建立/加入房間、密碼房、房間成員管理、房間後台 | **已實作**，見 [room-layer.md](architecture/room-layer.md) |
-| 聊天層 | 訊息收發、訊息歷史記錄 | **設計中**，見 [chat-layer.md](architecture/chat-layer.md)。正式持久儲存（PostgreSQL）的決定在這一層做，房間層一起遷 |
+| 聊天層 | 訊息收發、訊息歷史記錄 | **設計完成、待實作**，見 [chat-layer.md](architecture/chat-layer.md)（ADR-1..ADR-10）。正式持久儲存（PostgreSQL）的決定在這一層做，房間層一起遷 |
 | WebBff | 前端的 BFF：出前端靜態檔 + 登入/登出 endpoint（見 [identity-layer.md](architecture/identity-layer.md) ADR-10） | 已實作 |
 | webClient | Angular 前端，重做（沿用 `main` 的資料夾名） | 待實作 |
 
@@ -55,7 +55,7 @@
 - ~~房間後台管理功能具體要管理什麼~~ 已確認四項：踢出成員、封鎖使用者、關閉／刪除房間、修改房間設定（見 [room-layer.md](architecture/room-layer.md)）。「監看訊息」不在其中
 - ~~訊息記錄要保留多久、要不要分頁查詢~~ 已決定：保留 **90 天**（暫定值，未經驗證）、keyset 分頁，見 [chat-layer.md](architecture/chat-layer.md) ADR-6 與 5.2。**搜尋仍然沒做**——它的查詢成本跟分頁不同量級，會推翻該文件 ADR-5「歷史查詢走 WebSocket」的判斷
 - **使用者的顯示名稱**：房間成員名單目前只有 Google `sub`（一串數字），UI 上不能看。登入時已經把 Google 的 `name`／`picture` 存下來（[identity-layer.md](architecture/identity-layer.md) ADR-11）。**部分解決**：聊天訊息會內嵌送出當下的名稱快照（[chat-layer.md](architecture/chat-layer.md) ADR-3），所以聊天視窗不需要查詢介面；**成員名單仍然需要批次查詢介面**，那要等 webClient 才會被逼出來。「暱稱可不可以自己改」還是產品決定，但快照語意讓它變得無害——改名不會改寫歷史訊息
-- **關閉的房間，歷史訊息還能不能看？** 目前的設計疊起來是「資料還在、但沒有任何人查得到」（[chat-layer.md](architecture/chat-layer.md) §9 第一條）：房間層刻意用 `IsClosed` 而不真刪，理由正是不讓歷史訊息變孤兒，但關房會清空成員名單，而歷史查詢的授權是「你現在在這間房嗎」。要嘛給一條「曾經是成員」的授權路徑，要嘛承認關房＝歷史消失——後者會讓 `IsClosed` 失去意義。**這是產品決定**
+- ~~**關閉的房間，歷史訊息還能不能看？**~~ **已決定：不能看，因為訊息會被刪掉。** 關閉房間＝**刪除**房間，該房的歷史訊息與封鎖名單一起刪（[chat-layer.md](architecture/chat-layer.md) ADR-10）。理由是這是個 demo 專案，歷史訊息沒有長期保留的價值；連帶結果是 `IsClosed` 這個狀態整個消失（它唯一的用途就是不讓歷史訊息變孤兒），房間只有「在」與「不在」。**兩個後果要記著**：刪除不可逆、沒有垃圾桶，所以 webClient 的關閉房間必須二次確認；而實作併入 PostgreSQL 遷移，在那之前 `IsClosed` 還在，但已經沒有設計理由
 - ~~房間本身與封鎖名單需要持久儲存，這跟訊息記錄是**同一個儲存決定**，建議一起做，不要為房間層單獨選一個~~ **已決定：PostgreSQL**（[chat-layer.md](architecture/chat-layer.md) ADR-4），`rooms` / `room_bans` / `messages` 三張表同一個資料庫，理由就是本條原本寫的那個：同一套 migration／備份策略。Session / Presence / 成員名單**不遷**，維持 Redis（TTL 與 compare-and-swap 語意放進關聯式資料庫會變難看且變慢）
 - 第 3 節的排除清單只是根據目前對話推測，需要你確認是否有遺漏（該做但沒提到／不該做但被列進來）
 
