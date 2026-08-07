@@ -423,7 +423,10 @@ internal sealed class RoomGraceSweeper(
   - **驗證已經是 repo 裡的專案：`E2E.Tests`**（10 項，43 秒）。原本那份腳本放在暫存目錄，隨 session 一起蒸發了——而文件上寫著它「可重複執行」，所以那句話有一段時間是假的。現在它用 `Aspire.Hosting.Testing` 自己啟整個 AppHost（4 個服務含 Gateway ×2 replica + 4 個容器），不需要手動抄 Aspire 分配的 port。
     - **預設會被 Skip**，要 `CHATSYSTEM_E2E=1` 才跑（需要 Docker）：`$env:CHATSYSTEM_E2E='1'; dotnet test E2E.Tests`。理由是它會把 `dotnet test` 從 2 秒變成 1 分鐘——常跑不動的測試等於沒有測試。
     - **假登入後門只在測試 process 的環境變數裡打開**（`Login__AllowFakeIdTokens=true`），repo 裡不會有一份「後門是開的」設定檔。同時釘住 `ASPNETCORE_ENVIRONMENT=Development`，因為那是後門的第二道鎖，也是 Gateway 讀到 Origin allowlist 的條件（allowlist 空的是 fail-closed，會全部 403）。
-    - **跨節點是被斷言的，不是被推論的**：連線前後各照一張 `Conn:*` 的快照，差集就是這個測試自己開的兩條連線，然後斷言它們的 `nodeId` 不同。如果兩條剛好落在同一個 Gateway，測試會紅——因為那時它就沒有驗到它宣稱要驗的東西。
+    - **跨節點是被斷言的，不是被推論的**：連線前後各照一張 `Conn:*` 的快照，差集就是剛開的那條連線，於是問得出它落在哪個 `nodeId`。
+      - **原本的寫法是「開兩條、斷言 `nodeId` 不同」，那讓這個測試隨啟動時序紅掉。** 原因不在產品，在 `AppHostFixture` 的就緒檢查：它打的是 Aspire 放在 replica 前面的 **proxy**，一次成功的 GET 只證明**至少一個** replica 會回應，**分不出後面站著一個還是兩個**（該 fixture 刻意不猜 `gateway-0`／`gateway-1` 這種衍生名字，理由寫在那裡）。第二個 replica 還沒開始聽的時候，開幾條連線都會落在同一個節點。這條測試因此在同一台機器上約 1/3 到 3/3 的機率紅，而每一次紅都是假警報。
+      - **改成「開到落在不同節點為止」**（`ConnectToAnotherNodeAsync`，30 秒期限，沒中的連線立刻丟棄）。**斷言的強度一項都沒少**——後面那個廣播仍然一定跨節點；差別只在「環境還沒就緒」不再被當成「產品壞了」。試到期限還是同一個節點就丟例外，訊息明說「實際上只有一個 replica 在服務，所以紅掉是對的」。代價是幾條丟棄的連線與約 1 秒。
+      - 一併補掉一個原本只是剛好沒踩到的時序：`Conn:*` 是 handshake 完成**之後**才寫進 Redis 的，所以要**等**新連線出現，不能只照一張快照。
     - 這一組刻意**不**重跑 `Integration.Tests` 已經釘住的每一條 handler 行為，而是偏重下面那三件 Direct 蓋不到的事。
   - **`38a8716` 之後重跑過一次全綠**（那個 commit 把事件通道從原生 NATS 收回 Adaptare、`CommandRouter` 的鏈裡多掛一個 `AddHandler`、`Gateway` 少一個 exchange——三處都落在「只有真 NATS 蓋得到」的範圍）。寬限期那一條實測 **39 秒**（5 秒確認沒有動靜 + 30 秒寬限期 + sweeper 間隔），時間對得上真實機制而不是提早收到。
   - **功能面已經搬進 `Integration.Tests`**（跑在 `Adaptare.Direct` 上，不需要 NATS／Redis／AppHost，全部 0.6 秒跑完）。那條路徑上是真的元件：`InboundBridge` → `InboundProcessor` → `PacketRegistry` → 房間層 handler → `RoomBroadcaster` → `PacketPublisher` → `OutboundGateway` → 真的 `DispatchHandler`，只有 store 換成 in-memory 替身、最末端換成記錄用的 handler。**寬限期那一輪也在裡面**（用可推進的 `TimeProvider` + 直接呼叫 `SweepAsync`，把真 NATS 要等 60 秒的那一項變成毫秒級）。

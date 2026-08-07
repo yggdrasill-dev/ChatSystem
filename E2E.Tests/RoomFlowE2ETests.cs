@@ -15,6 +15,10 @@ public class RoomFlowE2ETests(AppHostFixture fixture)
 	private static readonly TimeSpan _GracePeriod = RedisRoomMembership.GracePeriod;
 	private static readonly TimeSpan _SweeperInterval = RoomGraceSweeper.Interval;
 
+	// 等第二個 Gateway replica 開始服務的期限。它不是「等 replica 啟動」的時間預算——
+	// AppHost 早就啟動完了——而是「proxy 開始把連線分到第二個 replica」的期限。
+	private static readonly TimeSpan _CrossNodeTimeout = TimeSpan.FromSeconds(30);
+
 	[E2EFact]
 	public async Task Login_ThenHandshake_EstablishesAWorkingConnection()
 	{
@@ -50,36 +54,40 @@ public class RoomFlowE2ETests(AppHostFixture fixture)
 	[E2EFact]
 	public async Task Broadcast_ReachesAMemberOnADifferentGatewayNode()
 	{
-		// 先照一張快照，之後才分得出哪些連線是這個測試自己開的。
-		var before = await fixture.SnapshotConnectionsAsync();
-
+		var aliceBefore = await fixture.SnapshotConnectionsAsync();
 		await using var alice = await ConnectAsync("xnode-a");
-		await using var bob = await ConnectAsync("xnode-b");
+		var aliceNode = await NodeOfNewConnectionAsync(aliceBefore);
 
-		var mine = (await fixture.SnapshotConnectionsAsync())
-			.Where(entry => !before.ContainsKey(entry.Key))
-			.ToDictionary(entry => entry.Key, entry => entry.Value);
+		// Aspire 對開了 replica 的資源會在 endpoint 前面放一個 proxy 輪流分派，但
+		// **「至少一個 replica 會回應」不等於「兩個都在服務」**——`AppHostFixture` 的就緒檢查
+		// 只打得到那個 proxy，分不出後面站著幾個（它刻意不猜 gateway-0/gateway-1 這種衍生
+		// 名字，理由見該檔案）。第二個 replica 還沒開始聽的時候，開幾條連線都會落在同一個節點。
+		//
+		// 本節原本直接 `Assert.Equal(2, mine.Values.Distinct().Count())`，於是這個測試會隨啟動
+		// 時序紅掉，而紅掉的原因不是產品壞了、是它自己沒等到第二個 replica。改成**開到落在
+		// 不同節點為止**：下面那個廣播仍然一定跨節點，**這個測試該驗的東西一項都沒少**——
+		// 差別只在環境時序不再被當成失敗。
+		var bob = await ConnectToAnotherNodeAsync(aliceNode)
+			?? throw new InvalidOperationException(
+				$"在 {_CrossNodeTimeout} 內開的每一條連線都落在 {aliceNode}——實際上只有一個 " +
+				"Gateway replica 在服務，這個測試沒有驗到它宣稱要驗的跨節點投遞，所以紅掉是對的。");
 
-		Assert.Equal(2, mine.Count);
+		await using (bob)
+		{
+			var (roomId, _) = await CreateRoomAsync(alice);
 
-		// Aspire 對開了 replica 的資源會在 endpoint 前面放一個 proxy 輪流分派，所以兩條連線
-		// 通常會落在不同的 Gateway。**這個斷言不是在驗 Aspire**，是在確保下面那個廣播真的跨了
-		// 節點——如果兩條落在同一個節點，這個測試就沒有驗到它宣稱要驗的東西，寧可紅掉。
-		Assert.Equal(2, mine.Values.Distinct().Count());
+			await alice.SendAsync("room.join", new JoinRoomRequest { RoomId = roomId });
+			await alice.ExpectAsync("room.joined", RoomJoined.Parser);
 
-		var (roomId, _) = await CreateRoomAsync(alice);
+			await bob.SendAsync("room.join", new JoinRoomRequest { RoomId = roomId });
+			await bob.ExpectAsync("room.joined", RoomJoined.Parser);
 
-		await alice.SendAsync("room.join", new JoinRoomRequest { RoomId = roomId });
-		await alice.ExpectAsync("room.joined", RoomJoined.Parser);
+			// alice 在另一個節點上，所以這則廣播一定經過 Dispatcher 的分組與跨節點投遞。
+			var memberJoined = await alice.ExpectAsync("room.member.joined", RoomMemberJoined.Parser);
 
-		await bob.SendAsync("room.join", new JoinRoomRequest { RoomId = roomId });
-		await bob.ExpectAsync("room.joined", RoomJoined.Parser);
-
-		// alice 在另一個節點上，所以這則廣播一定經過 Dispatcher 的分組與跨節點投遞。
-		var memberJoined = await alice.ExpectAsync("room.member.joined", RoomMemberJoined.Parser);
-
-		Assert.Equal(roomId, memberJoined.RoomId);
-		Assert.Equal(bob.UserId, memberJoined.UserId);
+			Assert.Equal(roomId, memberJoined.RoomId);
+			Assert.Equal(bob.UserId, memberJoined.UserId);
+		}
 	}
 
 	[E2EFact]
@@ -273,6 +281,56 @@ public class RoomFlowE2ETests(AppHostFixture fixture)
 	private static string UniqueId(string prefix) => $"{prefix}-{Guid.NewGuid():N}"[..24];
 
 	private Task<ChatClient> ConnectAsync(string prefix) => ChatClient.ConnectAsync(fixture, UniqueId(prefix));
+
+	// 一直開連線直到某一條落在 `otherThan` 以外的 Gateway 節點上；期限內試不到就回 null。
+	//
+	// 每次嘗試都用新的 userId（`UniqueId`），所以不會觸發 Supersede 把前一條踢掉；沒中的那些
+	// 立刻 dispose，Gateway 會把它們從 ConnectionDirectory 移掉。**代價是幾條丟棄的連線**，
+	// 換掉的是一個會隨啟動時序紅掉的斷言。
+	private async Task<ChatClient?> ConnectToAnotherNodeAsync(string otherThan)
+	{
+		var deadline = DateTime.UtcNow + _CrossNodeTimeout;
+
+		for (var attempt = 0; DateTime.UtcNow < deadline; attempt++)
+		{
+			var before = await fixture.SnapshotConnectionsAsync();
+			var candidate = await ConnectAsync($"xnode-b{attempt}");
+
+			if (await NodeOfNewConnectionAsync(before) != otherThan)
+				return candidate;
+
+			await candidate.DisposeAsync();
+			await Task.Delay(500);
+		}
+
+		return null;
+	}
+
+	// client 自己不知道它的 connectionId——那是伺服器端的概念，不會回給 client——所以只能用
+	// 「連線前後的 `Conn:*` 差集」反推它落在哪個節點。
+	//
+	// 註冊是 handshake 完成之後才寫進 Redis 的，`ConnectAsync` 回來的那一刻不保證看得到，
+	// 所以要等它出現而不是只照一張快照——這正是原本那個版本沒處理、只是剛好沒踩到的時序。
+	private async Task<string> NodeOfNewConnectionAsync(IReadOnlyDictionary<string, string> before)
+	{
+		var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+
+		while (DateTime.UtcNow < deadline)
+		{
+			var appeared = (await fixture.SnapshotConnectionsAsync())
+				.Where(entry => !before.ContainsKey(entry.Key))
+				.ToList();
+
+			// 同一個 collection 循序執行，所以「剛好多出一條」是穩定的：上一輪丟棄的連線就算
+			// 還沒被清掉，它也在 before 裡面，不會被算成新出現的。
+			if (appeared.Count == 1)
+				return appeared[0].Value;
+
+			await Task.Delay(100);
+		}
+
+		throw new TimeoutException("新連線沒有在 10 秒內出現在 ConnectionDirectory 裡。");
+	}
 
 	private static async Task<(string RoomId, string Name)> CreateRoomAsync(ChatClient owner, string password = "")
 	{

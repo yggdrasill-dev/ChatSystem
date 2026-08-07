@@ -58,6 +58,12 @@ public sealed class AppHostFixture : IAsyncLifetime
 
 		// 不用 WaitForResourceAsync：Gateway 開了 replica，資源名稱會變成 gateway-0/gateway-1 之類的
 		// 衍生名字，猜名字比直接問傳輸層脆弱。這裡直接打 endpoint，能回應就是真的可以用了。
+		//
+		// **但要知道這個檢查證明不了什麼**：GatewayHttp 是 Aspire 放在 replica 前面的 proxy，
+		// 一次成功的 GET 只代表**至少一個** replica 會回應，分不出後面站著一個還是兩個。所以
+		// 「兩個 replica 都在服務」不是這個 fixture 給的保證——需要那個性質的測試要自己確認，
+		// 見 RoomFlowE2ETests.ConnectToAnotherNodeAsync。這個限制曾經讓
+		// Broadcast_ReachesAMemberOnADifferentGatewayNode 隨啟動時序紅掉。
 		await WaitUntilReachableAsync(GatewayHttp, "/").ConfigureAwait(false);
 		await WaitUntilReachableAsync(WebBffHttp, "/login/nonce").ConfigureAwait(false);
 	}
