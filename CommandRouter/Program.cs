@@ -7,13 +7,16 @@ var builder = Host.CreateApplicationBuilder(args);
 {
 	builder.AddServiceDefaults();
 
-	// 下行要用 IOutboundGateway（回訊息）與 IConnectionTerminator（狀態違反時關連線），
-	// 兩者都經 Dispatcher，所以這裡需要 ConnectionDirectory 的 Redis 與訊息匯流排。
+	// 下行要用 IOutboundGateway（回訊息），它經 Dispatcher，所以這裡需要 ConnectionDirectory
+	// 的 Redis 與訊息匯流排。
+	//
+	// 刻意沒有 AddConnectionTerminator()：協定層唯一的終止路徑是 IInboundFilter 的
+	// Terminate，那個機制已經移除（protocol-layer.md ADR-6），所以這個 process 不再有任何
+	// 關掉使用者連線的能力。終止連線目前只剩身分層的 Supersede 在用。
 	builder.AddRedisClient("connection-directory");
 	builder.AddNatsClient("message-bus");
 	builder.Services.AddConnectionDirectory();
 	builder.Services.AddOutboundGateway();
-	builder.Services.AddConnectionTerminator();
 
 	// 協定層本身：subject ↔ 型別的對應表與出口
 	builder.Services.AddPacketRegistry();

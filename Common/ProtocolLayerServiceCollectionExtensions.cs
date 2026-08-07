@@ -50,9 +50,4 @@ public static class ProtocolLayerServiceCollectionExtensions
 	public static IServiceCollection AddOutboundPacket<TMessage>(this IServiceCollection services, string subject)
 		where TMessage : IMessage<TMessage>
 		=> services.AddSingleton(new PacketRegistration(subject, typeof(TMessage), null));
-
-	// 分派前的前置條件檢查，由各層自己註冊（見 protocol-layer.md ADR-6）。
-	public static IServiceCollection AddInboundFilter<TFilter>(this IServiceCollection services)
-		where TFilter : class, IInboundFilter
-		=> services.AddScoped<IInboundFilter, TFilter>();
 }

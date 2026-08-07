@@ -1,6 +1,5 @@
 using Adaptare;
 using Chat.Protos;
-using Common.Connections;
 using Common.Protocol;
 using Google.Protobuf;
 
@@ -10,10 +9,13 @@ namespace CommandRouter;
 //
 // 用 IMessageProcessor（request/reply）而不是 IMessageHandler：Gateway 要等 ack 回來才讀
 // 下一個 frame，這正是單一連線訊息順序的保證來源（見 protocol-layer.md ADR-2）。
+//
+// 刻意沒有注入 IConnectionTerminator：協定層對壞輸入一律是「記 log + 忽略」（ADR-8），
+// 唯一的終止路徑是 IInboundFilter 的 Terminate，而那個機制已經移除（ADR-6）。所以
+// 「內容錯誤不會關掉使用者的連線」現在是結構上做不到，不是靠測試盯著。
 public sealed class InboundProcessor(
 	IServiceScopeFactory scopeFactory,
 	PacketRegistry registry,
-	IConnectionTerminator connectionTerminator,
 	ILogger<InboundProcessor> logger) : IMessageProcessor<byte[], byte[]>
 {
 	public async ValueTask<byte[]> HandleAsync(
@@ -32,22 +34,6 @@ public sealed class InboundProcessor(
 
 		// 一則命令 = 一個 scope，對應 ASP.NET Core 的 per-request 心智模型（見第 9 節決議）。
 		using var scope = scopeFactory.CreateScope();
-
-		var filters = scope.ServiceProvider
-			.GetServices<IInboundFilter>()
-			.OrderBy(filter => filter.Order);
-
-		foreach (var filter in filters)
-		{
-			var decision = await filter
-				.EvaluateAsync(context, packet.Subject, cancellationToken)
-				.ConfigureAwait(false);
-
-			if (decision == FilterDecision.Allow)
-				continue;
-
-			return await RejectAsync(filter, decision, packet, cancellationToken).ConfigureAwait(false);
-		}
 
 		if (!registry.IsInboundSubject(packet.Subject))
 		{
@@ -88,39 +74,6 @@ public sealed class InboundProcessor(
 		}
 
 		return Ack(InboundAck.Types.Status.Ok);
-	}
-
-	private async ValueTask<byte[]> RejectAsync(
-		IInboundFilter filter,
-		FilterDecision decision,
-		InboundPacket packet,
-		CancellationToken cancellationToken)
-	{
-		var filterName = filter.GetType().Name;
-
-		if (decision == FilterDecision.Terminate)
-		{
-			logger.LogWarning(
-				"{ConnectionId} {Subject} rejected by {Filter}, terminating the connection.",
-				packet.ConnectionId,
-				packet.Subject,
-				filterName);
-
-			// 處置動作由這裡統一執行，filter 只負責判斷（ADR-6）。
-			await connectionTerminator
-				.TerminateAsync([packet.ConnectionId], cancellationToken)
-				.ConfigureAwait(false);
-		}
-		else
-		{
-			logger.LogWarning(
-				"{ConnectionId} {Subject} dropped by {Filter}.",
-				packet.ConnectionId,
-				packet.Subject,
-				filterName);
-		}
-
-		return Ack(InboundAck.Types.Status.RejectedByFilter, filterName);
 	}
 
 	private static byte[] Ack(InboundAck.Types.Status status, string detail = "") =>

@@ -447,8 +447,10 @@ public class RoomCommandFlowTests
 					.AddHandler<CapturingDeliveryHandler>($"connect.deliver.{NodeId}"))
 				.AddDirectGlobPatternExchange("*");
 
-			builder.Services.AddSingleton<IConnectionTerminator>(new NoopConnectionTerminator());
-
+			// 刻意沒有註冊 IConnectionTerminator：這條命令鏈裡沒有任何元件需要它。
+			// 之前有一個會丟例外的替身，那純粹是因為 InboundProcessor 為了 filter 機制注入它
+			// （protocol-layer.md ADR-6，機制已移除）。現在「這條路徑不關連線」是 DI 圖上
+			// 就看得出來的事實。
 			m_Host = builder.Build();
 			await m_Host.StartAsync();
 
@@ -509,14 +511,5 @@ public class RoomCommandFlowTests
 				_ => throw new InvalidOperationException(
 					$"Unexpected outbound subject '{packet.Subject}'. Registered: {string.Join(", ", registry.Subjects)}"),
 			};
-	}
-
-	// 房間層不該終止任何連線（ADR-5），但協定層的 filter 政策需要這個依賴存在。
-	private sealed class NoopConnectionTerminator : IConnectionTerminator
-	{
-		public ValueTask TerminateAsync(
-			IReadOnlyCollection<string> connectionIds,
-			CancellationToken cancellationToken = default) =>
-			throw new InvalidOperationException("房間層不該終止連線（room-layer.md ADR-5）。");
 	}
 }

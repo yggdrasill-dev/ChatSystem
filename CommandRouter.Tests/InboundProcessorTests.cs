@@ -24,34 +24,21 @@ public class InboundProcessorTests
 
 		Assert.Equal(InboundAck.Types.Status.Ok, ack.Status);
 		Assert.Equal(("conn-1", "user-1", "inner"), Assert.Single(host.Sink.Calls));
-		await host.Terminator.DidNotReceive().TerminateAsync(Arg.Any<IReadOnlyCollection<string>>(), Arg.Any<CancellationToken>());
 	}
 
 	[Fact]
-	public async Task HandleAsync_PassesThePrincipalFromThePacket_ToBothFiltersAndHandlers()
+	public async Task HandleAsync_PassesThePrincipalFromThePacket_ToTheHandler()
 	{
-		var seenPrincipals = new List<string>();
-		using var host = CreateHost(services =>
-		{
-			services.AddPacketHandler<Packet, RecordingHandler>(TestSubject);
-			services.AddSingleton(new FilterScript
-			{
-				Order = 0,
-				Decision = FilterDecision.Allow,
-				SeenPrincipals = seenPrincipals
-			});
-			services.AddInboundFilter<ScriptedFilter>();
-		});
+		using var host = CreateHost(services => services.AddPacketHandler<Packet, RecordingHandler>(TestSubject));
 
 		await host.HandleAsync("conn-1", TestSubject, new Packet().ToByteString(), principal: "user-42");
 
 		// 「這則命令是誰送的」隨封包一起到，CommandRouter 不查任何對照表（ADR-9）
-		Assert.Equal(["user-42"], seenPrincipals);
 		Assert.Equal("user-42", Assert.Single(host.Sink.Calls).Principal);
 	}
 
 	[Fact]
-	public async Task HandleAsync_AcksUnknownSubject_WithoutTerminating()
+	public async Task HandleAsync_AcksUnknownSubject()
 	{
 		using var host = CreateHost();
 
@@ -59,7 +46,6 @@ public class InboundProcessorTests
 
 		// rolling deploy 期間「新 client + 舊 CommandRouter」是常態，不能因此斷線（ADR-8）
 		Assert.Equal(InboundAck.Types.Status.UnknownSubject, ack.Status);
-		await host.Terminator.DidNotReceive().TerminateAsync(Arg.Any<IReadOnlyCollection<string>>(), Arg.Any<CancellationToken>());
 	}
 
 	[Fact]
@@ -73,7 +59,7 @@ public class InboundProcessorTests
 	}
 
 	[Fact]
-	public async Task HandleAsync_AcksMalformedPayload_WithoutTerminating()
+	public async Task HandleAsync_AcksMalformedPayload_WithoutDispatching()
 	{
 		using var host = CreateHost(services => services.AddPacketHandler<Packet, RecordingHandler>(TestSubject));
 
@@ -83,63 +69,6 @@ public class InboundProcessorTests
 		// terminate 會造成「重連→送同一個壞封包→又被踢」的緊迫迴圈，成本比忽略更高（ADR-8）
 		Assert.Equal(InboundAck.Types.Status.MalformedPayload, ack.Status);
 		Assert.Empty(host.Sink.Calls);
-		await host.Terminator.DidNotReceive().TerminateAsync(Arg.Any<IReadOnlyCollection<string>>(), Arg.Any<CancellationToken>());
-	}
-
-	[Fact]
-	public async Task HandleAsync_TerminatesTheConnection_WhenAFilterSaysSo()
-	{
-		using var host = CreateHost(services =>
-		{
-			services.AddPacketHandler<Packet, RecordingHandler>(TestSubject);
-			services.AddSingleton(new FilterScript { Order = 0, Decision = FilterDecision.Terminate });
-			services.AddInboundFilter<ScriptedFilter>();
-		});
-
-		var ack = await host.HandleAsync("conn-1", TestSubject, new Packet().ToByteString());
-
-		Assert.Equal(InboundAck.Types.Status.RejectedByFilter, ack.Status);
-		Assert.Empty(host.Sink.Calls);
-		// 處置動作由 processor 統一執行，filter 只負責判斷（ADR-6）
-		await host.Terminator.Received(1).TerminateAsync(
-			Arg.Is<IReadOnlyCollection<string>>(ids => ids != null && ids.SequenceEqual(new[] { "conn-1" })),
-			Arg.Any<CancellationToken>());
-	}
-
-	[Fact]
-	public async Task HandleAsync_AcksRejected_WithoutTerminating_WhenAFilterDrops()
-	{
-		using var host = CreateHost(services =>
-		{
-			services.AddPacketHandler<Packet, RecordingHandler>(TestSubject);
-			services.AddSingleton(new FilterScript { Order = 0, Decision = FilterDecision.Drop });
-			services.AddInboundFilter<ScriptedFilter>();
-		});
-
-		var ack = await host.HandleAsync("conn-1", TestSubject, new Packet().ToByteString());
-
-		Assert.Equal(InboundAck.Types.Status.RejectedByFilter, ack.Status);
-		Assert.Empty(host.Sink.Calls);
-		await host.Terminator.DidNotReceive().TerminateAsync(Arg.Any<IReadOnlyCollection<string>>(), Arg.Any<CancellationToken>());
-	}
-
-	[Fact]
-	public async Task HandleAsync_RunsFiltersInOrder_AndStopsAtTheFirstRejection()
-	{
-		var evaluated = new List<int>();
-		using var host = CreateHost(services =>
-		{
-			services.AddPacketHandler<Packet, RecordingHandler>(TestSubject);
-			services.AddSingleton(new FilterScript { Order = 0, Decision = FilterDecision.Drop, Evaluated = evaluated });
-			services.AddSingleton(new FilterScript { Order = -1, Decision = FilterDecision.Allow, Evaluated = evaluated });
-			services.AddScoped<IInboundFilter, ScriptedFilter>();
-			services.AddScoped<IInboundFilter, SecondScriptedFilter>();
-		});
-
-		await host.HandleAsync("conn-1", TestSubject, new Packet().ToByteString());
-
-		// Order -1 先跑（Allow），Order 0 接著跑並 Drop，之後不再有 filter 被評估
-		Assert.Equal([-1, 0], evaluated);
 	}
 
 	[Fact]
@@ -152,7 +81,17 @@ public class InboundProcessorTests
 		// handler 的 bug 不該關掉使用者的連線
 		Assert.Equal(InboundAck.Types.Status.HandlerFailed, ack.Status);
 		Assert.Equal(nameof(InvalidOperationException), ack.Detail);
-		await host.Terminator.DidNotReceive().TerminateAsync(Arg.Any<IReadOnlyCollection<string>>(), Arg.Any<CancellationToken>());
+	}
+
+	[Fact]
+	public void InboundProcessor_HasNoWayToTerminateAConnection()
+	{
+		// ADR-8：協定層對壞輸入一律是 log + 忽略。唯一的終止路徑是 IInboundFilter 的
+		// Terminate，而那個機制已隨 ADR-6 的了斷條件移除——上面那些測試因此不必再各自
+		// 斷言 DidNotReceive()，這件事變成結構上不可能發生。
+		Assert.DoesNotContain(
+			typeof(IConnectionTerminator),
+			typeof(InboundProcessor).GetConstructors().Single().GetParameters().Select(p => p.ParameterType));
 	}
 
 	private static ProcessorHost CreateHost(Action<IServiceCollection>? configure = null)
@@ -166,26 +105,21 @@ public class InboundProcessorTests
 		services.AddPacketRegistry();
 
 		var provider = services.BuildServiceProvider();
-		var terminator = Substitute.For<IConnectionTerminator>();
 
 		var processor = new InboundProcessor(
 			provider.GetRequiredService<IServiceScopeFactory>(),
 			provider.GetRequiredService<PacketRegistry>(),
-			terminator,
 			NullLogger<InboundProcessor>.Instance);
 
-		return new ProcessorHost(provider, processor, sink, terminator);
+		return new ProcessorHost(provider, processor, sink);
 	}
 
 	private sealed class ProcessorHost(
 		ServiceProvider provider,
 		InboundProcessor processor,
-		CallSink sink,
-		IConnectionTerminator terminator) : IDisposable
+		CallSink sink) : IDisposable
 	{
 		public CallSink Sink => sink;
-
-		public IConnectionTerminator Terminator => terminator;
 
 		public async Task<InboundAck> HandleAsync(
 			string connectionId,
@@ -228,43 +162,5 @@ public class InboundProcessorTests
 	{
 		public ValueTask HandleAsync(CommandContext context, Packet message, CancellationToken cancellationToken = default) =>
 			throw new InvalidOperationException("boom");
-	}
-
-	private sealed class FilterScript
-	{
-		public int Order { get; init; }
-
-		public FilterDecision Decision { get; init; }
-
-		public List<int>? Evaluated { get; init; }
-
-		public List<string>? SeenPrincipals { get; init; }
-	}
-
-	// 兩個 filter 型別是為了讓 DI 能同時註冊兩個 IInboundFilter 實作；
-	// 各自從註冊的 FilterScript 清單裡按 Order 取自己那一份。
-	private class ScriptedFilter(IEnumerable<FilterScript> scripts) : IInboundFilter
-	{
-		protected virtual int ScriptIndex => 0;
-
-		private FilterScript Script => scripts.OrderBy(script => script.Order).ElementAt(ScriptIndex);
-
-		public int Order => Script.Order;
-
-		public ValueTask<FilterDecision> EvaluateAsync(
-			CommandContext context,
-			string subject,
-			CancellationToken cancellationToken = default)
-		{
-			Script.Evaluated?.Add(Script.Order);
-			Script.SeenPrincipals?.Add(context.Principal);
-
-			return ValueTask.FromResult(Script.Decision);
-		}
-	}
-
-	private sealed class SecondScriptedFilter(IEnumerable<FilterScript> scripts) : ScriptedFilter(scripts)
-	{
-		protected override int ScriptIndex => 1;
 	}
 }

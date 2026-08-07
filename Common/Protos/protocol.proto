@@ -29,8 +29,13 @@ message InboundAck {
 		OK = 1;
 		UNKNOWN_SUBJECT = 2;
 		MALFORMED_PAYLOAD = 3;
-		REJECTED_BY_FILTER = 4;
 		HANDLER_FAILED = 5;
+
+		// 4 曾經是 REJECTED_BY_FILTER。IInboundFilter 整個機制已移除（見 protocol-layer.md
+		// ADR-6），保留編號避免日後被重用成別的意思——rolling deploy 期間舊 CommandRouter
+		// 仍可能送出 4，而 Gateway 不依據 ack 做任何動作（ADR-5），所以無害。
+		reserved 4;
+		reserved "REJECTED_BY_FILTER";
 	}
 
 	Status status = 1;
