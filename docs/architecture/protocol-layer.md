@@ -1,6 +1,6 @@
 # 協定層架構設計（Protocol Layer）
 
-狀態：機制已實作（`Common/Protocol/` + `CommandRouter/`，含 ADR-9 的 `CommandContext`），房間層已註冊 15 個 subject。**`IInboundFilter` 已移除**，見 ADR-6
+狀態：機制已實作（`Common/Protocol/` + `CommandRouter/`，含 ADR-9 的 `CommandContext`），房間層 15 個 + 聊天層 5 個 = 已註冊 20 個 subject。**`IInboundFilter` 已移除**，見 ADR-6
 技術棧：延續連線層的 .NET + NATS（Adaptare）+ protobuf
 範圍：**client 封包內容的解析、subject 與型別的對應、分派給對的 handler**，不含任何具體命令的業務語意
 
@@ -424,7 +424,7 @@ var builder = Host.CreateApplicationBuilder(args);
 
 ## 9. 待確認 / 後續事項
 
-- **已完成**：協定層機制全部實作。`Common/Protocol/`（`IPacketHandler`、`PacketRegistration`、`PacketRegistry`、`IPacketPublisher`/`PacketPublisher`、`InboundBridge`）、`Common/Protos/protocol.proto`、`Common/ProtocolLayerServiceCollectionExtensions.cs`、`CommandRouter/`（`InboundProcessor` + `Program.cs`）。`Gateway/Program.cs` 的 `NoOpInboundMessageHandler` 註冊換成 `AddInboundBridge()`（該檔案已刪除），AppHost 新增 `command-router` 資源。原本預期第一批註冊來自身分層，`identity-layer.md` ADR-8 之後改為**房間層**——現在 registry 有 15 個 subject（啟動時會印出來）。
+- **已完成**：協定層機制全部實作。`Common/Protocol/`（`IPacketHandler`、`PacketRegistration`、`PacketRegistry`、`IPacketPublisher`/`PacketPublisher`、`InboundBridge`）、`Common/Protos/protocol.proto`、`Common/ProtocolLayerServiceCollectionExtensions.cs`、`CommandRouter/`（`InboundProcessor` + `Program.cs`）。`Gateway/Program.cs` 的 `NoOpInboundMessageHandler` 註冊換成 `AddInboundBridge()`（該檔案已刪除），AppHost 新增 `command-router` 資源。原本預期第一批註冊來自身分層，`identity-layer.md` ADR-8 之後改為**房間層**——現在 registry 有 20 個 subject（房間層 15 + 聊天層 5，啟動時會印出來）。
 - **已完成（ADR-6 的了斷）**：`IInboundFilter` 整組移除，範圍與連帶結果記在 ADR-6 的「執行」段。
 - **已完成（ADR-9）**：`InboundPacket.principal`、`Common/Protocol/CommandContext.cs`、`IPacketHandler` 改收 `CommandContext`、`InboundBridge.HandleAsync` 多一個 `principal` 參數、`InboundProcessor` 組出 context 並傳給 dispatch。跟連線層的 handshake 驗證是同一次跨層變更（`connection-layer.md` 第 9 節）。
 - **已修正的 bug（房間層端到端驗證時抓到的第二個）**：共用的 `AddNatsMessaging()` 會讓**每個下行訊息被投遞兩次**。`AddNatsMessageQueue()` 每被呼叫一次就多一個 `IMessageQueueBackgroundRegistration`，而 handler 的設定是共用的 options——所以「共用設定呼叫一次 + host 為了註冊自己的 handler 再呼叫一次」等於每個訂閱被建立兩份。marker 只擋得住我們自己的重複呼叫，擋不住 host 那一次；下面那條「實測 Adaptare 容許這種重複呼叫」的結論只驗了「`IMessageSender` 解得出來」，**沒有驗訂閱有沒有被建立兩份**。

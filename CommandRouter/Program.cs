@@ -31,6 +31,15 @@ var builder = Host.CreateApplicationBuilder(args);
 	builder.Services.AddRoomPackets();
 	builder.Services.AddRoomMembershipMaintenance();
 
+	// 聊天層：訊息收發與歷史查詢。重用房間層的 RoomBroadcaster 與 IRoomMembership
+	// （chat-layer.md 6.8），以及身分層的 IUserProfileStore 讀顯示名稱快照（ADR-3），
+	// 所以必須排在上面那幾行之後。
+	//
+	// **階段 A：訊息存在記憶體裡、限流不跨複本**，見 AddChatStore() 的說明。
+	builder.Services.AddChatStore();
+	builder.Services.AddChatPackets();
+	builder.Services.AddChatRetention();
+
 	// 這個 process 唯一一次 Adaptare message queue 註冊（見 Common/NatsMessagingRegistration.cs）。
 	builder.Services
 		.AddMessageQueue()

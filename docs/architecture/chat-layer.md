@@ -1,7 +1,7 @@
-# 聊天層架構設計（Chat Layer）
+﻿# 聊天層架構設計（Chat Layer）
 
-狀態：**設計中**，尚未實作
-技術棧：延續 .NET 10 + NATS（Adaptare）+ protobuf；**新增 PostgreSQL 作為正式持久儲存**（見 ADR-4）
+狀態：**階段 A 已實作**（`Common/Chat/` + `Common/Protos/chat.proto`，行為完整、儲存與限流是程序內替身）；**階段 B（PostgreSQL 落地 + 房間層遷移）未開始**，見 §11
+技術棧：延續 .NET 10 + NATS（Adaptare）+ protobuf；**新增 PostgreSQL 作為正式持久儲存**（見 ADR-4，階段 B）
 範圍：**訊息本身——收發、持久化、歷史查詢**，不含「誰該收到」（房間層）與「怎麼投遞」（連線層）
 依賴：命令的解析與分派由協定層負責（[protocol-layer.md](protocol-layer.md)）；成員名單與 fan-out 名單向房間層取得（[room-layer.md](room-layer.md)）；送出者的顯示名稱向身分層取得（[identity-layer.md](identity-layer.md)）
 
@@ -43,6 +43,7 @@
 | `IMessageSequencer`（新） | 發號的接縫。目前是無狀態的微秒時鐘實作；房間 actor 若落地，換掉的是註冊那一行（見 ADR-9） |
 | `IChatMessageStore`（新） | **append-only**：一次 `INSERT`、一個 keyset 分頁查詢、一個批次刪除。沒有 read-modify-write，不要求交易 |
 | `ChatRetention`（新） | 保留期限的政策值，`ChatRetentionSweeper` 用它 |
+| `IChatRateLimiter`（新，**實作時才出現**） | 每人每秒幾則。設計稿把限流寫成 handler 裡直接打 Redis，實作時抽成介面——理由見 6.9 |
 | `chat.send` / `chat.history` | 本層向 `CommandRouter` 註冊的兩個命令。**兩個都不帶 `room_id`**（見 ADR-5） |
 
 ## 4. 元件關係圖
@@ -427,8 +428,16 @@ CREATE INDEX messages_sent_at_idx ON messages (sent_at);
 public static IServiceCollection AddChatStore(this IServiceCollection services)
 {
 	services.TryAddSingleton(TimeProvider.System);
+	services.TryAddSingleton(ChatRetention.Default);
+	services.TryAddSingleton(ChatRateLimit.Default);
+
 	services.AddSingleton<IMessageSequencer, MonotonicMicrosecondSequencer>();
-	return services.AddSingleton<IChatMessageStore, PostgresChatMessageStore>();
+
+	// 階段 A：跨複本不成立、字典不淘汰（6.9）。階段 B 換 RedisChatRateLimiter。
+	services.AddSingleton<IChatRateLimiter, InMemoryChatRateLimiter>();
+
+	// 階段 A：process 重啟訊息就消失。階段 B 換 PostgresChatMessageStore。
+	return services.AddSingleton<IChatMessageStore, InMemoryChatMessageStore>();
 }
 
 public static IServiceCollection AddChatPackets(this IServiceCollection services)
@@ -436,7 +445,8 @@ public static IServiceCollection AddChatPackets(this IServiceCollection services
 	services.AddPacketHandler<SendChatMessageRequest, ChatSendHandler>("chat.send");
 	services.AddPacketHandler<ChatHistoryRequest, ChatHistoryHandler>("chat.history");
 
-	services.AddOutboundPacket<ChatMessage>("chat.message");
+	// MessagePacket 是 Chat.Protos.ChatMessage 的別名，理由見 6.10。
+	services.AddOutboundPacket<MessagePacket>("chat.message");
 	services.AddOutboundPacket<ChatHistory>("chat.history.reply");
 	return services.AddOutboundPacket<ChatOperationReply>("chat.reply");
 }
@@ -446,15 +456,51 @@ public static IServiceCollection AddChatRetention(this IServiceCollection servic
 	services.AddHostedService<ChatRetentionSweeper>();
 ```
 
-`IMessageSequencer` 註冊為 **singleton**：單調守衛的狀態必須是整個 process 共用的，註冊成 scoped 會讓每則命令拿到一個新的守衛，那個 CAS 迴圈就白寫了。
+`IMessageSequencer` 註冊為 **singleton**：單調守衛的狀態必須是整個 process 共用的，註冊成 scoped 會讓每則命令拿到一個新的守衛，那個 CAS 迴圈就白寫了。**這一條有併發測試釘住**，見 §9。
 
-AppHost 新增一個 `chat-db` 資源（`builder.AddPostgres("chat-db").WithDataVolume()`），`CommandRouter` 加一條 `WithReference`。**房間層的 `room-store` Redis 在遷移完成後只剩成員名單**，見 §9。
+**階段 A 刻意讓這三個註冊在 `CommandRouter/Program.cs` 裡就位**，即使儲存是替身——換句話說 A→B 不會動到 `Program.cs`，只會動 `AddChatStore()` 裡那兩行。代價是**這個 process 現在看起來像可以上線但不是**（訊息不持久化、限流不跨複本），所以那兩處各有一行 `// 階段 A：` 標記，`Program.cs` 也有。
+
+階段 B 才會在 AppHost 新增 `chat-db` 資源（`builder.AddPostgres("chat-db").WithDataVolume()`）與 `CommandRouter` 的 `WithReference`。**房間層的 `room-store` Redis 在遷移完成後只剩成員名單**，見 §9。
 
 ### 6.8 重用 `RoomBroadcaster`
 
 聊天層的 fan-out 跟房間層完全一樣：拿 `userId` 名單 → `IPresenceDirectory.ResolveConnectionsAsync` → `IPacketPublisher`。`RoomBroadcaster` 已經是這個形狀。
 
 決定：**保持原位、不改可見度、聊天層直接用**（同屬 `Common` 組件）。它的職責就是「把訊息送給一群房間成員」，那對聊天層與房間層是同一件事；為了「聊天層不該依賴 `Common.Rooms`」而複製一份，只會讓兩邊行為漂移——這正是 `room-layer.md` §9 拒絕「建房順便加入」時用過的同一個論證。聊天層本來就依賴房間層（要問成員名單），多用一個 broadcaster 沒有增加耦合方向。
+
+### 6.9 `IChatRateLimiter`——設計稿沒有這個型別
+
+ADR-7 只寫「限流用 Redis 計數（`INCR Chat:rate:{userId}:{unixSecond}` + `EXPIRE 2`）」，也就是預設 handler 直接打 Redis。實作時抽成介面，兩個理由：
+
+- **跟本層其他每一個相依都是介面**（`IRoomMembership`、`IUserProfileStore`、`IChatMessageStore`、`IMessageSequencer`）。讓 handler 唯一一次直接持有 `IConnectionMultiplexer` 會破壞這個一致性，也會讓 handler 的單元測試需要一個 Redis mock。
+- **它跟 `IMessageSequencer` 是同一類接縫**：ADR-9 的房間 actor 落地時，per-room 的 turn-based 併發會讓限流的實作方式改變。
+
+```csharp
+public sealed record ChatRateLimit(int MessagesPerSecond)   // 暫定值 10
+{
+	public static readonly ChatRateLimit Default = new(MessagesPerSecond: 10);
+}
+
+public interface IChatRateLimiter
+{
+	ValueTask<bool> TryAcquireAsync(string userId, CancellationToken cancellationToken = default);
+}
+```
+
+階段 A 的 `InMemoryChatRateLimiter` **有兩個已知缺陷，都只有換 Redis 才能解**，寫在這裡以免日後被當成疏漏：
+
+- **跨複本不成立**。`CommandRouter` 是多複本，記憶體計數器只擋得住打到同一個複本的請求，實際上限是「複本數 × 每秒 10 則」。這正是 ADR-7 一開始就說要用 Redis 的理由。
+- **字典沒有淘汰**，鍵隨「曾經發過訊息的使用者」單調成長。Redis 版本靠 `EXPIRE 2` 自然解決。
+
+實作上刻意用鎖而不是 `ConcurrentDictionary.AddOrUpdate`：後者的 update factory 可能被呼叫多次，計數會在競爭下遺失——而「同一個使用者同時猛送」正是這個限流器要擋的情況，在那個情況下少算等於沒擋。
+
+### 6.10 領域型別與 wire 型別同名
+
+`Common.Chat.ChatMessage`（領域）與 `Chat.Protos.ChatMessage`（proto）**同名**，這是實作時才浮現的摩擦——房間層沒有這個問題（`Room` 沒有對應的 proto 型別）。
+
+**沒有改名，兩個都留著**：它們代表同一個概念的兩種形態，改掉任何一個都會讓「哪一個才是領域概念」變模糊。需要同時提到兩者的地方只有三處，各用一個 `using MessagePacket = Chat.Protos.ChatMessage;` 別名解決：`ChatPacket`（對應處本身）、`AddChatPackets()`（要寫 `AddOutboundPacket<MessagePacket>`）、以及測試。**handler 一次都不用寫**——它們靠泛型推論。
+
+`ChatPacket` 這個靜態類別是領域 ↔ wire 的唯一對應處，等於把這個摩擦收斂在一個檔案裡。
 
 ## 7. 架構決策記錄（ADR）
 
@@ -618,15 +664,19 @@ AppHost 新增一個 `chat-db` 資源（`builder.AddPostgres("chat-db").WithData
 ## 9. 待確認 / 後續事項
 
 - ~~**關閉的房間，歷史訊息沒有人有權限查**~~ **已定案（ADR-10）**：關房＝刪房，訊息隨 `ON DELETE CASCADE` 一起刪。原本列的三個方向都沒被選——選的是第四個：**承認這些資料不該留**。這比「補一條曾經是成員的授權路徑」誠實，也讓 `IsClosed` 這個為了掩護孤兒訊息而存在的狀態整個消失。實作併入 PostgreSQL 遷移，理由見 ADR-10 最後一條。
-- **`IUserProfileStore` 只被回答了一半**（ADR-3）。本層需要單筆的 `GetDisplayNameAsync(userId)`；**批次讀 N 個成員的 profile 仍然沒有介面**，而 `RoomJoined.member_user_ids` 要在 UI 上顯示成名字就需要它。答案是**兩個都要**，但批次那個要等 webClient。
+- ~~**`IUserProfileStore` 只被回答了一半**（ADR-3）。本層需要單筆的 `GetDisplayNameAsync(userId)`~~ **單筆已實作**（單一 `HGET`，`identity-layer.md` ADR-11 已同步）。**批次讀 N 個成員的 profile 仍然沒有介面**，而 `RoomJoined.member_user_ids` 要在 UI 上顯示成名字就需要它——那要等 webClient。
 - **房間層的 Redis 遷移完成後，`room-store` 這個資源要怎麼處理**。`rooms` / `room_bans` 搬進 Postgres 之後，`room-store` 只剩 `IRoomMembership`（成員名單、寬限期的 Sorted Set）。保留它（符合 `connection-layer.md` ADR-2 的「每層擁有自己的基礎設施」）或併進 `connection-directory`（同樣是暫時狀態）。傾向後者，但跟 ADR-2 的原則衝突——**沒定案**。
 - **遷移是一次破壞性變更**：`RedisRoomStore` / `RedisRoomBanList` 會被 Postgres 版本取代，`room-layer.md` 6.1 那張 Redis key 設計表會整段作廢。那節的論證仍有保存價值（它解釋了為什麼 `{rooms}` 用 hash tag 而連線層刻意不用），應該改寫成「已被取代」而不是刪掉。**注意：`{rooms}:seq:*` 這個 key 從來沒有存在過**——它只出現在本文件被推翻的第一版設計裡（ADR-2 的 (b)）。
 - ~~**`IInboundFilter` 的去留**（ADR-7）：協定層的變更，需要獨立決定。~~ **已移除**，見 `protocol-layer.md` ADR-6 的「執行」段。
-- **暫定值**（全部未經負載測試）：保留期 90 天、清理批次 5000 列 / 每天一輪、每人每秒 10 則、每則 4096 字元、歷史分頁預設 50 則。
-- **測試分層**：
-  - `Integration.Tests`（`Adaptare.Direct`、in-memory 替身）可以蓋掉本層**絕大部分**行為——這是 append-only 帶來的好處：初稿的「seq 連續無洞」與「同房序列化」是 Postgres 交易的性質，in-memory 替身怎麼寫都會通過，等於在測自己寫的替身。現在沒有這個問題。
-  - 仍然需要真 Postgres 的只剩兩件：**主鍵衝突時 `TryAppendAsync` 真的回 `false`**（6.4 的重試路徑，替身不會自然產生 `23505`），以及 **keyset 分頁在稀疏鍵上的實際查詢計畫**。放 `E2E.Tests` 或用 Testcontainers。
-  - **`MonotonicMicrosecondSequencer` 的 CAS 迴圈要有併發測試**：多執行緒同時呼叫 `Next()`，斷言結果全部相異且嚴格遞增。非原子的版本在單執行緒測試下永遠會過（6.4）。
+- **暫定值**（全部未經負載測試）：保留期 90 天、清理批次 5000 列 / 每天一輪、每人每秒 10 則、每則 4096 字元、歷史分頁預設 50 則、**歷史分頁上限 100 則**（最後這個是實作時補的：沒有上限的話 client 可以一次拉完整個房間的歷史，而 ADR-5 已經說明這條查詢會佔住那條連線的順序通道）。
+- **測試分層**（階段 A 的實際狀況）：
+  - `Integration.Tests`（`Adaptare.Direct`）蓋掉本層**絕大部分**行為，**11 條、跟房間層一起 0.6 秒跑完**。這是 append-only 帶來的好處：初稿的「seq 連續無洞」與「同房序列化」是 Postgres 交易的性質，in-memory 替身怎麼寫都會通過，等於在測自己寫的替身。現在沒有這個問題。
+    - **而且階段 A 的聊天層在這條路徑上沒有任何替身**：`AddChatStore()` 註冊的本來就是 in-memory 的 store 與限流器，所以那是**完整的正式註冊**。這是巧合帶來的便利，階段 B 之後就會需要替身了。
+  - **`MonotonicMicrosecondSequencer` 的 CAS 迴圈有併發測試**（`Next_NeverIssuesTheSameKeyTwice_UnderConcurrency`：16 執行緒 × 2000 次，斷言全部相異）。**已用手動變異驗證過它真的擋得住**：把 CAS 迴圈還原成 `m_Last = Math.Max(observed, m_Last + 1)`，只有這一條會紅，同檔案另外四條循序測試全部照過——那正是文件一開始就預期的失效模式。
+  - **`ChatMessageStoreContractTests` 是介面的契約，不是替身的規格**：階段 B 的 `PostgresChatMessageStore` 必須通過同一組斷言（keyset 游標嚴格小於、稀疏鍵行為相同、批次刪除回傳實際筆數），屆時只換 `NewStore()`。
+  - 仍然需要真 Postgres 的只剩兩件：**主鍵衝突時 `TryAppendAsync` 真的回 `false`**（6.4 的重試路徑，替身不會自然產生 `23505`——階段 A 用一個「先把號佔掉」的測試逼出同一條程式路徑，但那驗的是 handler 的重試，不是 Postgres 的錯誤碼），以及 **keyset 分頁在稀疏鍵上的實際查詢計畫**。放 `E2E.Tests` 或用 Testcontainers。
+  - `E2E.Tests` 加了 3 條，只驗 Direct 蓋不到的三件事（production 接線、wire format 上的 `int64`、跨節點 fan-out）。**其中跨節點那條特別值得**：聊天層自己沒有 fan-out 程式碼，它重用 `RoomBroadcaster`（6.8），所以那條驗的是「重用真的接對了」。
+  - **階段 A 的 E2E 依賴 `CommandRouter` 只有一個複本**（AppHost 沒有對它 `WithReplicas`），因為訊息在該 process 的記憶體裡。一旦開複本，歷史查詢會開始隨機失敗——那不是測試的問題，是階段 B 還沒做。
 
 ## 10. 對既有文件的影響
 
@@ -661,7 +711,29 @@ AppHost 新增一個 `chat-db` 資源（`builder.AddPostgres("chat-db").WithData
 
 ### `product-scope.md`
 
-- §5 表格：聊天層狀態從「待設計」改為「設計中」。
+- §5 表格：聊天層狀態從「待設計」→「設計中」→ **「階段 A 已實作」**。
 - §6「訊息記錄要保留多久」已回答：90 天（暫定值）。「要不要分頁查詢」已回答：keyset 分頁。「要不要搜尋」**仍然沒做**。
 - §6「房間本身與封鎖名單需要持久儲存，這跟訊息記錄是同一個儲存決定」已執行：PostgreSQL。**注意該節先前引用的理由（「`seq` 的連續性要求同交易遞增」）隨 ADR-2 一起被推翻，要改回原本那個較弱但正確的理由：同一套 migration／備份策略。**
 - §4「沒有具體規模數字」在本層被引用了三次（ADR-4 選 Postgres、ADR-6 不做分區、ADR-9 暫緩 actor）。
+
+## 11. 實作進度：階段 A 已完成，階段 B 未開始
+
+刻意切成兩段，理由是**把行為釘死在不需要容器的測試層，之後換 store 只是換一個介面實作，不會回頭改語意**。這只有在 ADR-2 改成 append-only 之後才做得到——初稿那版的核心性質是 Postgres 交易的性質，沒有真資料庫根本驗不了。
+
+### 階段 A（已完成）
+
+`Common/Protos/chat.proto`、`Common/Chat/`（領域模型、`IMessageSequencer` + `MonotonicMicrosecondSequencer`、`IChatMessageStore` + `InMemoryChatMessageStore`、`IChatRateLimiter` + `InMemoryChatRateLimiter`、`ChatRetention`、`ChatRetentionSweeper`、`Handlers/`）、`Common/ChatLayerServiceCollectionExtensions.cs`、`CommandRouter/Program.cs` 的三行註冊。`IUserProfileStore.GetDisplayNameAsync` 是這一段順帶補上的跨層變更。
+
+**行為是完整的**：先存後廣播、keyset 分頁、排序鍵單調唯一且稀疏、名稱快照、限流、長度上限、保留期清理。測試 30 條單元 + 11 條整合 + 3 條端到端。
+
+**但它不能上線**，兩個原因都在 §6.9 與 6.7 標記過：訊息不持久化（process 重啟就消失）、限流不跨複本。
+
+### 階段 B（未開始）
+
+1. AppHost 新增 `chat-db`（Postgres）+ `CommandRouter` 的 `WithReference`。
+2. `PostgresChatMessageStore`（Npgsql + Dapper 手寫 SQL + 冪等的啟動時 migration，6.6），schema 見 6.5。**要通過 `ChatMessageStoreContractTests` 同一組斷言。**
+3. `RedisChatRateLimiter`（`INCR` + `EXPIRE 2`）。**放哪個 Redis 還沒定**——它是 per-user 的暫時計數，語意上最接近 `identity-store`，但 `connection-layer.md` ADR-2 的原則是「每層擁有自己的基礎設施」。這跟 §9 那條「`room-store` 遷移後怎麼處理」是同一類問題，應該一起決定。
+4. **房間層一起遷**（ADR-4）：`IRoomStore` / `IRoomBanList` 換 Postgres 實作，**同一批把 ADR-10 做掉**（`IsClosed` 移除、`TryCloseAsync` → `TryDeleteAsync`、`ROOM_CLOSED` 併入 `ROOM_NOT_FOUND`）。
+5. 真 Postgres 才驗得到的兩件事補測試（§9 測試分層最後兩條）。
+
+**順序上 (4) 最痛**：它會動到已經實作並測試過的房間層，而且是破壞性的。但它必須跟 (2) 同一批，否則 `messages` 的 FK 沒有 `rooms` 可以指——這也正是 ADR-10 決定不單獨改 Redis 版本的理由。

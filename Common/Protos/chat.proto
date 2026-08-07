@@ -1,0 +1,78 @@
+syntax = "proto3";
+
+option csharp_namespace = "Chat.Protos";
+package chat;
+
+// 聊天層自己的命令與下行訊息。協定層不認識這些型別，對應表由 AddChatPackets() 註冊。
+
+// ---- 上行 ----
+
+// 刻意沒有 room_id：使用者一次只能在一間房，「送到哪間房」是伺服器知道的事實，
+// 不是 client 說了算（chat-layer.md ADR-5）。少了這個欄位，「你真的在這間房嗎」
+// 這個檢查就不可能被漏掉——漏掉的話是「可以讀取任意房間歷史訊息」的漏洞。
+message SendChatMessageRequest {
+	string body = 1;
+}
+
+message ChatHistoryRequest {
+	// 0 = 從最新的開始；否則回傳 order_key 嚴格小於它的那一頁（keyset 分頁）。
+	int64 before_order_key = 1;
+	// 0 或超過上限時由伺服器夾到預設值，不回錯誤。
+	int32 limit = 2;
+}
+
+// ---- 下行 ----
+
+message ChatMessage {
+	string room_id = 1;
+
+	// 房間內單調遞增的排序鍵與分頁游標。
+	//
+	// **稀疏，不保證連續。** 不要拿它計數（則數 != max - min），也不要拿它偵測
+	// 缺口（expected = last + 1 一定會誤判）。要判斷「有沒有新訊息」請比大小，
+	// 不要做算術。命名刻意不叫 seq，就是為了不誘發那種寫法（ADR-2）。
+	//
+	// 值約 1.786e15（微秒時間戳），**低於 JS 的 2^53**，所以 TypeScript 可以直接
+	// 當 number 用，不必轉 BigInt——這正是 ADR-2 不選 snowflake 的其中一個理由。
+	int64 order_key = 2;
+
+	string sender_user_id = 3;
+	// 送出當下的顯示名稱快照，不是即時查詢的結果（ADR-3）。改名不會改寫歷史訊息。
+	// 空字串代表登入時 Google 沒給 name，顯示什麼由 client 決定。
+	string sender_display_name = 4;
+	string body = 5;
+
+	// 實際發生時間，跟 order_key 是兩件事：order_key 在突發時可能借用未來的
+	// 微秒，sent_at 不會（ADR-2）。顯示時間一律用這個欄位。
+	int64 sent_at_unix_ms = 6;
+}
+
+message ChatHistory {
+	string room_id = 1;
+	// order_key 由大到小（最新的在前）。
+	repeated ChatMessage messages = 2;
+	bool has_more = 3;
+}
+
+// 沿用 RoomOperationReply 的形狀。業務失敗一定要用明確的下行訊息回覆
+// （protocol-layer.md ADR-8）。
+message ChatOperationReply {
+	enum Status {
+		// OK = 0 在這裡是安全的，但理由要寫清楚，因為 protocol-layer.md §9 有一條
+		// 相反方向的教訓（InboundAck.OK 原本是 0，序列化成 0 bytes，經過 NATS 回來
+		// 變 null，每個成功的命令都殺掉連線）。差別在於那條教訓只適用於
+		// **request/reply 的 reply**——「0 bytes 的回覆」跟「沒有回覆」在那裡無法
+		// 區分。本型別走一般下行投遞（IPacketPublisher），沒有「沒有回覆」這個
+		// 對立面；而且成功路徑上 room_id 永遠非空，本來就不會序列化成 0 bytes。
+		OK = 0;
+		// 不在任何房間。房間被刪掉也走這一條——關房＝刪房（ADR-10）且會清空成員
+		// 名單，所以兩件事在這裡是同一個結果（ADR-8）。
+		NOT_IN_ROOM = 1;
+		BODY_EMPTY = 2;
+		BODY_TOO_LONG = 3;
+		RATE_LIMITED = 4;
+	}
+
+	Status status = 1;
+	string room_id = 2;
+}
