@@ -17,4 +17,17 @@ internal sealed class RedisUserProfileStore(IConnectionMultiplexer multiplexer) 
 				new HashEntry(IdentityKeys.ProfileFields.DisplayName, displayName ?? string.Empty),
 				new HashEntry(IdentityKeys.ProfileFields.PictureUrl, pictureUrl ?? string.Empty),
 			]));
+
+	// 單一 HGET，不是 HGETALL：聊天層只要 display_name，而這是在 chat.send 的熱路徑上
+	// （每則訊息一次，chat-layer.md ADR-3 明說這次往返不優化）。
+	public async ValueTask<string?> GetDisplayNameAsync(string userId, CancellationToken cancellationToken = default)
+	{
+		var displayName = await multiplexer
+			.GetDatabase()
+			.HashGetAsync(IdentityKeys.Profile(userId), IdentityKeys.ProfileFields.DisplayName)
+			.ConfigureAwait(false);
+
+		// key 或 field 不存在都是 null；存在但空字串代表「Google 沒給」，那要照原樣回。
+		return displayName.IsNull ? null : displayName.ToString();
+	}
 }

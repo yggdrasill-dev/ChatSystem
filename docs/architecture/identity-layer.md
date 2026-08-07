@@ -38,7 +38,7 @@
 | Google ID Token 驗證 | 前端用 Google Identity Services 取得 ID Token，後端驗證簽章 + `aud`/`iss`/`exp`/`nonce`（見 ADR-1、ADR-5） |
 | `ISessionStore`（新，`Common.Identity`） | `SessionToken → UserId`，opaque token，Redis 存放，7 天、隨活動 sliding 續期（見 ADR-2、ADR-3） |
 | `ILoginNonceStore`（新，`Common.Identity`） | ADR-5 的一次性 nonce：登入前配發、驗證時消耗 |
-| `IUserProfileStore`（新，`Common.Identity`） | `UserId → 暱稱 / 頭像網址`。只有寫入，還沒有查詢介面（見 ADR-11） |
+| `IUserProfileStore`（新，`Common.Identity`） | `UserId → 暱稱 / 頭像網址`。寫入 + **單筆讀 `GetDisplayNameAsync`**（聊天層 ADR-3 逼出來的）；批次讀仍然沒有，見 ADR-11 |
 | `IIdTokenValidator`（新，`WebBff/Services`） | 把 static 的 `GoogleJsonWebSignature.ValidateAsync` 包成可替換的介面。刻意不放 `Common`，`Google.Apis.Auth` 只有登入這一處需要 |
 | Session Cookie | `httpOnly` + `Secure` + `SameSite=Lax`，存 `SessionToken`。**必須跟 Gateway 同 site**，否則 handshake 帶不上（見 ADR-10） |
 | `IPresenceDirectory`（新，`Common.Identity`） | `UserId → 目前的 ConnectionId`（單一值），實作 Supersede（見 ADR-4）與房間 fan-out 需要的批次正向解析 |
@@ -443,6 +443,7 @@ allowlist 從設定讀（AppHost 注入，開發與正式環境各自的來源�
 - **Consequences**：
   - 決定的關鍵不是「現在需不需要」，而是**時機**：ID Token 是整個系統唯一看得到這兩個 claim 的地方，登入的那一刻不寫下來，之後要補只能叫所有人重新登入。寫入的成本是一次 `HSET`。
   - 查詢介面等房間層真的要顯示成員名單時再設計，屆時才知道需要的是單筆還是批次、要不要跟成員名單一起回傳。
+    - **後續**：先被逼出來的是**單筆**（`GetDisplayNameAsync`），而且逼出它的是**聊天層**不是房間層——[chat-layer.md](chat-layer.md) ADR-3 把顯示名稱快照存進每一則訊息，所以寫入路徑上要讀一次。批次那個仍然待定，見第 9 節。**「先不設計」這個決定本身是對的**：真正的需求形狀跟本 ADR 當時猜的（跟成員名單一起回傳）不一樣。
   - **代價**：現在 `GET /login/session` 只回 `userId`，前端拿不到暱稱可以顯示。這是刻意接受的——多加一個讀取方法很容易，但「批次讀 N 個成員的 profile」跟「讀自己的 profile」是不同形狀，猜錯就要改兩次。
   - profile 是持久資料，跟 Session 一樣住在 identity-store，不設 TTL、每次登入覆寫。它是否要跟房間資料一起遷到正式儲存，見第 9 節。
 
@@ -491,4 +492,7 @@ allowlist 從設定讀（AppHost 注入，開發與正式環境各自的來源�
 - ~~ADR-8 反向索引 `ConnectionUser:{connectionId}` 的 TTL 長度與續期方式尚未決定。~~ **已消失**：反向索引整條刪除（新 ADR-8）。
 - 連線層的 close description 是中性字串（`"Connection terminated by server."`），**不會**告訴 client「你被新連線取代了」——Supersede 是本層語意，連線層刻意不知道（見 `connection-layer.md` 第 6.6 節）。如果 WebClient 需要區分「被踢掉」與「一般斷線」以顯示不同提示，得由本層在 `TerminateAsync` 之前先送一則訊息給舊連線，或替 `TerminateRequest` 補一個 `reason` 欄位。**尚未決定要不要做**——但 ADR-8 之後這個需求變得更明顯了：被 Supersede 踢掉的舊分頁只會看到連線莫名斷掉，而它自己的 session 其實仍然有效，重連又會把新分頁踢掉，形成兩個分頁互踢。要嘛給 client 一個明確的 reason 讓它停止重連，要嘛接受這個行為。
 - Session 與 profile 都是持久資料，`identity-store` 已經開了 `WithDataVolume()` + `WithPersistence()`。這跟房間層的 `room-store` 是同一類需求，而 `room-layer.md` ADR-7 已經預告房間資料未來要遷到正式儲存——屆時 Session／profile 要不要一起遷（還是留在 Redis，因為它們本來就是 key-value 且有 TTL 語意）需要一起決定。
-- **`IUserProfileStore` 的查詢介面**（ADR-11）：房間層要顯示成員名單時才設計，屆時要一起決定形狀（批次讀 N 個成員 vs 單筆讀自己）與「暱稱要不要可自訂」。在那之前 `GET /login/session` 只回 `userId`，前端顯示不了暱稱。
+- **`IUserProfileStore` 的查詢介面**（ADR-11）：**單筆那半已經做了**——`GetDisplayNameAsync(userId)`，由聊天層逼出來（[chat-layer.md](chat-layer.md) ADR-3：訊息內嵌送出當下的顯示名稱快照，所以寫入路徑上要讀一次自己的名字）。實作是單一 `HGET` 而不是 `HGETALL`，因為那是 `chat.send` 的熱路徑。
+  - **批次讀 N 個成員的 profile 仍然沒有介面**，而且逼出它的不是房間層而是 webClient——`RoomJoined.member_user_ids` 要在 UI 上顯示成名字時才需要。所以 ADR-11 那句「屆時才知道需要的是單筆還是批次」的答案是**兩個都要，但在不同時間點**。
+  - 「暱稱要不要可自訂」還是產品決定，但**快照語意讓它變得無害**：改名不會改寫歷史訊息（chat-layer ADR-3），這件事有整合測試釘住。
+  - `GET /login/session` 仍然只回 `userId`，沒有跟著改——沒有使用者要求它。

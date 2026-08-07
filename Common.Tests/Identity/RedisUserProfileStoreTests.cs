@@ -35,6 +35,46 @@ public class RedisUserProfileStoreTests
 			Arg.Any<CommandFlags>());
 	}
 
+	[Fact]
+	public async Task GetDisplayNameAsync_ReadsASingleField_NotTheWholeHash()
+	{
+		var (store, database) = CreateStore();
+		StubDisplayName(database, "Sunny");
+
+		Assert.Equal("Sunny", await store.GetDisplayNameAsync("user-1"));
+
+		// 單一 HGET 而不是 HGETALL：這是 chat.send 的熱路徑，每則訊息一次（chat-layer.md ADR-3）。
+		await database.Received(1).HashGetAsync(
+			(RedisKey)"Profile:user-1",
+			(RedisValue)"display_name",
+			Arg.Any<CommandFlags>());
+	}
+
+	[Fact]
+	public async Task GetDisplayNameAsync_ReturnsNull_WhenThereIsNoProfile()
+	{
+		var (store, database) = CreateStore();
+		StubDisplayName(database, RedisValue.Null);
+
+		// null（沒有 profile）與空字串（Google 沒給 name）要分得出來——對聊天層是同一個結果，
+		// 但介面不該把兩者混成一個。
+		Assert.Null(await store.GetDisplayNameAsync("user-1"));
+	}
+
+	[Fact]
+	public async Task GetDisplayNameAsync_ReturnsEmpty_WhenGoogleGaveNothing()
+	{
+		var (store, database) = CreateStore();
+		StubDisplayName(database, string.Empty);
+
+		Assert.Equal(string.Empty, await store.GetDisplayNameAsync("user-1"));
+	}
+
+	private static void StubDisplayName(IDatabase database, RedisValue value) =>
+		database
+			.HashGetAsync((RedisKey)"Profile:user-1", (RedisValue)"display_name", Arg.Any<CommandFlags>())
+			.Returns(value);
+
 	private static (IUserProfileStore Store, IDatabase Database) CreateStore()
 	{
 		var database = Substitute.For<IDatabase>();
