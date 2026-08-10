@@ -23,6 +23,9 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Common\Common.csproj" />
+    <!-- IRoomStore / IRoomBanList 的 in-memory 替身住在那裡，跟契約測試共用同一份（B0）。
+         這是本 repo 第一個測試專案引用測試專案的地方。 -->
+    <ProjectReference Include="..\Common.Tests\Common.Tests.csproj" />
     <ProjectReference Include="..\CommandRouter\CommandRouter.csproj" />
     <ProjectReference Include="..\Dispatcher\Dispatcher.csproj" />
   </ItemGroup>

@@ -448,6 +448,11 @@ internal sealed class RoomGraceSweeper(
 
 - ~~**硬前置：連線層的斷線事件**（ADR-3）。~~ **已實作**：`events.connection.disconnected`，設計見 `connection-layer.md` 第 6.7 節與 ADR-8。房間層要訂閱它並在 handler 裡呼叫 `MarkDisconnectedAsync`。注意該 ADR 明確把事件定為 best-effort——本層 ADR-2 的「讀取時過濾」正確性不依賴它，這個前提要繼續維持，不要改成「只在收到事件時才清理」。事件會帶 `principal`（`connection-layer.md` ADR-9），所以本層不需要任何 `connectionId → userId` 的反查。
 - **訂閱時的 queue group 名稱要跟其他訂閱端區隔**。NATS 的規則是不同 queue group 各收到一份、同一個 group 內互相分攤。目前預期只有房間層訂閱 `events.connection.disconnected`（身分層的解綁在 Gateway 內直接完成，不繞事件），但未來多一個訂閱端時如果沿用同一個 group 名，兩邊會互搶事件，症狀是「有時候有處理、有時候沒有」——這種錯誤在 diff 上看不出來，所以一開始就用有層次的名字（例如 `room.membership`）。
+- **已完成**：`IRoomStore` / `IRoomBanList` 的**契約測試**（`Common.Tests/Rooms/RoomStoreContractTests.cs`、`RoomBanListContractTests.cs`，14 + 6 條），形狀比照 `ChatMessageStoreContractTests`。原本這一層只有 `RedisRoomStoreTests` / `RedisRoomBanListTests`，那 16 條斷言的是 Redis 指令的形狀（SADD 哪個 key、`HashSetAsync` 哪些欄位），**換掉實作整份作廢、一條都接不過去**——聊天層享受得到的「換 store 只換 `NewStore()`」，房間層原本享受不到。兩份是互補的：白箱那份守 Redis 的原子性語意，契約那份守任何儲存都必須成立的行為。
+  - **四條契約是照「Postgres 實作最可能走錯的路」挑的**，不是照介面方法數：建房撞 id 時不覆寫（`ON CONFLICT DO UPDATE` 就錯）、公開房的 `PasswordHash` 讀回來是 `null` 而不是空字串（`room.list` 的 `has_password` 直接看它）、改設定不動 `OwnerUserId` / `CreatedAt`（整列 UPDATE 會靜默洗掉）、封鎖以 `(room_id, user_id)` 為範圍。
+  - **已用手動變異驗證過**：四個變異（建房改成覆寫、改設定整列覆寫、公開房存空字串、封鎖漏掉 roomId）各自只打紅預期的那一條，其餘 85 條照過。
+  - `IRoomStore` / `IRoomBanList` 的 in-memory 替身從 `Integration.Tests/InMemoryStores.cs` 移到 `Common.Tests/Rooms/InMemoryRoomStores.cs`，契約測試與組合測試共用同一份——兩邊各留一份會漂移，症狀是「單元全綠、整合莫名其妙」。代價是 `Integration.Tests` 引用 `Common.Tests`，這是本 repo 第一個測試專案引用測試專案的地方。
+  - 帶 `[ADR-10]` 標記的斷言（`ListOpen` 排除已關閉、改設定對已關閉的房間回 false、`TryClose` 的三態）會在關房改成真刪那一步消失或翻面。標記是留給那一步用的，讓它是機械式的。
 - **房間本身的持久儲存選擇**。`IRoomStore` 與 `IRoomBanList` 是持久資料（房間關掉之後歷史訊息還要能查），不該只放 Redis。但這個決定跟聊天層的訊息記錄是**同一個決定**（同一個資料庫、同一套 migration/備份策略），建議一起做，不要為房間層單獨選一個。介面設計刻意不綁任何儲存技術，所以先實作 Redis 版本再換也可以，只是要接受一次資料遷移。
 - **後台權限模型**：目前只認 `OwnerUserId`。要不要有「多位管理員」或「全站管理員」（例如你自己要能關掉任何房間）？後者會需要一個房間層之外的角色概念。
 - ~~**`ResolveConnectionsAsync` 的擁有者**：形狀確定，歸屬待定。~~ **已定案**：身分層的 `IPresenceDirectory`（見 6.3）。

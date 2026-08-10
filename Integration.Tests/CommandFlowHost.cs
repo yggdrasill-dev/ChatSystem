@@ -7,6 +7,7 @@ using Common.Connections;
 using Common.Identity;
 using Common.Protocol;
 using Common.Rooms;
+using Common.Tests.Rooms;
 using Dispatcher;
 using Google.Protobuf;
 using Microsoft.Extensions.DependencyInjection;

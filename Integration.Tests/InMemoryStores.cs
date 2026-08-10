@@ -8,6 +8,9 @@ namespace Integration.Tests;
 // 這些替身只負責讓「層與層的組合」跑得起來，不是 Redis 實作的規格。Redis 的語意（Lua 的
 // fencing、GETSET、讀取時過濾）由 Common.Tests 裡對著 mock IDatabase 的單元測試守。
 //
+// IRoomStore / IRoomBanList 的替身**不在這裡**，移到 Common.Tests.Rooms 了：那兩個同時是
+// RoomStoreContractTests / RoomBanListContractTests 的跑道，兩邊各留一份會漂移。
+//
 // 但有兩件事刻意跟 Redis 版對齊，因為 handler 的正確性依賴它們：
 //   1. GetMembersAsync 在讀取時就濾掉寬限期已過的成員（room-layer.md ADR-2）
 //   2. 「userId → roomId」的指向只有在還指向這個房間時才會被清掉（fencing）
@@ -89,66 +92,6 @@ internal sealed class InMemoryRoomMembership(TimeProvider timeProvider) : IRoomM
 		];
 
 		return ValueTask.FromResult(expired);
-	}
-}
-
-internal sealed class InMemoryRoomStore : IRoomStore
-{
-	private readonly ConcurrentDictionary<string, Room> m_Rooms = new();
-
-	public ValueTask<Room?> GetAsync(string roomId, CancellationToken cancellationToken = default) =>
-		ValueTask.FromResult(m_Rooms.TryGetValue(roomId, out var room) ? room : null);
-
-	public ValueTask<IReadOnlyCollection<Room>> ListOpenAsync(CancellationToken cancellationToken = default) =>
-		ValueTask.FromResult<IReadOnlyCollection<Room>>([.. m_Rooms.Values.Where(room => !room.IsClosed)]);
-
-	public ValueTask<bool> TryCreateAsync(Room room, CancellationToken cancellationToken = default) =>
-		ValueTask.FromResult(m_Rooms.TryAdd(room.RoomId, room));
-
-	public ValueTask<bool> TryUpdateSettingsAsync(
-		string roomId,
-		string name,
-		string? passwordHash,
-		CancellationToken cancellationToken = default)
-	{
-		if (!m_Rooms.TryGetValue(roomId, out var room) || room.IsClosed)
-			return ValueTask.FromResult(false);
-
-		m_Rooms[roomId] = room with { Name = name, PasswordHash = passwordHash };
-
-		return ValueTask.FromResult(true);
-	}
-
-	public ValueTask<bool> TryCloseAsync(string roomId, CancellationToken cancellationToken = default)
-	{
-		if (!m_Rooms.TryGetValue(roomId, out var room) || room.IsClosed)
-			return ValueTask.FromResult(false);
-
-		m_Rooms[roomId] = room with { IsClosed = true };
-
-		return ValueTask.FromResult(true);
-	}
-}
-
-internal sealed class InMemoryRoomBanList : IRoomBanList
-{
-	private readonly ConcurrentDictionary<(string RoomId, string UserId), bool> m_Banned = new();
-
-	public ValueTask<bool> IsBannedAsync(string roomId, string userId, CancellationToken cancellationToken = default) =>
-		ValueTask.FromResult(m_Banned.ContainsKey((roomId, userId)));
-
-	public ValueTask BanAsync(string roomId, string userId, CancellationToken cancellationToken = default)
-	{
-		m_Banned[(roomId, userId)] = true;
-
-		return ValueTask.CompletedTask;
-	}
-
-	public ValueTask UnbanAsync(string roomId, string userId, CancellationToken cancellationToken = default)
-	{
-		m_Banned.TryRemove((roomId, userId), out _);
-
-		return ValueTask.CompletedTask;
 	}
 }
 

@@ -734,6 +734,7 @@ public interface IChatRateLimiter
 2. `PostgresChatMessageStore`（Npgsql + Dapper 手寫 SQL + 冪等的啟動時 migration，6.6），schema 見 6.5。**要通過 `ChatMessageStoreContractTests` 同一組斷言。**
 3. `RedisChatRateLimiter`（`INCR` + `EXPIRE 2`）。**放哪個 Redis 還沒定**——它是 per-user 的暫時計數，語意上最接近 `identity-store`，但 `connection-layer.md` ADR-2 的原則是「每層擁有自己的基礎設施」。這跟 §9 那條「`room-store` 遷移後怎麼處理」是同一類問題，應該一起決定。
 4. **房間層一起遷**（ADR-4）：`IRoomStore` / `IRoomBanList` 換 Postgres 實作，**同一批把 ADR-10 做掉**（`IsClosed` 移除、`TryCloseAsync` → `TryDeleteAsync`、`ROOM_CLOSED` 併入 `ROOM_NOT_FOUND`）。
+   - **已先行完成**：房間層兩個 store 的契約測試（`room-layer.md` §9）。房間層原本只有對著 mock `IDatabase` 的白箱測試，那些換掉實作就整份作廢——`ChatMessageStoreContractTests` 讓聊天層的 (2) 有個接得住的target，(4) 現在也有了。
 5. 真 Postgres 才驗得到的兩件事補測試（§9 測試分層最後兩條）。
 
 **順序上 (4) 最痛**：它會動到已經實作並測試過的房間層，而且是破壞性的。但它必須跟 (2) 同一批，否則 `messages` 的 FK 沒有 `rooms` 可以指——這也正是 ADR-10 決定不單獨改 Redis 版本的理由。
