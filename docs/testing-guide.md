@@ -195,6 +195,20 @@ CsCheck 與 FsCheck 都有這個能力（CsCheck 的 model-based sample、FsChec
 
 > ChatSystem 的三個真實 bug **全部落在縫隙裡**:`InboundAck` 的 0 bytes（只有真 NATS 會把 0 bytes 變 null)、DI 重複註冊（只有真實組裝看得到)、cancellation token（只有真 Kestrel 會觸發 `RequestAborted`)。這不是巧合——**能被單層蓋到的 bug 早就被蓋掉了,留下來的都在縫隙裡。**
 
+### 假傳輸是 process 範圍的,而測試預設並行
+
+「整合層用假傳輸」還有一個代價不在上表裡:**那個假傳輸通常是 process 範圍的單一實例,而測試框架預設讓不同測試類別並行。** 兩個 host 同時活著就會互相偷訊息——A 送出的訊息被 B 的 processor 收走,B 的 store 裡沒有對應狀態所以什麼都不做,A 看到的是「回覆完全沒到」。
+
+這個失效模式有三個特徵,認得出來就省很多時間:
+
+- **只在整組跑時紅,單獨跑任何一個類別永遠綠。** 所以它極容易被誤判成「某一條測試自己的時序問題」,而被指控的那條跟原因無關。
+- **一次紅一到數條,而且跨測試類別。** 只看單一條紅的那次採樣,會完全看錯方向。
+- 錯誤訊息是「集合是空的」這種**缺席型**斷言失敗,不是值不對。
+
+> ChatSystem 的 `Integration.Tests` 就踩到這個:`CommandFlowHost` 的註解早就寫著「一個 process 裡只有一個 Direct queue」,但那句話當初只是用來說明「跨節點 fan-out 驗不到」——**沒人把它的第二個後果寫下來。** 修法是 `[assembly: CollectionBehavior(DisableTestParallelization = true)]`,代價是零(整組 0.6 秒)。修之前約 10 次會紅 3 次,修之後 20 次全綠。
+
+**判準**:如果假傳輸、記憶體 bus、或任何「process 內唯一」的資源被多個測試 host 共用,先關並行,不要先去改測試。給每個 host 獨立的 subject 前綴是另一條路,但那讓測試基礎設施改變了被測對象的 subject,代價比省下的並行度大。
+
 實務作法:
 
 - 每修好一個 bug,問**「為什麼現有的層都沒抓到?」**,答案就是縫隙的位置。
