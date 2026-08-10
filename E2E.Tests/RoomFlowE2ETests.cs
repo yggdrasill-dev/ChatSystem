@@ -194,12 +194,15 @@ public class RoomFlowE2ETests(AppHostFixture fixture)
 		Assert.Equal(RoomOperationReply.Types.Status.RoomNotFound, rejected.Status);
 	}
 
-	// **這一條的存在理由是 ADR-10 帶進來的那段 Lua。** 改設定現在走一段腳本，而單元測試 stub 掉
-	// ScriptEvaluateAsync、整合測試走 in-memory 替身——兩邊都不會真的執行它。語法錯或回傳型別不對
-	// 只有真 Redis 分辨得出來，所以這裡驗的是「它跑得起來而且真的寫進去了」。守門本身驗不到，
-	// 那條在下面的 RoomStore_RefusesToResurrectADeletedRoom。
+	// 原本這一條叫 Update_RunsTheScriptAgainstRealRedis，為了驗 B1 那段 EXISTS 守門的 Lua 真的跑
+	// 得起來。**B2 把房間搬到 Postgres，那段 Lua 連同 RedisRoomStore 一起消失了**——`UPDATE ...
+	// WHERE room_id = $1` 影響 0 列本來就回 false，不需要守門。
+	//
+	// 這一條留著，理由換成「改設定這條命令走完整條真實鏈路（含 Postgres）之後，讀回來是對的」
+	// ——它是 room.update 在 E2E 唯一的覆蓋。守門那個性質現在由契約測試
+	// TryUpdateSettings_DoesNotResurrectADeletedRoom 在真 Postgres 上驗（PostgresContractTests）。
 	[E2EFact]
-	public async Task Update_RunsTheScriptAgainstRealRedis()
+	public async Task Update_ClearsThePassword_ThroughTheRealChain()
 	{
 		await using var alice = await ConnectAsync("update-owner");
 
@@ -222,48 +225,7 @@ public class RoomFlowE2ETests(AppHostFixture fixture)
 
 		Assert.Equal(renamed, summary.Name);
 		Assert.False(summary.HasPassword);
-
 	}
-
-	// 下面兩條**不經過 client 命令**，直接對真 room-store 呼叫 IRoomStore。兩條性質都是 ADR-10
-	// 帶進來的，而且都在「client 走不到、in-memory 替身湊不出來」的夾縫裡——見
-	// AppHostFixture.ConnectRoomStoreAsync 的註解。
-	[E2EFact]
-	public async Task RoomStore_RefusesToResurrectADeletedRoom()
-	{
-		await using var probe = await fixture.ConnectRoomStoreAsync();
-
-		var roomId = UniqueId("zombie");
-		Assert.True(await probe.Store.TryCreateAsync(NewRoom(roomId)));
-		Assert.True(await probe.Store.TryDeleteAsync(roomId));
-
-		// **這正是 RoomUpdateHandler 走不到的那條路徑**：它自己會先 GetAsync，房間不在就直接回
-		// ROOM_NOT_FOUND，所以循序的 client 命令永遠不會讓 HSET 撞上一個不存在的 key。真正會走到
-		// 這裡的是 update 與 close 交錯的那個窗口。少了腳本裡那行 EXISTS，HSET 會把房間建回來一半
-		// ——只有 name 與 password_hash、沒有房主。
-		Assert.False(await probe.Store.TryUpdateSettingsAsync(roomId, "Zombie", null));
-		Assert.Null(await probe.Store.GetAsync(roomId));
-	}
-
-	[E2EFact]
-	public async Task RoomStore_DeleteTakesTheBanListWithIt()
-	{
-		await using var probe = await fixture.ConnectRoomStoreAsync();
-
-		var roomId = UniqueId("cascade");
-		Assert.True(await probe.Store.TryCreateAsync(NewRoom(roomId)));
-		await probe.Bans.BanAsync(roomId, "banned-user");
-
-		Assert.True(await probe.Store.TryDeleteAsync(roomId));
-
-		// Postgres 版靠 ON DELETE CASCADE，Redis 版只能在 TryDeleteAsync 裡自己多刪一個 key
-		// （ADR-10）。留著的話那個集合永遠不會再被讀到——roomId 是 Guid、不會重用——但那正是
-		// ADR-10 想消滅的孤兒形狀，所以這裡把它釘住。
-		Assert.False(await probe.Bans.IsBannedAsync(roomId, "banned-user"));
-	}
-
-	private static Room NewRoom(string roomId) =>
-		new(roomId, "Lobby", null, "probe-owner", DateTimeOffset.FromUnixTimeMilliseconds(1_700_000_000_000));
 
 	[E2EFact]
 	public async Task GracePeriod_ReconnectWithinTheWindow_IsInvisibleToOtherMembers()

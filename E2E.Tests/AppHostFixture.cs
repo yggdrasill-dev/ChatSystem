@@ -2,6 +2,8 @@ using Aspire.Hosting;
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.Testing;
 using Common.Rooms;
+using Common.Storage;
+using Npgsql;
 using StackExchange.Redis;
 
 namespace E2E.Tests;
@@ -34,6 +36,8 @@ public sealed class AppHostFixture : IAsyncLifetime
 	// 會拿不到東西。這個 fixture 跟部署拓樸綁在一起是刻意的——它要直接對 Redis 說話。
 	private string RedisConnectionString { get; set; } = null!;
 
+	private string ChatDbConnectionString { get; set; } = null!;
+
 	public async Task InitializeAsync()
 	{
 		// 閘門關著就不要花一分鐘啟容器——所有測試都會被 Skip，fixture 也不該做事。
@@ -60,6 +64,9 @@ public sealed class AppHostFixture : IAsyncLifetime
 		RedisConnectionString =
 			await m_App.GetConnectionStringAsync("redis").ConfigureAwait(false)
 			?? throw new InvalidOperationException("拿不到 redis 的連線字串。");
+		ChatDbConnectionString =
+			await m_App.GetConnectionStringAsync("chat-db").ConfigureAwait(false)
+			?? throw new InvalidOperationException("拿不到 chat-db 的連線字串。");
 
 		// 不用 WaitForResourceAsync：Gateway 開了 replica，資源名稱會變成 gateway-0/gateway-1 之類的
 		// 衍生名字，猜名字比直接問傳輸層脆弱。這裡直接打 endpoint，能回應就是真的可以用了。
@@ -111,14 +118,35 @@ public sealed class AppHostFixture : IAsyncLifetime
 		return snapshot;
 	}
 
-	// 直接對 room-store 說話的房間層儲存。**只給「經由 client 命令走不到」的斷言用。**
+	// 真 Postgres 上的房間層儲存，**建在一個獨立的 schema 裡**。
 	//
-	// 目前有兩條那樣的性質，兩條都是 ADR-10 帶進來的：TryUpdateSettingsAsync 的 EXISTS 守門
-	// 擋的是 update 與 delete 交錯的那個窗口，而 RoomUpdateHandler 自己會先 GetAsync，所以
-	// 循序的 client 命令永遠走不到那條路徑；而「刪房帶走封鎖名單」在 in-memory 的替身上湊不
-	// 出來（兩個替身是獨立物件），契約測試因此蓋不到。
-	public async Task<RoomStoreProbe> ConnectRoomStoreAsync() =>
-		new(await ConnectionMultiplexer.ConnectAsync(RedisConnectionString).ConfigureAwait(false));
+	// 契約測試每一條都要一個空的 store，而它跑的是應用真正在用的那個資料庫——直接
+	// TRUNCATE public.rooms 會把同一組 E2E 其他測試建的房間一起清掉。用 search_path 隔離：
+	// ChatDbMigrator 的 DDL 刻意不寫 schema 名稱，所以同一份 DDL 建到哪裡由連線決定。
+	public async Task<ChatDbProbe> ConnectChatDbAsync()
+	{
+		var dataSourceBuilder = new NpgsqlDataSourceBuilder(ChatDbConnectionString);
+		dataSourceBuilder.ConnectionStringBuilder.SearchPath = ChatDbProbe.Schema;
+
+		var dataSource = dataSourceBuilder.Build();
+
+		// 這一步不能省：search_path 指向一個不存在的 schema，Postgres **不會報錯**，只會讓後面的
+		// CREATE TABLE 落到 public 去——那正是要避免的事，而且它會靜默地看起來一切正常。
+		await using (var connection = await dataSource.OpenConnectionAsync().ConfigureAwait(false))
+		{
+			await using var command = connection.CreateCommand();
+			// **先 DROP 再 CREATE**，不是 CREATE IF NOT EXISTS：chat-db 掛了 data volume，schema
+			// 會跨執行留下來，而 migrator 用的是 CREATE TABLE IF NOT EXISTS——**改了 DDL 也不會生效**。
+			// 那會讓「拿掉 ON DELETE CASCADE」這種變異驗不出來（實際踩過）。
+			command.CommandText =
+				$"DROP SCHEMA IF EXISTS {ChatDbProbe.Schema} CASCADE; CREATE SCHEMA {ChatDbProbe.Schema}";
+			await command.ExecuteNonQueryAsync().ConfigureAwait(false);
+		}
+
+		await new ChatDbMigrator(dataSource).MigrateAsync().ConfigureAwait(false);
+
+		return new ChatDbProbe(dataSource);
+	}
 
 	private static void Configure(
 		IDistributedApplicationBuilder builder,
@@ -164,13 +192,28 @@ public sealed class AppHostFixture : IAsyncLifetime
 
 // 真 Redis 上的 IRoomStore / IRoomBanList。兩個實作都是 internal，靠 Common.csproj 的
 // InternalsVisibleTo 拿得到。
-public sealed class RoomStoreProbe(ConnectionMultiplexer redis) : IAsyncDisposable
+// 真 Postgres 上的 IRoomStore / IRoomBanList，活在自己的 schema 裡。兩個實作都是 internal，
+// 靠 Common.csproj 的 InternalsVisibleTo 拿得到。
+public sealed class ChatDbProbe(NpgsqlDataSource dataSource) : IAsyncDisposable
 {
-	public IRoomStore Store { get; } = new RedisRoomStore(redis);
+	public const string Schema = "contract_probe";
 
-	public IRoomBanList Bans { get; } = new RedisRoomBanList(redis);
+	public IRoomStore Store { get; } = new PostgresRoomStore(dataSource);
 
-	public ValueTask DisposeAsync() => redis.DisposeAsync();
+	public IRoomBanList Bans { get; } = new PostgresRoomBanList(dataSource);
+
+	// `CASCADE` 這裡指的是 TRUNCATE 的 CASCADE（連帶清掉有 FK 指過來的 room_bans），
+	// 跟 ADR-10 那個 ON DELETE CASCADE 是兩件不同的事，只是剛好同名。
+	public async Task ResetAsync()
+	{
+		await using var connection = await dataSource.OpenConnectionAsync().ConfigureAwait(false);
+		await using var command = connection.CreateCommand();
+
+		command.CommandText = "TRUNCATE rooms CASCADE";
+		await command.ExecuteNonQueryAsync().ConfigureAwait(false);
+	}
+
+	public ValueTask DisposeAsync() => dataSource.DisposeAsync();
 }
 
 [CollectionDefinition(Name)]

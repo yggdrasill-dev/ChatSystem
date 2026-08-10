@@ -24,11 +24,13 @@
   <ItemGroup>
     <PackageReference Include="Adaptare" Version="2.2.1" />
     <PackageReference Include="Adaptare.Nats" Version="2.2.1" />
+    <PackageReference Include="Dapper" Version="2.1.79" />
     <PackageReference Include="Google.Protobuf" Version="3.35.1" />
     <PackageReference Include="Grpc.Tools" Version="2.82.0">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
+    <PackageReference Include="Npgsql" Version="10.0.3" />
     <PackageReference Include="StackExchange.Redis" Version="3.0.17" />
   </ItemGroup>
 

@@ -388,11 +388,12 @@ CREATE TABLE rooms (
 -- 也沒有 is_closed。關房＝刪房，「已關閉的房間」這個狀態不存在（ADR-10）。
 
 CREATE TABLE room_bans (
-    room_id   text        NOT NULL REFERENCES rooms(room_id) ON DELETE CASCADE,
-    user_id   text        NOT NULL,
-    banned_at timestamptz NOT NULL,
+    room_id text NOT NULL REFERENCES rooms(room_id) ON DELETE CASCADE,
+    user_id text NOT NULL,
     PRIMARY KEY (room_id, user_id)
 );
+-- banned_at 原本列在這裡，實作時拿掉了：IRoomBanList.BanAsync 沒有時間參數，加了會是一個
+-- 沒有任何程式碼讀得到的欄位。等「這個封鎖是什麼時候下的」真的有需求再加（room-layer.md §9）。
 
 CREATE TABLE messages (
     room_id             text        NOT NULL REFERENCES rooms(room_id) ON DELETE CASCADE,
@@ -740,18 +741,16 @@ public interface IChatRateLimiter
 - 房間層兩個 store 的**契約測試**（`room-layer.md` §9）。房間層原本只有對著 mock `IDatabase` 的白箱測試，那些換掉實作就整份作廢——`ChatMessageStoreContractTests` 讓聊天層的訊息 store 有個接得住的目標，房間層的兩個 store 現在也有了。
 - **ADR-10 的語意變更**（`room-layer.md` §9）。原本規劃跟換儲存同一批，改成先單獨做完——理由與代價見 ADR-10 最後一條。**儲存還是 Redis**，所以下面 (2) 只剩換實作這件事。
 
+- **AppHost 的 `chat-db`**（`postgres` 資源 + 同名資料庫）與 `CommandRouter` 的 `WithReference`。
+- **房間層已遷**（原清單的 (2)）：`PostgresRoomStore` / `PostgresRoomBanList`、`Common/Storage/ChatDbMigrator`，`RedisRoomStore` / `RedisRoomBanList` 與 14 條白箱測試已刪除。**B0 那 20 條契約斷言現在對著真 Postgres 跑一次**（契約測試改成抽象基底，in-memory 與 Postgres 各派生一個殼）。實作才浮現的三件事與一個變異驗證的陷阱記在 `room-layer.md` §9，其中兩件值得在這裡點名：
+  - **Dapper 不能直接對映 `Room`**（`timestamptz` → `DateTime` vs `DateTimeOffset`），症狀出現在 `room.list.reply` 沒回來而不是單元測試裡。
+  - **`IRoomBanList` 有一條沒寫下來的前置條件：房間必須存在**，被 `room_bans` 的 FK 逼出來。那條 FK 就是 ADR-10 的 CASCADE 機制，所以這不是可以繞的。
+
 剩下的：
 
-1. AppHost 新增 `chat-db`（Postgres）+ `CommandRouter` 的 `WithReference`。
-2. **房間層先遷**（ADR-4）：`IRoomStore` / `IRoomBanList` 換 Postgres 實作，schema 見 6.5 的 `rooms` / `room_bans`。**要通過 `RoomStoreContractTests` / `RoomBanListContractTests` 同一組斷言**——語意已經是 ADR-10 之後的樣子，這一步不該再動任何 handler 或 proto。
-   - `RedisRoomStore` 那段 `EXISTS` 守門的 Lua 不用搬：它擋的是 `HSET` 會建立不存在的 key，而 `UPDATE ... WHERE room_id = $1` 影響 0 列本來就回 `false`。**但 `RoomStoreContractTests.TryUpdateSettings_DoesNotResurrectADeletedRoom` 要照樣通過**，那條斷言不分儲存。
-   - E2E 那兩條直接對 store 說話的測試（`RoomStore_*`）要跟著改成連 Postgres，其中「刪房帶走封鎖名單」屆時驗的是 `ON DELETE CASCADE` 而不是手動刪 key。
-3. `PostgresChatMessageStore`（Npgsql + Dapper 手寫 SQL + 冪等的啟動時 migration，6.6），schema 見 6.5 的 `messages`。**要通過 `ChatMessageStoreContractTests` 同一組斷言。** `messages` 的 FK 到這一步才建得起來，ADR-10 的 `ON DELETE CASCADE` 也在這裡閉合。
-4. `RedisChatRateLimiter`（`INCR` + `EXPIRE 2`）。~~**放哪個 Redis 還沒定。**~~ 已隨 §9 那條一起解決：聊天層拿自己的邏輯名稱（`chat-ratelimit`），AppHost 把它指到同一顆實體 Redis，**不需要新容器**。這一步要做的只有 `AddChatStore()` 換一行實作、`CommandRouter/Program.cs` 加一個 `AddKeyedRedisClient`、AppHost 加一個 `WithReference`。記得對一遍 AppHost 那份 key 前綴清單。不碰 schema，順序上完全獨立。
-5. 真 Postgres 才驗得到的兩件事補測試（§9 測試分層最後兩條）。
+1. **`PostgresChatMessageStore`**（Npgsql + Dapper 手寫 SQL，6.6），schema 見 6.5 的 `messages`，DDL 加進 `ChatDbMigrator`。**要通過 `ChatMessageStoreContractTests` 同一組斷言**——那一份還是舊形狀（具體類別 + `NewStore()`），可以照房間層的做法改成抽象基底，讓 in-memory 與 Postgres 各跑一次。`messages` 的 FK 到這一步才建得起來，ADR-10 的 `ON DELETE CASCADE` 也在這裡閉合。**做完之後 `CommandRouter` 才可以開複本。**
+   - 房間層那三個坑會原封不動地再遇到一次：`ChatMessage.SentAt` 也是 `DateTimeOffset`（要 row 型別）、`messages.room_id` 的 FK 要求房間存在（`ChatSendHandler` 先查授權所以成立，但契約測試要建房）、以及改了 DDL 要記得測試 schema 是 `DROP` 重建的。
+2. **`RedisChatRateLimiter`**（`INCR` + `EXPIRE 2`）。聊天層拿自己的邏輯名稱（`chat-ratelimit`），AppHost 把它指到同一顆實體 Redis，**不需要新容器**。要做的只有 `AddChatStore()` 換一行實作、`CommandRouter/Program.cs` 加一個 `AddKeyedRedisClient`、AppHost 加一個 `WithReference`。記得對一遍 AppHost 那份 key 前綴清單。不碰 schema，順序上完全獨立。
+3. 真 Postgres 才驗得到的兩件事補測試（§9 測試分層最後兩條）：主鍵衝突時 `TryAppendAsync` 真的回 `false`（23505），以及 keyset 分頁在稀疏鍵上的實際查詢計畫。**基礎設施已經就位**——`E2E.Tests` 的 `ChatDbProbe` 就是為這種測試開的。
 
-**(2) 先於 (3)，但不必跟它同一批。** 本節先前寫的是「房間層必須跟訊息 store 同一批，否則 `messages` 的 FK 沒有 `rooms` 可以指」——那句話只在「訊息先遷」的方向上成立。FK 是單向的 `messages.room_id → rooms.room_id`，`rooms` / `room_bans` 對 `messages` 沒有任何依賴，所以這是**順序**約束而不是**原子**約束：房間先遷，`messages` 建表時就有東西可以指。反過來才會被逼著二選一——先建一張沒有 FK 的 `messages` 再 `ALTER`（而 6.6 的啟動時 migration 明說不處理欄位變更），或者把兩件事塞進同一個 commit。
-
-**(2) 仍然是最痛的一步**：它會動到已經實作並測試過的房間層，而且是破壞性的——`Room` 少一個欄位、介面兩個方法改名改語意、`room.proto` 少一個 enum 值（wire 層變更）、`RedisRoomStoreTests` 那 16 條整份作廢。ADR-10 併進這一步的理由不變：`RedisRoomStore` / `RedisRoomBanList` 反正要被取代，先改 Redis 版等於同一個 refactor 做兩次。
-
-**拆開的代價是多一個中間態**：(2) 之後 (3) 之前，關房已經是真刪，但訊息還在 `InMemoryChatMessageStore` 裡、沒有 CASCADE 接手，於是留下孤兒訊息。階段 A 的訊息本來就 process 重啟即消失，所以無害——但這是「中間態不能上線」的第三條，跟訊息不持久化、限流不跨複本放在一起記。
+**目前的中間態**：房間已經在 Postgres、關房是真刪，但訊息還在 `InMemoryChatMessageStore` 裡、沒有 CASCADE 接手，所以刪房會留下孤兒訊息。階段 A 的訊息本來就 process 重啟即消失，所以無害——但這是「不能上線」的第三條，跟訊息不持久化、限流不跨複本放在一起記。**(1) 做完，前兩條一起消失。**

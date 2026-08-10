@@ -2,8 +2,9 @@ using Common.Rooms;
 
 namespace Common.Tests.Rooms;
 
-// **這些是 IRoomStore 的契約，不是替身的規格。** 階段 B 的 PostgresRoomStore 必須通過同一組
-// 斷言——屆時把 NewStore() 換掉就行，形狀比照 ChatMessageStoreContractTests。
+// **這些是 IRoomStore 的契約，不是替身的規格。** 抽象基底，每個實作派生一個殼去跑同一組斷言：
+// `InMemoryRoomStoreContractTests`（這個專案）與 `PostgresRoomStoreContractTests`（E2E.Tests，
+// 因為它需要真的資料庫）。B0 寫這一份的時候只有 in-memory，B2 讓 Postgres 也接了上來。
 //
 // 房間層原本沒有這個東西，這是 RedisRoomStoreTests 蓋不到的那一半：那些斷言的是 Redis
 // 指令的形狀（SADD 哪個 key、HashSetAsync 哪些欄位），換掉實作整份作廢、一條都接不過去。
@@ -12,7 +13,7 @@ namespace Common.Tests.Rooms;
 // 一條刻意**不在**這裡的保證：刪房會把封鎖名單一起帶走。它在每個實作上長得不一樣
 // （Postgres 是 ON DELETE CASCADE、Redis 是 TryDeleteAsync 裡多刪一個 key），而 in-memory
 // 的兩個替身是獨立物件、湊不出那個連動。由各實作自己的測試守。
-public class RoomStoreContractTests
+public abstract class RoomStoreContract
 {
 	// 固定值而不是 UtcNow：Redis 版把 CreatedAt 存成 unix 毫秒，UtcNow 帶的次毫秒 ticks
 	// round-trip 之後會被截掉。**契約的精度上限就是毫秒**，Postgres 的 timestamptz 更精確
@@ -21,7 +22,7 @@ public class RoomStoreContractTests
 
 	[Fact]
 	public async Task Get_ReturnsNull_WhenTheRoomDoesNotExist() =>
-		Assert.Null(await NewStore().GetAsync("never-created"));
+		Assert.Null(await (await NewStoreAsync()).GetAsync("never-created"));
 
 	[Fact]
 	public async Task TryCreate_ThenGet_RoundTripsEveryField()
@@ -62,7 +63,7 @@ public class RoomStoreContractTests
 
 	[Fact]
 	public async Task List_ReturnsEmpty_WhenThereAreNoRooms() =>
-		Assert.Empty(await NewStore().ListAsync());
+		Assert.Empty(await (await NewStoreAsync()).ListAsync());
 
 	[Fact]
 	public async Task List_ReturnsEveryRoom()
@@ -119,7 +120,7 @@ public class RoomStoreContractTests
 
 	[Fact]
 	public async Task TryUpdateSettings_ReturnsFalse_WhenTheRoomDoesNotExist() =>
-		Assert.False(await NewStore().TryUpdateSettingsAsync("never-created", "Lounge", null));
+		Assert.False(await (await NewStoreAsync()).TryUpdateSettingsAsync("never-created", "Lounge", null));
 
 	[Fact]
 	public async Task TryUpdateSettings_DoesNotResurrectADeletedRoom()
@@ -158,13 +159,15 @@ public class RoomStoreContractTests
 
 	[Fact]
 	public async Task TryDelete_ReturnsFalse_WhenTheRoomDoesNotExist() =>
-		Assert.False(await NewStore().TryDeleteAsync("never-created"));
+		Assert.False(await (await NewStoreAsync()).TryDeleteAsync("never-created"));
 
-	private static IRoomStore NewStore() => new InMemoryRoomStore();
+	// 實作提供一個**空的** store。Postgres 版靠這一步清掉上一條測試留下的資料，所以它得是 async
+	// ——in-memory 版 new 一個就好，兩者的差別只在這裡。
+	protected abstract ValueTask<IRoomStore> NewStoreAsync();
 
-	private static async Task<IRoomStore> NewStoreWithAsync(params Room[] rooms)
+	private async Task<IRoomStore> NewStoreWithAsync(params Room[] rooms)
 	{
-		var store = NewStore();
+		var store = await NewStoreAsync();
 
 		foreach (var room in rooms)
 			Assert.True(await store.TryCreateAsync(room));

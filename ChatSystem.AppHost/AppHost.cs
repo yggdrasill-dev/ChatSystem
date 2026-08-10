@@ -25,6 +25,16 @@ var redis = builder.AddRedis("redis")
 // 訊息匯流排：Gateway <-> Dispatcher 之間的 NATS pub/sub（dispatch.deliver / connect.deliver.{nodeId}）
 var messageBus = builder.AddNats("message-bus");
 
+// 正式持久儲存（chat-layer.md ADR-4）：rooms / room_bans / messages 三張表同一個資料庫，
+// 理由是同一套 migration 與備份策略。Session / Presence / 成員名單**不遷**——它們是 TTL 與
+// compare-and-swap 語意，放進關聯式資料庫會變難看也變慢。
+//
+// 跟上面 Redis 那顆相反，這裡實體與邏輯是 1:1：只有一個資料庫、也只有一個名稱。要拆的時候
+// 面對的是 schema 而不是連線字串，所以那層 indirection 在這裡買不到東西。
+var chatDb = builder.AddPostgres("postgres")
+	.WithDataVolume()
+	.AddDatabase("chat-db");
+
 builder.AddProject<Projects.Dispatcher>("dispatcher")
 	// connection-directory：連線層自己擁有的 ConnectionId -> NodeId 對照表
 	.WithReference(redis, "connection-directory")
@@ -40,8 +50,11 @@ builder.AddProject<Projects.CommandRouter>("command-router")
 	.WithReference(redis, "room-store")
 	// identity-store：Session（7 天 TTL）、登入 nonce、profile、Presence
 	.WithReference(redis, "identity-store")
+	// chat-db：房間、封鎖名單（階段 B）與訊息（階段 B 的下一步）
+	.WithReference(chatDb)
 	.WithReference(messageBus)
 	.WaitFor(redis)
+	.WaitFor(chatDb)
 	.WaitFor(messageBus);
 
 // 前端的 BFF：出靜態檔（未來 Angular 的 build 產物）並簽發 session cookie。

@@ -8,22 +8,22 @@ namespace Microsoft.Extensions.DependencyInjection;
 
 public static class RoomLayerServiceCollectionExtensions
 {
-	// 房間層用自己的 Redis 資源（AppHost 的 room-store），不共用連線層的 connection-directory：
-	// 房間資料是持久資料、需要開 AOF/RDB，跟連線層那個純快取用途的設定需求不同，而且
-	// connection-layer.md ADR-2 的擁有權原則就是「每一層的基礎設施由自己擁有」。
+	// **房間層橫跨兩個儲存**（chat-layer.md ADR-4）：房間與封鎖名單是持久資料，住 Postgres；
+	// 成員名單是暫時狀態（成員 hash、寬限期的 Sorted Set、userId → roomId 指向），留 Redis。
 	//
-	// 因為同一個 process（CommandRouter）會同時需要兩個 Redis，這裡必須用 keyed service
-	// 取得對應的 client：先呼叫 builder.AddKeyedRedisClient(redisServiceKey)。
+	// 需要先呼叫 builder.AddNpgsqlDataSource("chat-db") 與 builder.AddKeyedRedisClient(redisServiceKey)。
+	// Redis 那邊用 keyed service 是因為同一個 process 會有多個邏輯名稱（AppHost 目前把它們都
+	// 指向同一顆實體 Redis，見那裡的註解）。
 	public static IServiceCollection AddRoomStore(this IServiceCollection services, object redisServiceKey)
 	{
-		services.AddSingleton<IRoomStore>(sp =>
-			new RedisRoomStore(sp.GetRequiredKeyedService<IConnectionMultiplexer>(redisServiceKey)));
+		services.AddSingleton<IRoomStore, PostgresRoomStore>();
+		services.AddSingleton<IRoomBanList, PostgresRoomBanList>();
 
-		services.AddSingleton<IRoomBanList>(sp =>
-			new RedisRoomBanList(sp.GetRequiredKeyedService<IConnectionMultiplexer>(redisServiceKey)));
-
-		// 成員名單是暫時狀態、不是持久資料，但仍然放房間層自己的 Redis：它跟房間資料要
-		// 跨 key 一起操作（斷線標記那段 Lua），分開兩個 instance 就辦不到。
+		// 成員名單為什麼留 Redis：TTL 與寬限期的 Sorted Set 語意放進關聯式資料庫會變難看也變慢
+		// （ADR-4）。**先前這裡寫的理由是「要跟房間資料跨 key 一起操作」，那句話是錯的**——
+		// RedisRoomMembership 那兩段 Lua 動的是 Members / Grace / UserRoom，一個都不碰
+		// {rooms}:room:*。`{rooms}` 這個 hash tag 仍然需要，但要的是成員名單自己那幾個 key
+		// 落在同一個 slot，跟房間資料無關。
 		services.TryAddSingleton(TimeProvider.System);
 
 		return services.AddSingleton<IRoomMembership>(sp =>

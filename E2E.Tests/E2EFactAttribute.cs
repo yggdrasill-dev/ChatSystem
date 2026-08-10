@@ -10,10 +10,14 @@ namespace E2E.Tests;
 // 需要 Docker Desktop 在跑。
 public sealed class E2EFactAttribute : FactAttribute
 {
+	// 契約測試的基底類別用的是普通的 [Fact]（in-memory 版必須永遠跑），所以那兩個 Postgres 殼
+	// 改不了屬性，只能在工廠方法裡 Assert.SkipUnless。理由字串共用這一份。
+	internal const string SkipReason = "需要 CHATSYSTEM_E2E=1（會啟動整個 AppHost，需要 Docker）。";
+
 	public E2EFactAttribute()
 	{
 		if (!Enabled)
-			Skip = "需要 CHATSYSTEM_E2E=1（會啟動整個 AppHost，需要 Docker）。";
+			Skip = SkipReason;
 	}
 
 	internal static bool Enabled => Environment.GetEnvironmentVariable("CHATSYSTEM_E2E") == "1";

@@ -219,17 +219,19 @@ public interface IRoomBanList
 
 **`OwnerUserId` 不可變更**這件事是刻意的，而且被後台流程依賴：`room.kick` / `room.close` / `room.update` 都是「先讀房間檢查是不是房主、再動作」，看起來像 TOCTOU，但因為房主永遠不會變所以安全。**如果以後要加「轉移房主」功能，這三個流程都要重新檢視。**
 
-**Redis key 設計**（provisional，見 ADR-7）：
+**Redis key 設計**——**已被 PostgreSQL 取代（B2），這張表只剩歷史價值**。`RedisRoomStore` / `RedisRoomBanList` 與它們的白箱測試都已刪除，schema 見 [chat-layer.md](chat-layer.md) 6.5。留著它是因為底下那段 hash tag 的論證**仍然有效，只是理由變了**：
 
-| key | 型別 | 用途 |
+| key（已移除） | 型別 | 用途 |
 |---|---|---|
-| `{rooms}:index` | Set | 所有 roomId。`TryCreateAsync` 用 `SADD` 的回傳值當原子守門，同時也是 `ListOpenAsync` 的來源 |
-| `{rooms}:room:{roomId}` | Hash | `name` / `password_hash` / `owner_user_id` / `created_at` / `is_closed` |
-| `{rooms}:ban:{roomId}` | Set | 封鎖的 userId。`SISMEMBER`／`SADD`／`SREM` 本身就是原子的，`IRoomBanList` 因此不需要 Try 語意 |
+| ~~`{rooms}:index`~~ | Set | 所有 roomId。`TryCreateAsync` 用 `SADD` 的回傳值當原子守門，同時也是列表的來源 → 現在是 `INSERT ... ON CONFLICT DO NOTHING` 的影響列數 |
+| ~~`{rooms}:room:{roomId}`~~ | Hash | `name` / `password_hash` / `owner_user_id` / `created_at`（`is_closed` 在 B1 就消失了） |
+| ~~`{rooms}:ban:{roomId}`~~ | Set | 封鎖的 userId → 現在是 `room_bans` 的複合主鍵，`IRoomBanList` 仍然不需要 Try 語意 |
 
-`{rooms}` 是 Redis Cluster 的 hash tag，讓房間層所有 key 落在同一個 slot。這是刻意的取捨：代價是這批資料集中在一個節點、無法靠 Cluster 分散，換來的是「同一個操作可以跨 key 保持一致」（例如未來真的需要 Lua 時）。房間資料量小、變更頻率低，可以接受；哪天那個 slot 變成熱點再重新評估。連線層走的是相反選擇——`Conn:{connectionId}` 刻意分散在不同 slot，也因此 `ResolveNodesAsync` 不能用 MGET（見 `connection-layer.md` 6.2）。
+`{rooms}` 是 Redis Cluster 的 hash tag，讓這批 key 落在同一個 slot。這是刻意的取捨：代價是資料集中在一個節點、無法靠 Cluster 分散，換來的是「同一個操作可以跨 key 保持一致」。連線層走的是相反選擇——`Conn:{connectionId}` 刻意分散在不同 slot，也因此 `ResolveNodesAsync` 不能用 MGET（見 `connection-layer.md` 6.2）。
 
-`ListOpenAsync` 是 `SMEMBERS` 之後逐筆 `HGETALL`（併發上限比照 `RedisConnectionDirectory` 的 64），也就是 N+1。房間數量小的時候沒問題，這正是 §8 把分頁列為「先不做」時心裡有數的成本。
+**B2 之後 hash tag 保護的對象換人了。** 先前這裡（以及 `AddRoomStore` 的註解）寫的是「成員名單要跟房間資料跨 key 一起操作」——**那句話一直是錯的**：`RedisRoomMembership` 的兩段 Lua 動的是 `Members` / `Grace` / `UserRoom`，一個都不碰房間資料。所以房間搬去 Postgres 並沒有動到這個取捨，hash tag 現在保護的是那三個成員名單自己的 key。
+
+`ListOpenAsync` 的 N+1（`SMEMBERS` 之後逐筆 `HGETALL`）也隨之消失——Postgres 上就是一個 `SELECT`。**但 §8 那個成本沒有變小**：`room.list` 仍然對每間房呼叫一次 `GetMembersAsync`（成員名單還在 Redis），所以 N+1 從「兩輪」變成「一輪」，不是零。
 
 `TryCreateAsync` 若在 `SADD` 成功之後、`HSET` 之前失敗，index 裡會留下一個沒有 hash 的 roomId。讀取端一律把「hash 不存在」視為房間不存在並跳過，所以那只是垃圾不是錯誤；而且 roomId 由呼叫端每次新產生，重試不會撞到同一個 id。
 
@@ -387,7 +389,9 @@ internal sealed class RoomGraceSweeper(
 - **Decision**：存雜湊（加 per-room salt）。房主忘記密碼就用 `room.update` 設一組新的，不提供「查看目前密碼」。
 - **Consequences**：`RoomSummary` 只揭露 `has_password` 布林值。代價是房主無法在 UI 上看到現在的密碼，只能重設——對一個 Demo 專案來說這個取捨很划算，避免了「儲存可還原的密碼」這個一旦做錯就很難補救的決定。
 
-### ADR-7（provisional）：房間與封鎖名單先放 Redis，跟聊天層一起遷到正式儲存
+### ADR-7（provisional → **已解除，B2 遷入 PostgreSQL**）：房間與封鎖名單先放 Redis，跟聊天層一起遷到正式儲存
+
+> **這個 provisional 標記已經到期。** 正式儲存是 PostgreSQL（[chat-layer.md](chat-layer.md) ADR-4），實作見第 9 節。底下的論證保留，因為它預測對了一件事也預測錯了一件事：對的是「抽象跟一個真的實作一起設計」抓到了 hash tag 與原子性需求；錯的是它假設「先實作 Redis 版再換」只需要接受一次資料遷移——實際上還被 FK 逼出了一條沒寫下來的前置條件（`IRoomBanList` 要求房間存在）。
 
 - **Context**：`IRoomStore` / `IRoomBanList` 是持久資料（房間關掉之後歷史訊息還要能查），不該只放 Redis。但真正逼出「需要可查詢的持久儲存」的是聊天層的訊息記錄（要分頁、可能要搜尋），而那還沒設計。另一個選項是先只寫一個 in-memory 實作、等儲存決定了再寫真的。
 - **Decision**：先寫 Redis 實作並明確標為 provisional。正式儲存的選擇跟聊天層的訊息記錄**一起做**，屆時遷移。
@@ -457,7 +461,15 @@ internal sealed class RoomGraceSweeper(
   - **兩條性質是測試夾縫裡的**：EXISTS 守門擋的窗口 client 命令走不到（`RoomUpdateHandler` 自己會先 `GetAsync`），而「刪房帶走封鎖名單」在 in-memory 替身上湊不出來（兩個替身是獨立物件）。所以 `E2E.Tests` 多了兩條**不經過 client、直接對真 room-store 呼叫 `IRoomStore`** 的測試，`AppHostFixture` 為此開了一個 `ConnectRoomStoreAsync()`。**第一版不是這樣寫的**：原本那條走 client 命令，而它抓不到把守門拿掉的變異——因為 handler 的 null 檢查先擋下來了，Lua 根本沒被呼叫到。
   - **已用手動變異驗證過**：拿掉 `EXISTS` 那一行、拿掉刪封鎖名單那一行，各自打紅對應的那一條 E2E。
   - 測試數：Common.Tests 178、Integration.Tests 31、E2E 16，三組全綠（E2E 需要 Docker 與 `CHATSYSTEM_E2E=1`）。
-- **房間本身的持久儲存選擇**。`IRoomStore` 與 `IRoomBanList` 是持久資料，不該只放 Redis。但這個決定跟聊天層的訊息記錄是**同一個決定**（同一個資料庫、同一套 migration/備份策略），建議一起做，不要為房間層單獨選一個。介面設計刻意不綁任何儲存技術，所以先實作 Redis 版本再換也可以，只是要接受一次資料遷移。
+- **已完成（B2）**：`IRoomStore` / `IRoomBanList` 換成 PostgreSQL（`PostgresRoomStore`、`PostgresRoomBanList`、`Common/Storage/ChatDbMigrator`），`RedisRoomStore` / `RedisRoomBanList` 與它們的 14 條白箱測試已刪除。成員名單留 Redis，所以**房間層從此橫跨兩個儲存**。
+  - **B0 那 20 條契約斷言現在對著真 Postgres 跑一次**：契約測試改成抽象基底，`Common.Tests` 派生 in-memory 版（0.4 秒、不需容器），`E2E.Tests` 派生 Postgres 版（借用 AppHost 已經有的容器，跑在獨立 schema 上）。**這正是 B0 當初寫它的目的，而它抓到的東西見下面兩條。**
+  - **三件實作才浮現的事**：
+    1. **不能把 `Room` 直接交給 Dapper 對映。** Npgsql 把 `timestamptz` 讀成 `DateTime`，而 `Room.CreatedAt` 是 `DateTimeOffset`，建構子對映對不上就丟「A parameterless default constructor or one matching signature ... is required」。中間放一個 row 型別明確轉換，不註冊 Dapper 的 `TypeHandler`（那是全域 static）。**症狀出現在 `room.list.reply` 沒回來**，不是在單元測試裡——因為 in-memory 替身不經過對映。
+    2. **`IRoomBanList` 有一條沒被寫下來的前置條件：房間必須存在。** `room_bans.room_id` 的 FK 是 ADR-10 的 CASCADE 機制，對不存在的房間下封鎖會丟 23503；Redis 的 Set 從來不管，所以 B0 那版契約測試直接對「room-1」下封鎖也過得去。那條前置條件**一直都成立**（`RoomBanHandler` 先讀房間、檢查房主），只是換儲存才被 FK 逼出來。契約測試已補上。
+    3. **`banned_at` 沒有實作**（6.5 的 schema 有列）：`IRoomBanList.BanAsync` 沒有時間參數，加了會是一個沒有任何程式碼讀得到的欄位。等「這個封鎖是什麼時候下的」真的有需求再加。
+  - **變異驗證踩到一個陷阱值得記**：`chat-db` 掛了 data volume，而 migrator 是 `CREATE TABLE IF NOT EXISTS`——**改 DDL 不會生效**，所以「拿掉 `ON DELETE CASCADE`」這種變異第一次驗不出來。測試用的 schema 因此改成每次 `DROP SCHEMA ... CASCADE` 再建。修好之後兩個變異（`DO NOTHING` 改成覆寫、拿掉 CASCADE）各自打紅預期的那一條。
+  - 測試數：Common.Tests 164、Integration.Tests 31、E2E 35（含 21 條 Postgres 契約）。
+- ~~**房間本身的持久儲存選擇**。`IRoomStore` 與 `IRoomBanList` 是持久資料，不該只放 Redis。~~ **已定案並實作：PostgreSQL**（[chat-layer.md](chat-layer.md) ADR-4）。以下保留原本的論證。但這個決定跟聊天層的訊息記錄是**同一個決定**（同一個資料庫、同一套 migration/備份策略），建議一起做，不要為房間層單獨選一個。介面設計刻意不綁任何儲存技術，所以先實作 Redis 版本再換也可以，只是要接受一次資料遷移。
 - **後台權限模型**：目前只認 `OwnerUserId`。要不要有「多位管理員」或「全站管理員」（例如你自己要能關掉任何房間）？後者會需要一個房間層之外的角色概念。
 - ~~**`ResolveConnectionsAsync` 的擁有者**：形狀確定，歸屬待定。~~ **已定案**：身分層的 `IPresenceDirectory`（見 6.3）。
 - 寬限期 30 秒與 sweeper 10 秒間隔都是暫定值，未經負載測試。

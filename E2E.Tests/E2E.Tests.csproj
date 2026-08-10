@@ -19,10 +19,21 @@
     <Using Include="Xunit" />
   </ItemGroup>
 
+  <!-- Postgres 的契約測試繼承自 Common.Tests 的基底類別，那裡面是普通的 [Fact]（in-memory 版
+       必須永遠跑），派生類別改不了它們的屬性；而 xunit v2 沒有動態 skip（Assert.Skip 是 v3 的
+       功能）。所以這一份的閘門只能是編譯期的——關著的時候整份不編進去，而不是編進去卻假裝綠。
+       同一個環境變數，兩種機制，理由寫在 PostgresContractTests.cs。 -->
+  <ItemGroup Condition="'$(CHATSYSTEM_E2E)' != '1'">
+    <Compile Remove="PostgresContractTests.cs" />
+  </ItemGroup>
+
   <ItemGroup>
     <!-- IsAspireProjectResource="false"：這是「我要啟動這個 AppHost」，不是「把它加進拓樸」 -->
     <ProjectReference Include="..\ChatSystem.AppHost\ChatSystem.AppHost.csproj" IsAspireProjectResource="false" />
     <ProjectReference Include="..\Common\Common.csproj" />
+    <!-- RoomStoreContract / RoomBanListContract 住在那裡。Postgres 實作要跑同一組斷言，而它需要
+         真的資料庫，所以那兩個殼只能放在這個專案（B0 時只有 in-memory 版本可以跑）。 -->
+    <ProjectReference Include="..\Common.Tests\Common.Tests.csproj" />
   </ItemGroup>
 
 </Project>

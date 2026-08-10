@@ -1,6 +1,7 @@
 using CommandRouter;
 using Common.Protocol;
 using Common.Rooms;
+using Common.Storage;
 using NATS.Client.Core;
 
 var builder = Host.CreateApplicationBuilder(args);
@@ -21,11 +22,15 @@ var builder = Host.CreateApplicationBuilder(args);
 	// 協定層本身：subject ↔ 型別的對應表與出口
 	builder.Services.AddPacketRegistry();
 
-	// 房間層：房間/封鎖名單/成員名單住在自己的 Redis（room-store）。
-	// fan-out 要把 userId 換成 connectionId，所以也需要身分層的 IPresenceDirectory
-	// ——它住在 identity-store，跟 room-store 是兩個不同的 Redis 資源。
+	// 房間層橫跨兩個儲存：房間與封鎖名單在 Postgres（chat-db），成員名單留 Redis（room-store）。
+	// fan-out 要把 userId 換成 connectionId，所以也需要身分層的 IPresenceDirectory（identity-store）。
+	//
+	// room-store / identity-store 是**邏輯名稱**，AppHost 目前把它們指向同一顆實體 Redis
+	// ——所以這裡兩個 keyed client 連的是同一台，那是刻意的（見 AppHost.cs 的註解）。
+	builder.AddNpgsqlDataSource("chat-db");
 	builder.AddKeyedRedisClient("room-store");
 	builder.AddKeyedRedisClient("identity-store");
+	builder.Services.AddChatDb();
 	builder.Services.AddRoomStore("room-store");
 	builder.Services.AddIdentityStores("identity-store");
 	builder.Services.AddRoomPackets();
@@ -55,6 +60,11 @@ var builder = Host.CreateApplicationBuilder(args);
 
 var host = builder.Build();
 {
+	// **schema 要在開始收訊息之前就位。** 不做成 hosted service 的理由見 AddChatDb()：
+	// 同一批 hosted service 裡有會立刻開始收訊息的東西，而 hosted service 的順序是註冊順序。
+	// 這裡明確 await，失敗就啟動失敗——比第一則命令進來才炸在 SQL 上好查。
+	await host.Services.GetRequiredService<ChatDbMigrator>().MigrateAsync();
+
 	// 在這裡解析 PacketRegistry 有兩個目的：把對應表印進 log 方便排查，以及讓重複註冊的
 	// fail fast 發生在啟動時而不是第一則訊息進來時（ADR-4 失去編譯期檢查的補償）。
 	var registry = host.Services.GetRequiredService<PacketRegistry>();

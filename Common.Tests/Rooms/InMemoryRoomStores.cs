@@ -36,9 +36,9 @@ public sealed class InMemoryRoomStore : IRoomStore
 		return ValueTask.FromResult(true);
 	}
 
-	// 封鎖名單不在這裡帶走：這兩個替身是各自獨立的物件，湊不出 Postgres 的 ON DELETE CASCADE
-	// 或 Redis 版那次跨 key 刪除。**那條保證因此不在契約測試裡**，由各實作自己的測試守
-	// （Redis 版看 RedisRoomStoreTests 那條 KeyDelete 斷言，Postgres 版留給階段 B 的真容器測試）。
+	// 封鎖名單不在這裡帶走：這兩個替身是各自獨立的物件，湊不出 Postgres 的 ON DELETE CASCADE。
+	// **那條保證因此不在契約測試裡**，由 E2E.Tests 的
+	// PostgresRoomBanListContractTests.Delete_TakesTheBanListWithIt_ThroughTheForeignKey 守。
 	public ValueTask<bool> TryDeleteAsync(string roomId, CancellationToken cancellationToken = default) =>
 		ValueTask.FromResult(m_Rooms.TryRemove(roomId, out _));
 }
