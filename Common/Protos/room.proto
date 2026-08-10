@@ -59,7 +59,10 @@ message RoomOperationReply {
 		WRONG_PASSWORD = 2;
 		BANNED = 3;
 		NOT_OWNER = 4;
-		ROOM_CLOSED = 5;
+		// 5 曾經是 ROOM_CLOSED，隨 ADR-10 一起消失——關房＝刪房，「已關閉的房間」這個狀態
+		// 在系統裡不存在了，所以那些情境一律回 ROOM_NOT_FOUND。號碼保留不讓後來的人撿走：
+		// 同一個號碼換一個意思，是 wire 上最難查的那種錯。
+		reserved 5;
 		NOT_A_MEMBER = 6;
 	}
 

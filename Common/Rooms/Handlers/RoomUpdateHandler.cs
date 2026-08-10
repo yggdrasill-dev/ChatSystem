@@ -42,13 +42,13 @@ internal sealed class RoomUpdateHandler(
 			.TryUpdateSettingsAsync(message.RoomId, message.Name, passwordHash, cancellationToken)
 			.ConfigureAwait(false);
 
-		// 回 false 只可能是「這期間房間被關掉了」——併發 update 與 close 的競爭是 6.1 刻意
-		// 接受的，已關閉的房間設定沒有意義。
+		// 回 false 只可能是「這期間房間被刪掉了」——上面那次 GetAsync 之後、這次寫入之前。
+		// 對呼叫端來說跟一開始就找不到房間沒有差別，所以是同一個 ROOM_NOT_FOUND。
 		await broadcaster
 			.ReplyAsync(
 				context,
 				RoomReply.Of(
-					updated ? RoomOperationReply.Types.Status.Ok : RoomOperationReply.Types.Status.RoomClosed,
+					updated ? RoomOperationReply.Types.Status.Ok : RoomOperationReply.Types.Status.RoomNotFound,
 					message.RoomId),
 				cancellationToken)
 			.ConfigureAwait(false);

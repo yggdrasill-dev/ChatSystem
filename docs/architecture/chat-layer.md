@@ -645,11 +645,11 @@ public interface IChatRateLimiter
 - **而且產品上本來就沒有區分過**：`product-scope.md` §2 與 `room-layer.md` §1 都把這項能力寫成「關閉**／刪除**房間」。`IsClosed` 從來不是產品概念，它是為了避免孤兒訊息而生的實作手段——手段的前提被移除了，手段本身也該走。
 - **Consequences**：
   - **房間層變小**：`Room.IsClosed` 欄位、`ListOpenAsync` 的過濾、`RoomOperationReply.ROOM_CLOSED`（併入 `ROOM_NOT_FOUND`）、`TryCloseAsync` 的「已經是關閉狀態則回 false」全部消失。`TryCloseAsync` → `TryDeleteAsync`，「房間不存在則回 false」自然保住 idempotency。
-  - **`room-layer.md` 6.1 兩條「刻意接受的競爭」變乾淨**：`TryUpdateSettingsAsync` 與關房併發，改成真刪之後 `UPDATE ... WHERE room_id = $1` 影響 0 列、回 `false`，不再是「改到一間已關閉房間的設定」這種需要解釋為無害的狀態；兩個關房併發也只有一個會刪成功，所以**「`RoomClosed` 被廣播兩次」這條競爭直接消失**。（client 對重複通知仍要 idempotent，理由換成 `RoomMemberLeft` 那個。）
+  - ~~**`room-layer.md` 6.1 兩條「刻意接受的競爭」變乾淨**：`TryUpdateSettingsAsync` 與關房併發，改成真刪之後 `UPDATE ... WHERE room_id = $1` 影響 0 列、回 `false`……~~ **這兩條實作之後只對了一條。** 「兩個關房併發只有一個刪得到，所以 `RoomClosed` 不會廣播兩次」成立。但 update／delete 那條**方向相反**：「UPDATE 影響 0 列」是 Postgres 的性質，而語意變更先落在 Redis 上，`HSET` 對不存在的 key 會建立它——真刪把那條競爭從「無害」變成「殭屍房」。已用一段 `EXISTS` 守門的 Lua 消除，完整記錄在 `room-layer.md` 6.1。**教訓是本 ADR 的推論只在目標儲存上成立，而中間狀態不是目標儲存。**
   - **不可逆，而且沒有救**。誤按「關閉房間」＝該房所有歷史訊息立刻消失，沒有 undo、沒有垃圾桶。**webClient 必須做二次確認**，這是本 ADR 對前端提出的唯一硬要求。
   - **§9 那個洞消失了**，而且是用最誠實的方式：不是給歷史查詢補一條「曾經是成員」的授權路徑，而是承認資料不該留。`chat.history` 對已刪除的房間回 `NOT_IN_ROOM` 仍然正確——因為使用者確實不在任何房間。
   - **與 ADR-6 有一個張力，要說清楚**：ADR-6 為了避免長交易與 WAL 暴增，把保留期清理做成分批 `DELETE`；而 CASCADE 是**一次刪完**。兩者不衝突的理由是規模不同——ADR-6 處理的是「全表掃 90 天前的訊息」，這裡是「單一房間的全部訊息」，後者小一到兩個數量級。**觸發條件**：若單一房間的訊息量成長到 CASCADE 造成可觀的鎖等待，就改成 (c)（標記 + sweeper 分批清），屆時 `is_closed` 會以「待清理」的語意回來——**那時它才真的是為清理而存在的欄位，不是為了掩護孤兒訊息**。
-  - **實作時機併入 PostgreSQL 遷移**（ADR-4），不單獨做。`RedisRoomStore` / `RedisRoomBanList` 反正要被 Postgres 版本取代（§9），現在先改 Redis 版本等於同一個 refactor 做兩次。**在遷移完成之前，`IsClosed` 維持現狀——但它已經沒有設計理由了，留著純粹是因為改動不划算。**
+  - ~~**實作時機併入 PostgreSQL 遷移**（ADR-4），不單獨做。~~ **已改為單獨先做，而且做完了**（§11）。「同一個 refactor 做兩次」成立但範圍比字面小：只有 `RedisRoomStore.TryCloseAsync` 那一個方法白做（外加 Redis 沒有 CASCADE，真刪要自己把封鎖名單帶走的那幾行）。換來的是語意變更那一步不需要容器、紅掉時只有一個可能的原因——而它確實紅出了一個設計沒料到的問題（上一條）。**`IsClosed` 已經從系統裡消失。**
 
 ## 8. 明確排除於本階段
 
@@ -730,13 +730,17 @@ public interface IChatRateLimiter
 
 ### 階段 B（進行中）
 
-**已完成**：房間層兩個 store 的契約測試（`room-layer.md` §9）。房間層原本只有對著 mock `IDatabase` 的白箱測試，那些換掉實作就整份作廢——`ChatMessageStoreContractTests` 讓聊天層的訊息 store 有個接得住的目標，房間層的兩個 store 現在也有了。
+**已完成**：
+
+- 房間層兩個 store 的**契約測試**（`room-layer.md` §9）。房間層原本只有對著 mock `IDatabase` 的白箱測試，那些換掉實作就整份作廢——`ChatMessageStoreContractTests` 讓聊天層的訊息 store 有個接得住的目標，房間層的兩個 store 現在也有了。
+- **ADR-10 的語意變更**（`room-layer.md` §9）。原本規劃跟換儲存同一批，改成先單獨做完——理由與代價見 ADR-10 最後一條。**儲存還是 Redis**，所以下面 (2) 只剩換實作這件事。
 
 剩下的：
 
 1. AppHost 新增 `chat-db`（Postgres）+ `CommandRouter` 的 `WithReference`。
-2. **房間層先遷**（ADR-4）：`IRoomStore` / `IRoomBanList` 換 Postgres 實作（schema 見 6.5 的 `rooms` / `room_bans`），**同一批把 ADR-10 做掉**（`IsClosed` 移除、`TryCloseAsync` → `TryDeleteAsync`、`ROOM_CLOSED` 併入 `ROOM_NOT_FOUND`）。**要通過 `RoomStoreContractTests` / `RoomBanListContractTests` 同一組斷言。**
-   - **未定案**：ADR-10 的語意變更要不要**先在現有實作上做完**、再單獨換儲存。它有九成不在 `RedisRoomStore` 裡（`Room` 記錄、介面、`room.proto`、兩個 handler、替身、七條左右的測試），真正白做的只有一個方法；換來的是那一步不需要容器、紅掉時只有一個可能的原因。代價是 ADR-10 最後一條那個「同一個 refactor 做兩次」會小幅成立。
+2. **房間層先遷**（ADR-4）：`IRoomStore` / `IRoomBanList` 換 Postgres 實作，schema 見 6.5 的 `rooms` / `room_bans`。**要通過 `RoomStoreContractTests` / `RoomBanListContractTests` 同一組斷言**——語意已經是 ADR-10 之後的樣子，這一步不該再動任何 handler 或 proto。
+   - `RedisRoomStore` 那段 `EXISTS` 守門的 Lua 不用搬：它擋的是 `HSET` 會建立不存在的 key，而 `UPDATE ... WHERE room_id = $1` 影響 0 列本來就回 `false`。**但 `RoomStoreContractTests.TryUpdateSettings_DoesNotResurrectADeletedRoom` 要照樣通過**，那條斷言不分儲存。
+   - E2E 那兩條直接對 store 說話的測試（`RoomStore_*`）要跟著改成連 Postgres，其中「刪房帶走封鎖名單」屆時驗的是 `ON DELETE CASCADE` 而不是手動刪 key。
 3. `PostgresChatMessageStore`（Npgsql + Dapper 手寫 SQL + 冪等的啟動時 migration，6.6），schema 見 6.5 的 `messages`。**要通過 `ChatMessageStoreContractTests` 同一組斷言。** `messages` 的 FK 到這一步才建得起來，ADR-10 的 `ON DELETE CASCADE` 也在這裡閉合。
 4. `RedisChatRateLimiter`（`INCR` + `EXPIRE 2`）。**放哪個 Redis 還沒定**——它是 per-user 的暫時計數，語意上最接近 `identity-store`，但 `connection-layer.md` ADR-2 的原則是「每層擁有自己的基礎設施」。這跟 §9 那條「`room-store` 遷移後怎麼處理」是同一類問題，應該一起決定。這一步不碰 schema，順序上完全獨立。
 5. 真 Postgres 才驗得到的兩件事補測試（§9 測試分層最後兩條）。

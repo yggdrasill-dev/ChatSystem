@@ -18,8 +18,7 @@ internal sealed class RoomCreateHandler(
 			message.Name,
 			string.IsNullOrEmpty(message.Password) ? null : RoomPassword.Hash(message.Password),
 			context.Principal,
-			timeProvider.GetUtcNow(),
-			false);
+			timeProvider.GetUtcNow());
 
 		// roomId 是每次新產生的 Guid，撞到既有 id 不是業務失敗而是內部錯誤，所以往上丟讓
 		// ack 帶 HANDLER_FAILED——ADR-8 要求「業務失敗必須回下行訊息」，這不是業務失敗。

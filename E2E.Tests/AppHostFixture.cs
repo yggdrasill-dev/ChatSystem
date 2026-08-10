@@ -1,6 +1,7 @@
 using Aspire.Hosting;
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.Testing;
+using Common.Rooms;
 using StackExchange.Redis;
 
 namespace E2E.Tests;
@@ -29,6 +30,8 @@ public sealed class AppHostFixture : IAsyncLifetime
 
 	private string ConnectionDirectoryConnectionString { get; set; } = null!;
 
+	private string RoomStoreConnectionString { get; set; } = null!;
+
 	public async Task InitializeAsync()
 	{
 		// 閘門關著就不要花一分鐘啟容器——所有測試都會被 Skip，fixture 也不該做事。
@@ -55,6 +58,9 @@ public sealed class AppHostFixture : IAsyncLifetime
 		ConnectionDirectoryConnectionString =
 			await m_App.GetConnectionStringAsync("connection-directory").ConfigureAwait(false)
 			?? throw new InvalidOperationException("拿不到 connection-directory 的連線字串。");
+		RoomStoreConnectionString =
+			await m_App.GetConnectionStringAsync("room-store").ConfigureAwait(false)
+			?? throw new InvalidOperationException("拿不到 room-store 的連線字串。");
 
 		// 不用 WaitForResourceAsync：Gateway 開了 replica，資源名稱會變成 gateway-0/gateway-1 之類的
 		// 衍生名字，猜名字比直接問傳輸層脆弱。這裡直接打 endpoint，能回應就是真的可以用了。
@@ -103,6 +109,15 @@ public sealed class AppHostFixture : IAsyncLifetime
 		return snapshot;
 	}
 
+	// 直接對 room-store 說話的房間層儲存。**只給「經由 client 命令走不到」的斷言用。**
+	//
+	// 目前有兩條那樣的性質，兩條都是 ADR-10 帶進來的：TryUpdateSettingsAsync 的 EXISTS 守門
+	// 擋的是 update 與 delete 交錯的那個窗口，而 RoomUpdateHandler 自己會先 GetAsync，所以
+	// 循序的 client 命令永遠走不到那條路徑；而「刪房帶走封鎖名單」在 in-memory 的替身上湊不
+	// 出來（兩個替身是獨立物件），契約測試因此蓋不到。
+	public async Task<RoomStoreProbe> ConnectRoomStoreAsync() =>
+		new(await ConnectionMultiplexer.ConnectAsync(RoomStoreConnectionString).ConfigureAwait(false));
+
 	private static void Configure(
 		IDistributedApplicationBuilder builder,
 		string resourceName,
@@ -143,6 +158,17 @@ public sealed class AppHostFixture : IAsyncLifetime
 
 		throw new TimeoutException($"{baseUri}{path} 在 {_StartupTimeout} 內沒有起來。", last);
 	}
+}
+
+// 真 Redis 上的 IRoomStore / IRoomBanList。兩個實作都是 internal，靠 Common.csproj 的
+// InternalsVisibleTo 拿得到。
+public sealed class RoomStoreProbe(ConnectionMultiplexer redis) : IAsyncDisposable
+{
+	public IRoomStore Store { get; } = new RedisRoomStore(redis);
+
+	public IRoomBanList Bans { get; } = new RedisRoomBanList(redis);
+
+	public ValueTask DisposeAsync() => redis.DisposeAsync();
 }
 
 [CollectionDefinition(Name)]

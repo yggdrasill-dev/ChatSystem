@@ -228,12 +228,14 @@ public class RoomCommandFlowTests
 		Assert.Equal(roomId, host.Single<RoomClosed>().RoomId);
 		Assert.Equal([host.ConnectionOf("alice"), host.ConnectionOf("bob")], host.TargetsOf<RoomClosed>());
 
-		// 關閉之後成員被清掉，房間也不再出現在列表上
+		// 關閉之後成員被清掉，房間本身也不在了
 		Assert.Empty(await host.Membership.GetMembersAsync(roomId));
 
 		host.Clear();
 		await host.SendAsync("carol", "room.join", new JoinRoomRequest { RoomId = roomId });
-		Assert.Equal(Status.RoomClosed, host.Single<RoomOperationReply>().Status);
+
+		// ADR-10：關房＝刪房，所以晚到的人得到的是「沒有這間房」而不是「這間房關了」
+		Assert.Equal(Status.RoomNotFound, host.Single<RoomOperationReply>().Status);
 	}
 
 	[Fact]

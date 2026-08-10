@@ -174,23 +174,22 @@ public sealed record Room(
 	string Name,
 	string? PasswordHash,   // null = 公開房
 	string OwnerUserId,
-	DateTimeOffset CreatedAt,
-	bool IsClosed);
+	DateTimeOffset CreatedAt);
 
 public interface IRoomStore
 {
 	ValueTask<Room?> GetAsync(string roomId, CancellationToken cancellationToken = default);
 
-	ValueTask<IReadOnlyCollection<Room>> ListOpenAsync(CancellationToken cancellationToken = default);
+	ValueTask<IReadOnlyCollection<Room>> ListAsync(CancellationToken cancellationToken = default);
 
 	// 已存在則回 false，不覆寫。
 	ValueTask<bool> TryCreateAsync(Room room, CancellationToken cancellationToken = default);
 
-	// 房間不存在或已關閉則回 false。
+	// 房間不存在則回 false。
 	ValueTask<bool> TryUpdateSettingsAsync(string roomId, string name, string? passwordHash, CancellationToken cancellationToken = default);
 
-	// 房間不存在或已經是關閉狀態則回 false。
-	ValueTask<bool> TryCloseAsync(string roomId, CancellationToken cancellationToken = default);
+	// 真的刪除，封鎖名單一起走。房間不存在則回 false。
+	ValueTask<bool> TryDeleteAsync(string roomId, CancellationToken cancellationToken = default);
 }
 
 public interface IRoomBanList
@@ -207,16 +206,15 @@ public interface IRoomBanList
 
 - `Room.IsClosed` 移除，`ListOpenAsync` → `ListAsync`，`TryCloseAsync` → `TryDeleteAsync`（「房間不存在則回 false」自然保住 idempotency），`RoomOperationReply.ROOM_CLOSED` 併入 `ROOM_NOT_FOUND`。
 - **「已關閉的房間」這個狀態在系統裡不再存在**——房間只有「在」與「不在」。
-- **實作併入 PostgreSQL 遷移**（chat-layer ADR-4／ADR-10）：`RedisRoomStore` / `RedisRoomBanList` 反正要被取代，現在先改 Redis 版本等於同一個 refactor 做兩次。**在那之前 `IsClosed` 維持現狀，但它已經沒有設計理由了，留著純粹是因為改動不划算。**
-  - **這一條有一個未定案的變體**（`chat-layer.md` §11 階段 B 的 (2)）：把語意變更**先在現有實作上做完**、再單獨換儲存。上面那句「做兩次」仍然成立，但範圍比字面小——這一節列的五樣東西只有 `TryCloseAsync` 一個方法會白做，其餘（`Room` 記錄、介面、`room.proto`、兩個 handler、替身、測試）不管先做後做都只寫一次。
+- ~~**實作併入 PostgreSQL 遷移**：`RedisRoomStore` / `RedisRoomBanList` 反正要被取代，現在先改 Redis 版本等於同一個 refactor 做兩次。~~ **已改為先做，而且已經做完**（見第 9 節）。「做兩次」成立但範圍比字面小：只有 `TryCloseAsync` 那一個方法白做，換來的是語意變更那一步不需要容器、紅掉時只有一個可能的原因。**`IsClosed` 已經從系統裡消失。**
 - **對前端的硬要求**：刪除不可逆、沒有垃圾桶，webClient 的「關閉房間」必須二次確認。
 
 **為什麼不是 `GetAsync` + `UpdateAsync`**：初版設計是那樣，但 read-modify-write 會 lost update——兩個房主同時改設定、或 `room.update` 跟 `room.close` 併發都會出問題。而且**併發語意不是事後可以換掉的東西**，它會滲進每個呼叫端的寫法，所以在還沒有任何實作之前就先改掉。每個變更操作現在都是「一次到位、回傳有沒有生效」。
 
 **刻意接受的競爭**（實作時沒有用 Lua 消除，理由寫在這裡以免日後被「修正」成錯的東西）：
 
-- `TryUpdateSettingsAsync` 與 `TryCloseAsync` 併發：可能改到一個正在被關閉的房間的設定。無害——已關閉的房間，設定沒有意義。**遷移後這條會變乾淨**：真刪之後 `UPDATE ... WHERE room_id = $1` 影響 0 列、直接回 `false`，不再需要「無害」這個解釋（[chat-layer.md](chat-layer.md) ADR-10）。
-- 兩個 `TryCloseAsync` 併發：兩邊都可能回 `true`，`RoomClosed` 因此廣播兩次。無害——client 對重複的關閉通知照 idempotent 處理，跟 `RoomMemberLeft` 是同一個要求（見 6.5）。**遷移後這條會消失**：真刪只有一個呼叫刪得到，另一個回 `false` 就不廣播。client 端的 idempotent 要求仍然要留著，但理由換成 `RoomMemberLeft` 那個。
+- ~~`TryUpdateSettingsAsync` 與 `TryCloseAsync` 併發：可能改到一個正在被關閉的房間的設定。無害——已關閉的房間，設定沒有意義。**遷移後這條會變乾淨**：真刪之後 `UPDATE ... WHERE room_id = $1` 影響 0 列、直接回 `false`。~~ **這個預測是錯的，而且錯的方向相反：真刪讓這條從「無害」變成「殭屍房」。** 「UPDATE 影響 0 列」是 Postgres 的性質，Redis 的 `HSET` 對不存在的 key 會**建立**它——update 撞上 delete 會把房間寫回來一半（只有 `name` 與 `password_hash`，沒有房主、不在 index 上，但 `GetAsync` 查得到、`room.join` 進得去）。這是先在 Redis 上做 ADR-10 才會遇到的問題，設計文件從來沒有想像過這個中間狀態。**實作用一段 `EXISTS` 守門的 Lua 消除它**（`{rooms}` 的 hash tag 當初就是為這種情況付的代價），順手把原本的 read-modify-write 收成一次往返。Postgres 版不需要那段 Lua。
+- ~~兩個 `TryCloseAsync` 併發：兩邊都可能回 `true`，`RoomClosed` 因此廣播兩次。~~ **已消失。** `DEL` 的回傳值就是守門，只有一個呼叫刪得到，另一個回 `false` 就不廣播——對稱於 `TryCreateAsync` 的 `SADD`。client 端對重複關閉通知的 idempotent 要求仍然留著，但理由換成 `RoomMemberLeft` 那個（見 6.5）。
 - `TryCreateAsync` **不能**有競爭：這是唯一需要真正原子的操作，實作用 Redis `SADD` 的回傳值當守門（見下方 key 設計）。
 
 **`OwnerUserId` 不可變更**這件事是刻意的，而且被後台流程依賴：`room.kick` / `room.close` / `room.update` 都是「先讀房間檢查是不是房主、再動作」，看起來像 TOCTOU，但因為房主永遠不會變所以安全。**如果以後要加「轉移房主」功能，這三個流程都要重新檢視。**
@@ -454,7 +452,12 @@ internal sealed class RoomGraceSweeper(
   - **已用手動變異驗證過**：四個變異（建房改成覆寫、改設定整列覆寫、公開房存空字串、封鎖漏掉 roomId）各自只打紅預期的那一條，其餘 85 條照過。
   - `IRoomStore` / `IRoomBanList` 的 in-memory 替身從 `Integration.Tests/InMemoryStores.cs` 移到 `Common.Tests/Rooms/InMemoryRoomStores.cs`，契約測試與組合測試共用同一份——兩邊各留一份會漂移，症狀是「單元全綠、整合莫名其妙」。代價是 `Integration.Tests` 引用 `Common.Tests`，這是本 repo 第一個測試專案引用測試專案的地方。
   - 帶 `[ADR-10]` 標記的斷言（`ListOpen` 排除已關閉、改設定對已關閉的房間回 false、`TryClose` 的三態）會在關房改成真刪那一步消失或翻面。標記是留給那一步用的，讓它是機械式的。
-- **房間本身的持久儲存選擇**。`IRoomStore` 與 `IRoomBanList` 是持久資料（房間關掉之後歷史訊息還要能查），不該只放 Redis。但這個決定跟聊天層的訊息記錄是**同一個決定**（同一個資料庫、同一套 migration/備份策略），建議一起做，不要為房間層單獨選一個。介面設計刻意不綁任何儲存技術，所以先實作 Redis 版本再換也可以，只是要接受一次資料遷移。
+- **已完成**：ADR-10 的語意變更（`chat-layer.md` §11 階段 B 的 (2) 前半）。`Room.IsClosed` 移除、`ListOpenAsync` → `ListAsync`、`TryCloseAsync` → `TryDeleteAsync`、`room.proto` 的 `ROOM_CLOSED` 移除（號碼 5 標成 `reserved`，同一個號碼換意思是 wire 上最難查的錯）。**儲存還是 Redis**——刻意跟「換成 Postgres」拆成兩步，理由見 6.1 那一條。
+  - **實作才浮現、設計沒料到的一件事**：真刪讓 update／delete 的競爭變嚴重而不是變乾淨，因為 `HSET` 會建立不存在的 key。完整記錄在 6.1 的「刻意接受的競爭」，這裡只記結論——**那條競爭現在被一段 Lua 消除了，不再是「刻意接受」。**
+  - **兩條性質是測試夾縫裡的**：EXISTS 守門擋的窗口 client 命令走不到（`RoomUpdateHandler` 自己會先 `GetAsync`），而「刪房帶走封鎖名單」在 in-memory 替身上湊不出來（兩個替身是獨立物件）。所以 `E2E.Tests` 多了兩條**不經過 client、直接對真 room-store 呼叫 `IRoomStore`** 的測試，`AppHostFixture` 為此開了一個 `ConnectRoomStoreAsync()`。**第一版不是這樣寫的**：原本那條走 client 命令，而它抓不到把守門拿掉的變異——因為 handler 的 null 檢查先擋下來了，Lua 根本沒被呼叫到。
+  - **已用手動變異驗證過**：拿掉 `EXISTS` 那一行、拿掉刪封鎖名單那一行，各自打紅對應的那一條 E2E。
+  - 測試數：Common.Tests 178、Integration.Tests 31、E2E 16，三組全綠（E2E 需要 Docker 與 `CHATSYSTEM_E2E=1`）。
+- **房間本身的持久儲存選擇**。`IRoomStore` 與 `IRoomBanList` 是持久資料，不該只放 Redis。但這個決定跟聊天層的訊息記錄是**同一個決定**（同一個資料庫、同一套 migration/備份策略），建議一起做，不要為房間層單獨選一個。介面設計刻意不綁任何儲存技術，所以先實作 Redis 版本再換也可以，只是要接受一次資料遷移。
 - **後台權限模型**：目前只認 `OwnerUserId`。要不要有「多位管理員」或「全站管理員」（例如你自己要能關掉任何房間）？後者會需要一個房間層之外的角色概念。
 - ~~**`ResolveConnectionsAsync` 的擁有者**：形狀確定，歸屬待定。~~ **已定案**：身分層的 `IPresenceDirectory`（見 6.3）。
 - 寬限期 30 秒與 sweeper 10 秒間隔都是暫定值，未經負載測試。

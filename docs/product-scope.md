@@ -55,7 +55,7 @@
 - ~~房間後台管理功能具體要管理什麼~~ 已確認四項：踢出成員、封鎖使用者、關閉／刪除房間、修改房間設定（見 [room-layer.md](architecture/room-layer.md)）。「監看訊息」不在其中
 - ~~訊息記錄要保留多久、要不要分頁查詢~~ 已決定：保留 **90 天**（暫定值，未經驗證）、keyset 分頁，見 [chat-layer.md](architecture/chat-layer.md) ADR-6 與 5.2。**搜尋仍然沒做**——它的查詢成本跟分頁不同量級，會推翻該文件 ADR-5「歷史查詢走 WebSocket」的判斷
 - **使用者的顯示名稱**：房間成員名單目前只有 Google `sub`（一串數字），UI 上不能看。登入時已經把 Google 的 `name`／`picture` 存下來（[identity-layer.md](architecture/identity-layer.md) ADR-11）。**部分解決**：聊天訊息會內嵌送出當下的名稱快照（[chat-layer.md](architecture/chat-layer.md) ADR-3），所以聊天視窗不需要查詢介面；**成員名單仍然需要批次查詢介面**，那要等 webClient 才會被逼出來。「暱稱可不可以自己改」還是產品決定，但快照語意讓它變得無害——改名不會改寫歷史訊息
-- ~~**關閉的房間，歷史訊息還能不能看？**~~ **已決定：不能看，因為訊息會被刪掉。** 關閉房間＝**刪除**房間，該房的歷史訊息與封鎖名單一起刪（[chat-layer.md](architecture/chat-layer.md) ADR-10）。理由是這是個 demo 專案，歷史訊息沒有長期保留的價值；連帶結果是 `IsClosed` 這個狀態整個消失（它唯一的用途就是不讓歷史訊息變孤兒），房間只有「在」與「不在」。**兩個後果要記著**：刪除不可逆、沒有垃圾桶，所以 webClient 的關閉房間必須二次確認；而實作併入 PostgreSQL 遷移，在那之前 `IsClosed` 還在，但已經沒有設計理由
+- ~~**關閉的房間，歷史訊息還能不能看？**~~ **已決定：不能看，因為訊息會被刪掉。** 關閉房間＝**刪除**房間，該房的歷史訊息與封鎖名單一起刪（[chat-layer.md](architecture/chat-layer.md) ADR-10）。理由是這是個 demo 專案，歷史訊息沒有長期保留的價值；連帶結果是 `IsClosed` 這個狀態整個消失（它唯一的用途就是不讓歷史訊息變孤兒），房間只有「在」與「不在」。**兩個後果要記著**：刪除不可逆、沒有垃圾桶，所以 webClient 的關閉房間必須二次確認；而實作**已完成**（`IsClosed` 已經從系統裡消失，但儲存仍是 Redis——換 PostgreSQL 是分開的下一步）
 - ~~房間本身與封鎖名單需要持久儲存，這跟訊息記錄是**同一個儲存決定**，建議一起做，不要為房間層單獨選一個~~ **已決定：PostgreSQL**（[chat-layer.md](architecture/chat-layer.md) ADR-4），`rooms` / `room_bans` / `messages` 三張表同一個資料庫，理由就是本條原本寫的那個：同一套 migration／備份策略。Session / Presence / 成員名單**不遷**，維持 Redis（TTL 與 compare-and-swap 語意放進關聯式資料庫會變難看且變慢）
 - 第 3 節的排除清單只是根據目前對話推測，需要你確認是否有遺漏（該做但沒提到／不該做但被列進來）
 

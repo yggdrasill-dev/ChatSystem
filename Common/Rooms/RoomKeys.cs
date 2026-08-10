@@ -34,6 +34,5 @@ internal static class RoomKeys
 		public const string PasswordHash = "password_hash";
 		public const string OwnerUserId = "owner_user_id";
 		public const string CreatedAt = "created_at";
-		public const string IsClosed = "is_closed";
 	}
 }

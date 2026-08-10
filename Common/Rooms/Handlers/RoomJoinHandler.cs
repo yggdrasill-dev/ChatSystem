@@ -23,13 +23,6 @@ internal sealed class RoomJoinHandler(
 			return;
 		}
 
-		if (room.IsClosed)
-		{
-			await ReplyAsync(context, RoomOperationReply.Types.Status.RoomClosed, message.RoomId, cancellationToken)
-				.ConfigureAwait(false);
-			return;
-		}
-
 		if (await banList.IsBannedAsync(message.RoomId, context.Principal, cancellationToken).ConfigureAwait(false))
 		{
 			await ReplyAsync(context, RoomOperationReply.Types.Status.Banned, message.RoomId, cancellationToken)

@@ -13,13 +13,13 @@ internal sealed class RoomListHandler(
 		ListRoomsRequest message,
 		CancellationToken cancellationToken = default)
 	{
-		var rooms = await roomStore.ListOpenAsync(cancellationToken).ConfigureAwait(false);
+		var rooms = await roomStore.ListAsync(cancellationToken).ConfigureAwait(false);
 		var list = new RoomList();
 
 		foreach (var room in rooms)
 		{
 			// 人數用 GetMembersAsync().Count 而不是直接數 hash 的欄位數：後者會把寬限期已過、
-			// 還沒被 sweeper 清掉的幽靈成員一起算進去。代價是這裡在 ListOpenAsync 的 N+1
+			// 還沒被 sweeper 清掉的幽靈成員一起算進去。代價是這裡在 ListAsync 的 N+1
 			// 之上又多一輪 N（room-layer.md §8 把分頁列為「先不做」時心裡有數的成本又長了一點）。
 			var members = await membership.GetMembersAsync(room.RoomId, cancellationToken).ConfigureAwait(false);
 

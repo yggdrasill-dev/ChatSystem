@@ -8,5 +8,4 @@ public sealed record Room(
 	// 刻意不可變更。後台流程（kick/close/update）都是「先讀房間檢查是不是房主、再動作」，
 	// 看起來像 TOCTOU 但因為房主永遠不會變所以安全——如果以後要加「轉移房主」，那三個流程都要重新檢視。
 	string OwnerUserId,
-	DateTimeOffset CreatedAt,
-	bool IsClosed);
+	DateTimeOffset CreatedAt);

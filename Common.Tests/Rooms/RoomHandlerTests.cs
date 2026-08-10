@@ -32,7 +32,6 @@ public class RoomHandlerTests
 		Assert.NotNull(stored);
 		Assert.Equal("alice", stored.OwnerUserId);
 		Assert.Equal(_Now, stored.CreatedAt);
-		Assert.False(stored.IsClosed);
 
 		// 密碼不能以可還原的形式存（ADR-6）
 		Assert.NotNull(stored.PasswordHash);
@@ -74,16 +73,8 @@ public class RoomHandlerTests
 			Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
 	}
 
-	[Fact]
-	public async Task Join_RepliesRoomClosed_ForAClosedRoom()
-	{
-		var harness = new Harness();
-		harness.StubRoom(NewRoom(isClosed: true));
-
-		await harness.JoinHandler().HandleAsync(_Alice, new JoinRoomRequest { RoomId = "room-1" });
-
-		Assert.Equal(Status.RoomClosed, harness.Single<RoomOperationReply>().Status);
-	}
+	// 這裡原本有一條 Join_RepliesRoomClosed_ForAClosedRoom。ADR-10 之後「已關閉的房間」這個
+	// 狀態不存在了，關掉的房間就是 GetAsync 回 null，也就是上面那條 Join_RepliesRoomNotFound。
 
 	[Fact]
 	public async Task Join_RepliesBanned_BeforeCheckingThePassword()
@@ -274,7 +265,7 @@ public class RoomHandlerTests
 		var harness = new Harness();
 		harness.StubRoom(NewRoom());
 		harness.StubMembers("room-1", Member("alice"), Member("bob"));
-		harness.Store.TryCloseAsync("room-1", Arg.Any<CancellationToken>()).Returns(true);
+		harness.Store.TryDeleteAsync("room-1", Arg.Any<CancellationToken>()).Returns(true);
 
 		await new RoomCloseHandler(harness.Store, harness.Membership, harness.Broadcaster)
 			.HandleAsync(_Alice, new CloseRoomRequest { RoomId = "room-1" });
@@ -282,23 +273,25 @@ public class RoomHandlerTests
 		Assert.Equal(Status.Ok, harness.Single<RoomOperationReply>().Status);
 		Assert.Equal(["conn-alice", "conn-bob"], harness.TargetsOf<RoomClosed>());
 
-		// 名單要在關閉之前讀、清理要在廣播之後做，否則不知道該通知誰
+		// 名單要在刪除之前讀、清理要在廣播之後做，否則不知道該通知誰
 		await harness.Membership.Received(1).RemoveAsync("room-1", "alice", Arg.Any<CancellationToken>());
 		await harness.Membership.Received(1).RemoveAsync("room-1", "bob", Arg.Any<CancellationToken>());
 	}
 
 	[Fact]
-	public async Task Close_RepliesRoomClosed_AndBroadcastsNothing_WhenItWasAlreadyClosed()
+	public async Task Close_RepliesRoomNotFound_AndBroadcastsNothing_WhenTheRoomWasAlreadyDeleted()
 	{
 		var harness = new Harness();
 		harness.StubRoom(NewRoom());
 		harness.StubMembers("room-1", Member("bob"));
-		harness.Store.TryCloseAsync("room-1", Arg.Any<CancellationToken>()).Returns(false);
+		harness.Store.TryDeleteAsync("room-1", Arg.Any<CancellationToken>()).Returns(false);
 
+		// 兩個 close 併發時只有一個刪得到，另一個走這條——**所以 RoomClosed 不會被廣播兩次**。
+		// ADR-10 之前這裡是 6.1 刻意接受的重複廣播。
 		await new RoomCloseHandler(harness.Store, harness.Membership, harness.Broadcaster)
 			.HandleAsync(_Alice, new CloseRoomRequest { RoomId = "room-1" });
 
-		Assert.Equal(Status.RoomClosed, harness.Single<RoomOperationReply>().Status);
+		Assert.Equal(Status.RoomNotFound, harness.Single<RoomOperationReply>().Status);
 		Assert.DoesNotContain(harness.Sent, sent => sent.Message is RoomClosed);
 	}
 
@@ -361,7 +354,7 @@ public class RoomHandlerTests
 	public async Task List_ExposesOnlyWhetherARoomHasAPassword_AndCountsLiveMembers()
 	{
 		var harness = new Harness();
-		harness.Store.ListOpenAsync(Arg.Any<CancellationToken>()).Returns([
+		harness.Store.ListAsync(Arg.Any<CancellationToken>()).Returns([
 			NewRoom(roomId: "open", passwordHash: null),
 			NewRoom(roomId: "locked", passwordHash: RoomPasswordFor("x")),
 		]);
@@ -383,9 +376,8 @@ public class RoomHandlerTests
 	private static Room NewRoom(
 		string roomId = "room-1",
 		string? passwordHash = null,
-		string ownerUserId = "alice",
-		bool isClosed = false) =>
-		new(roomId, "Lobby", passwordHash, ownerUserId, _Now, isClosed);
+		string ownerUserId = "alice") =>
+		new(roomId, "Lobby", passwordHash, ownerUserId, _Now);
 
 	private static RoomMember Member(string userId, DateTimeOffset? disconnectedAt = null) =>
 		new(userId, _Now, $"conn-{userId}", disconnectedAt);
