@@ -208,6 +208,7 @@ public interface IRoomBanList
 - `Room.IsClosed` 移除，`ListOpenAsync` → `ListAsync`，`TryCloseAsync` → `TryDeleteAsync`（「房間不存在則回 false」自然保住 idempotency），`RoomOperationReply.ROOM_CLOSED` 併入 `ROOM_NOT_FOUND`。
 - **「已關閉的房間」這個狀態在系統裡不再存在**——房間只有「在」與「不在」。
 - **實作併入 PostgreSQL 遷移**（chat-layer ADR-4／ADR-10）：`RedisRoomStore` / `RedisRoomBanList` 反正要被取代，現在先改 Redis 版本等於同一個 refactor 做兩次。**在那之前 `IsClosed` 維持現狀，但它已經沒有設計理由了，留著純粹是因為改動不划算。**
+  - **這一條有一個未定案的變體**（`chat-layer.md` §11 階段 B 的 (2)）：把語意變更**先在現有實作上做完**、再單獨換儲存。上面那句「做兩次」仍然成立，但範圍比字面小——這一節列的五樣東西只有 `TryCloseAsync` 一個方法會白做，其餘（`Room` 記錄、介面、`room.proto`、兩個 handler、替身、測試）不管先做後做都只寫一次。
 - **對前端的硬要求**：刪除不可逆、沒有垃圾桶，webClient 的「關閉房間」必須二次確認。
 
 **為什麼不是 `GetAsync` + `UpdateAsync`**：初版設計是那樣，但 read-modify-write 會 lost update——兩個房主同時改設定、或 `room.update` 跟 `room.close` 併發都會出問題。而且**併發語意不是事後可以換掉的東西**，它會滲進每個呼叫端的寫法，所以在還沒有任何實作之前就先改掉。每個變更操作現在都是「一次到位、回傳有沒有生效」。

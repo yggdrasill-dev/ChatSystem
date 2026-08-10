@@ -1,6 +1,6 @@
 ﻿# 聊天層架構設計（Chat Layer）
 
-狀態：**階段 A 已實作**（`Common/Chat/` + `Common/Protos/chat.proto`，行為完整、儲存與限流是程序內替身）；**階段 B（PostgreSQL 落地 + 房間層遷移）未開始**，見 §11
+狀態：**階段 A 已實作**（`Common/Chat/` + `Common/Protos/chat.proto`，行為完整、儲存與限流是程序內替身）；**階段 B（PostgreSQL 落地 + 房間層遷移）進行中**——房間層的契約測試已就位，Postgres 尚未落地，見 §11
 技術棧：延續 .NET 10 + NATS（Adaptare）+ protobuf；**新增 PostgreSQL 作為正式持久儲存**（見 ADR-4，階段 B）
 範圍：**訊息本身——收發、持久化、歷史查詢**，不含「誰該收到」（房間層）與「怎麼投遞」（連線層）
 依賴：命令的解析與分派由協定層負責（[protocol-layer.md](protocol-layer.md)）；成員名單與 fan-out 名單向房間層取得（[room-layer.md](room-layer.md)）；送出者的顯示名稱向身分層取得（[identity-layer.md](identity-layer.md)）
@@ -728,13 +728,21 @@ public interface IChatRateLimiter
 
 **但它不能上線**，兩個原因都在 §6.9 與 6.7 標記過：訊息不持久化（process 重啟就消失）、限流不跨複本。
 
-### 階段 B（未開始）
+### 階段 B（進行中）
+
+**已完成**：房間層兩個 store 的契約測試（`room-layer.md` §9）。房間層原本只有對著 mock `IDatabase` 的白箱測試，那些換掉實作就整份作廢——`ChatMessageStoreContractTests` 讓聊天層的訊息 store 有個接得住的目標，房間層的兩個 store 現在也有了。
+
+剩下的：
 
 1. AppHost 新增 `chat-db`（Postgres）+ `CommandRouter` 的 `WithReference`。
-2. `PostgresChatMessageStore`（Npgsql + Dapper 手寫 SQL + 冪等的啟動時 migration，6.6），schema 見 6.5。**要通過 `ChatMessageStoreContractTests` 同一組斷言。**
-3. `RedisChatRateLimiter`（`INCR` + `EXPIRE 2`）。**放哪個 Redis 還沒定**——它是 per-user 的暫時計數，語意上最接近 `identity-store`，但 `connection-layer.md` ADR-2 的原則是「每層擁有自己的基礎設施」。這跟 §9 那條「`room-store` 遷移後怎麼處理」是同一類問題，應該一起決定。
-4. **房間層一起遷**（ADR-4）：`IRoomStore` / `IRoomBanList` 換 Postgres 實作，**同一批把 ADR-10 做掉**（`IsClosed` 移除、`TryCloseAsync` → `TryDeleteAsync`、`ROOM_CLOSED` 併入 `ROOM_NOT_FOUND`）。
-   - **已先行完成**：房間層兩個 store 的契約測試（`room-layer.md` §9）。房間層原本只有對著 mock `IDatabase` 的白箱測試，那些換掉實作就整份作廢——`ChatMessageStoreContractTests` 讓聊天層的 (2) 有個接得住的target，(4) 現在也有了。
+2. **房間層先遷**（ADR-4）：`IRoomStore` / `IRoomBanList` 換 Postgres 實作（schema 見 6.5 的 `rooms` / `room_bans`），**同一批把 ADR-10 做掉**（`IsClosed` 移除、`TryCloseAsync` → `TryDeleteAsync`、`ROOM_CLOSED` 併入 `ROOM_NOT_FOUND`）。**要通過 `RoomStoreContractTests` / `RoomBanListContractTests` 同一組斷言。**
+   - **未定案**：ADR-10 的語意變更要不要**先在現有實作上做完**、再單獨換儲存。它有九成不在 `RedisRoomStore` 裡（`Room` 記錄、介面、`room.proto`、兩個 handler、替身、七條左右的測試），真正白做的只有一個方法；換來的是那一步不需要容器、紅掉時只有一個可能的原因。代價是 ADR-10 最後一條那個「同一個 refactor 做兩次」會小幅成立。
+3. `PostgresChatMessageStore`（Npgsql + Dapper 手寫 SQL + 冪等的啟動時 migration，6.6），schema 見 6.5 的 `messages`。**要通過 `ChatMessageStoreContractTests` 同一組斷言。** `messages` 的 FK 到這一步才建得起來，ADR-10 的 `ON DELETE CASCADE` 也在這裡閉合。
+4. `RedisChatRateLimiter`（`INCR` + `EXPIRE 2`）。**放哪個 Redis 還沒定**——它是 per-user 的暫時計數，語意上最接近 `identity-store`，但 `connection-layer.md` ADR-2 的原則是「每層擁有自己的基礎設施」。這跟 §9 那條「`room-store` 遷移後怎麼處理」是同一類問題，應該一起決定。這一步不碰 schema，順序上完全獨立。
 5. 真 Postgres 才驗得到的兩件事補測試（§9 測試分層最後兩條）。
 
-**順序上 (4) 最痛**：它會動到已經實作並測試過的房間層，而且是破壞性的。但它必須跟 (2) 同一批，否則 `messages` 的 FK 沒有 `rooms` 可以指——這也正是 ADR-10 決定不單獨改 Redis 版本的理由。
+**(2) 先於 (3)，但不必跟它同一批。** 本節先前寫的是「房間層必須跟訊息 store 同一批，否則 `messages` 的 FK 沒有 `rooms` 可以指」——那句話只在「訊息先遷」的方向上成立。FK 是單向的 `messages.room_id → rooms.room_id`，`rooms` / `room_bans` 對 `messages` 沒有任何依賴，所以這是**順序**約束而不是**原子**約束：房間先遷，`messages` 建表時就有東西可以指。反過來才會被逼著二選一——先建一張沒有 FK 的 `messages` 再 `ALTER`（而 6.6 的啟動時 migration 明說不處理欄位變更），或者把兩件事塞進同一個 commit。
+
+**(2) 仍然是最痛的一步**：它會動到已經實作並測試過的房間層，而且是破壞性的——`Room` 少一個欄位、介面兩個方法改名改語意、`room.proto` 少一個 enum 值（wire 層變更）、`RedisRoomStoreTests` 那 16 條整份作廢。ADR-10 併進這一步的理由不變：`RedisRoomStore` / `RedisRoomBanList` 反正要被取代，先改 Redis 版等於同一個 refactor 做兩次。
+
+**拆開的代價是多一個中間態**：(2) 之後 (3) 之前，關房已經是真刪，但訊息還在 `InMemoryChatMessageStore` 裡、沒有 CASCADE 接手，於是留下孤兒訊息。階段 A 的訊息本來就 process 重啟即消失，所以無害——但這是「中間態不能上線」的第三條，跟訊息不持久化、限流不跨複本放在一起記。
