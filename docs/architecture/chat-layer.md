@@ -665,7 +665,12 @@ public interface IChatRateLimiter
 
 - ~~**關閉的房間，歷史訊息沒有人有權限查**~~ **已定案（ADR-10）**：關房＝刪房，訊息隨 `ON DELETE CASCADE` 一起刪。原本列的三個方向都沒被選——選的是第四個：**承認這些資料不該留**。這比「補一條曾經是成員的授權路徑」誠實，也讓 `IsClosed` 這個為了掩護孤兒訊息而存在的狀態整個消失。實作併入 PostgreSQL 遷移，理由見 ADR-10 最後一條。
 - ~~**`IUserProfileStore` 只被回答了一半**（ADR-3）。本層需要單筆的 `GetDisplayNameAsync(userId)`~~ **單筆已實作**（單一 `HGET`，`identity-layer.md` ADR-11 已同步）。**批次讀 N 個成員的 profile 仍然沒有介面**，而 `RoomJoined.member_user_ids` 要在 UI 上顯示成名字就需要它——那要等 webClient。
-- **房間層的 Redis 遷移完成後，`room-store` 這個資源要怎麼處理**。`rooms` / `room_bans` 搬進 Postgres 之後，`room-store` 只剩 `IRoomMembership`（成員名單、寬限期的 Sorted Set）。保留它（符合 `connection-layer.md` ADR-2 的「每層擁有自己的基礎設施」）或併進 `connection-directory`（同樣是暫時狀態）。傾向後者，但跟 ADR-2 的原則衝突——**沒定案**。
+- ~~**房間層的 Redis 遷移完成後，`room-store` 這個資源要怎麼處理**。保留它（符合 `connection-layer.md` ADR-2 的「每層擁有自己的基礎設施」）或併進 `connection-directory`。傾向後者，但跟 ADR-2 的原則衝突——**沒定案**。~~ **已定案，而且問錯了方向。**
+  - **這條引用 ADR-2 引錯了。** 去翻原文，ADR-2 論證的是**誰擁有那張對照表**（連線層不該反過來依賴上層的 SessionServer），是依賴方向；它的 Consequences 甚至寫「這個依賴本來就會存在，只是換了誰擁有它」。「每層擁有自己的基礎設施」是本節的轉述，比原文強——**而那個被加強的版本才是這條懸案的來源**。房間層照樣擁有成員名單、照樣直接存取，跟那些 key 住在哪個 instance 是兩件事。
+  - **真正的判準是 instance 級的設定**：`maxmemory-policy`（淘汰誰）、persistence、以及「一個慢指令卡住所有 client」的故障範圍。key 前綴解決撞名，解決不了那三個——所以只有那三者需要分歧時才該拆。這個專案只有一條分歧真的存在（身分層的 Session 要活過重啟），撐不起也不需要多顆。
+  - **做法是把邏輯名稱與實體資源分離**：AppHost 只開一顆 Redis，`connection-directory` / `room-store` / `identity-store` 這些**連線字串名稱**都指向它（`WithReference(redis, "room-store")`）。各層本來就只認 service key（`AddRoomStore(redisServiceKey)`），所以層與層的程式碼一行都沒動。**「開幾顆」從架構決定降級成部署參數**，要拆回去就是換 AppHost 那幾行的第一個引數。
+  - 代價三條寫在 `ChatSystem.AppHost/AppHost.cs`：persistence 被拉到最嚴格的那一個、key 前綴從巧合變成契約（那裡有清單）、每個邏輯名稱各自一組連線池。
+  - **`room-store` 這個名稱因此留著**，即使 `rooms` / `room_bans` 搬走之後它只剩成員名單——名稱跟實體無關，改名只是在猜未來的切分方式。
 - **遷移是一次破壞性變更**：`RedisRoomStore` / `RedisRoomBanList` 會被 Postgres 版本取代，`room-layer.md` 6.1 那張 Redis key 設計表會整段作廢。那節的論證仍有保存價值（它解釋了為什麼 `{rooms}` 用 hash tag 而連線層刻意不用），應該改寫成「已被取代」而不是刪掉。**注意：`{rooms}:seq:*` 這個 key 從來沒有存在過**——它只出現在本文件被推翻的第一版設計裡（ADR-2 的 (b)）。
 - ~~**`IInboundFilter` 的去留**（ADR-7）：協定層的變更，需要獨立決定。~~ **已移除**，見 `protocol-layer.md` ADR-6 的「執行」段。
 - **暫定值**（全部未經負載測試）：保留期 90 天、清理批次 5000 列 / 每天一輪、每人每秒 10 則、每則 4096 字元、歷史分頁預設 50 則、**歷史分頁上限 100 則**（最後這個是實作時補的：沒有上限的話 client 可以一次拉完整個房間的歷史，而 ADR-5 已經說明這條查詢會佔住那條連線的順序通道）。
@@ -742,7 +747,7 @@ public interface IChatRateLimiter
    - `RedisRoomStore` 那段 `EXISTS` 守門的 Lua 不用搬：它擋的是 `HSET` 會建立不存在的 key，而 `UPDATE ... WHERE room_id = $1` 影響 0 列本來就回 `false`。**但 `RoomStoreContractTests.TryUpdateSettings_DoesNotResurrectADeletedRoom` 要照樣通過**，那條斷言不分儲存。
    - E2E 那兩條直接對 store 說話的測試（`RoomStore_*`）要跟著改成連 Postgres，其中「刪房帶走封鎖名單」屆時驗的是 `ON DELETE CASCADE` 而不是手動刪 key。
 3. `PostgresChatMessageStore`（Npgsql + Dapper 手寫 SQL + 冪等的啟動時 migration，6.6），schema 見 6.5 的 `messages`。**要通過 `ChatMessageStoreContractTests` 同一組斷言。** `messages` 的 FK 到這一步才建得起來，ADR-10 的 `ON DELETE CASCADE` 也在這裡閉合。
-4. `RedisChatRateLimiter`（`INCR` + `EXPIRE 2`）。**放哪個 Redis 還沒定**——它是 per-user 的暫時計數，語意上最接近 `identity-store`，但 `connection-layer.md` ADR-2 的原則是「每層擁有自己的基礎設施」。這跟 §9 那條「`room-store` 遷移後怎麼處理」是同一類問題，應該一起決定。這一步不碰 schema，順序上完全獨立。
+4. `RedisChatRateLimiter`（`INCR` + `EXPIRE 2`）。~~**放哪個 Redis 還沒定。**~~ 已隨 §9 那條一起解決：聊天層拿自己的邏輯名稱（`chat-ratelimit`），AppHost 把它指到同一顆實體 Redis，**不需要新容器**。這一步要做的只有 `AddChatStore()` 換一行實作、`CommandRouter/Program.cs` 加一個 `AddKeyedRedisClient`、AppHost 加一個 `WithReference`。記得對一遍 AppHost 那份 key 前綴清單。不碰 schema，順序上完全獨立。
 5. 真 Postgres 才驗得到的兩件事補測試（§9 測試分層最後兩條）。
 
 **(2) 先於 (3)，但不必跟它同一批。** 本節先前寫的是「房間層必須跟訊息 store 同一批，否則 `messages` 的 FK 沒有 `rooms` 可以指」——那句話只在「訊息先遷」的方向上成立。FK 是單向的 `messages.room_id → rooms.room_id`，`rooms` / `room_bans` 對 `messages` 沒有任何依賴，所以這是**順序**約束而不是**原子**約束：房間先遷，`messages` 建表時就有東西可以指。反過來才會被逼著二選一——先建一張沒有 FK 的 `messages` 再 `ALTER`（而 6.6 的啟動時 migration 明說不處理欄位變更），或者把兩件事塞進同一個 commit。

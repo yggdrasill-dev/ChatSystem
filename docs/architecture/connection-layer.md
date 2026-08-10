@@ -532,6 +532,7 @@ receive loop 從 `connection.Principal` 取值（不是每則重查 Redis），�
 - **Context**：前一版設計讓 Dispatcher 去查一個假設中的 SessionServer 來解析路由——但 SessionServer 屬於還沒設計的使用者管理層，連線層反過來依賴它是本末倒置。
 - **Decision**：`ConnectionId → NodeId` 的對照表（`ConnectionDirectory`）是連線層自己的基礎設施，用連線層自己的 Redis（Cluster）存放，Gateway 直接寫、Dispatcher 直接讀，都在 `Common` 共用同一個介面/連線設定。
 - **Consequences**：比透過另一個服務轉一手少一次網路來回，設計也更單純；代價是連線層現在多了一個自己要維運的 Redis 依賴（但這個依賴本來就會存在，只是換了誰擁有它）。
+- **範圍澄清（後補）**：本 ADR 講的是**誰擁有那張對照表**，不是「每層要有自己的 Redis 實例」。`chat-layer.md` §9 曾把它轉述成後者、並因此生出一條「`room-store` 要不要保留」的懸案——那條懸案的前提是錯的。實體上開幾顆 Redis 是部署參數（AppHost 現在只開一顆，多個連線字串名稱指向它），拆與不拆都不影響本 ADR：連線層照樣擁有 `ConnectionDirectory`、Gateway 照樣直接寫、Dispatcher 照樣直接讀。要拆的判準是 instance 級的設定（`maxmemory-policy`、persistence、慢指令的故障範圍），跟資料歸屬無關。
 
 ### ADR-3：`OutboundGateway` 是上層呼叫連線層的唯一入口，只接受 `ConnectionId`
 

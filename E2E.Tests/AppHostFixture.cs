@@ -28,9 +28,11 @@ public sealed class AppHostFixture : IAsyncLifetime
 
 	public Uri WebBffHttp { get; private set; } = null!;
 
-	private string ConnectionDirectoryConnectionString { get; set; } = null!;
-
-	private string RoomStoreConnectionString { get; set; } = null!;
+	// **這裡問的是實體資源的名字，不是各層用的邏輯名稱。** AppHost 現在只開一顆 Redis、把
+	// connection-directory / room-store / identity-store 這些**連線字串名稱**都指向它，那些名稱
+	// 活在各專案的設定裡、不是 AppHost 的資源圖，所以 GetConnectionStringAsync("room-store")
+	// 會拿不到東西。這個 fixture 跟部署拓樸綁在一起是刻意的——它要直接對 Redis 說話。
+	private string RedisConnectionString { get; set; } = null!;
 
 	public async Task InitializeAsync()
 	{
@@ -55,12 +57,9 @@ public sealed class AppHostFixture : IAsyncLifetime
 
 		GatewayHttp = m_App.GetEndpoint("gateway", "http");
 		WebBffHttp = m_App.GetEndpoint("web-bff", "http");
-		ConnectionDirectoryConnectionString =
-			await m_App.GetConnectionStringAsync("connection-directory").ConfigureAwait(false)
-			?? throw new InvalidOperationException("拿不到 connection-directory 的連線字串。");
-		RoomStoreConnectionString =
-			await m_App.GetConnectionStringAsync("room-store").ConfigureAwait(false)
-			?? throw new InvalidOperationException("拿不到 room-store 的連線字串。");
+		RedisConnectionString =
+			await m_App.GetConnectionStringAsync("redis").ConfigureAwait(false)
+			?? throw new InvalidOperationException("拿不到 redis 的連線字串。");
 
 		// 不用 WaitForResourceAsync：Gateway 開了 replica，資源名稱會變成 gateway-0/gateway-1 之類的
 		// 衍生名字，猜名字比直接問傳輸層脆弱。這裡直接打 endpoint，能回應就是真的可以用了。
@@ -86,13 +85,16 @@ public sealed class AppHostFixture : IAsyncLifetime
 		// 變數，而我們本來就打算自己從 Set-Cookie 把 token 抽出來（見 ChatClient）。
 		App.CreateHttpClient("web-bff", "http");
 
-	// connectionId -> nodeId 的快照。key 前綴跟 RedisConnectionDirectory.Key 綁在一起（`Conn:{id}`），
+	// connectionId -> nodeId 的快照。**現在掃的是共用的 keyspace**（AppHost 只有一顆 Redis），所以
+	// `Conn:*` 這個 pattern 不再只是效率問題而是正確性的一部分；而且連線目錄現在也跟著被持久化，
+	// 上一輪跑剩的 `Conn:*` 會留下來——差集的寫法本來就免疫（殘留也在 before 裡），但別改成數總數。
+	// key 前綴跟 RedisConnectionDirectory.Key 綁在一起（`Conn:{id}`），
 	// 那是 internal 的實作細節，改了這裡要一起改——換來的是「兩條連線真的落在不同節點」可以被
 	// 精確斷言，而不是靠「廣播收到了」去推論。
 	public async Task<IReadOnlyDictionary<string, string>> SnapshotConnectionsAsync()
 	{
 		await using var redis = await ConnectionMultiplexer
-			.ConnectAsync(ConnectionDirectoryConnectionString)
+			.ConnectAsync(RedisConnectionString)
 			.ConfigureAwait(false);
 
 		var database = redis.GetDatabase();
@@ -116,7 +118,7 @@ public sealed class AppHostFixture : IAsyncLifetime
 	// 循序的 client 命令永遠走不到那條路徑；而「刪房帶走封鎖名單」在 in-memory 的替身上湊不
 	// 出來（兩個替身是獨立物件），契約測試因此蓋不到。
 	public async Task<RoomStoreProbe> ConnectRoomStoreAsync() =>
-		new(await ConnectionMultiplexer.ConnectAsync(RoomStoreConnectionString).ConfigureAwait(false));
+		new(await ConnectionMultiplexer.ConnectAsync(RedisConnectionString).ConfigureAwait(false));
 
 	private static void Configure(
 		IDistributedApplicationBuilder builder,
