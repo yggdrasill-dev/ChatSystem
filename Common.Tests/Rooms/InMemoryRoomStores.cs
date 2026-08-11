@@ -3,8 +3,9 @@ using Common.Rooms;
 
 namespace Common.Tests.Rooms;
 
-// IRoomStore / IRoomBanList 的 in-memory 實作。跟 Common/Chat/InMemoryChatMessageStore.cs 的
-// 地位不同——那個是階段 A 真的註冊進 DI 的實作，這兩個只活在測試裡，正式路徑一直都是 Redis。
+// IRoomStore / IRoomBanList 的 in-memory 實作。這兩個只活在測試裡，正式路徑從來沒有註冊過它們
+// ——**聊天層的 InMemoryChatMessageStore 曾經不是這樣**（階段 A 真的註冊進 DI），B1 之後它也搬
+// 進了這個專案，兩層從此對稱。
 //
 // 它們同時服務兩個地方：RoomStoreContractTests / RoomBanListContractTests 拿它們當契約的跑道，
 // Integration.Tests 拿它們讓層與層的組合跑得起來（原本住在那裡，B0 移過來）。**只留一份**是

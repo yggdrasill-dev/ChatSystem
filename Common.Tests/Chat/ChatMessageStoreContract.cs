@@ -1,32 +1,35 @@
 using Common.Chat;
+using Common.Rooms;
 
 namespace Common.Tests.Chat;
 
-// **這些是 IChatMessageStore 的契約，不是替身的規格。** 階段 B 的 PostgresChatMessageStore
-// 必須通過同一組斷言——屆時把 NewStore() 換掉就行。
+// **這些是 IChatMessageStore 的契約，不是替身的規格。** 抽象基底，每個實作派生一個殼去跑同一組
+// 斷言：in-memory 在 Common.Tests（0.4 秒、不需要容器），PostgreSQL 在 E2E.Tests。**B1 之前這
+// 一份是具體類別**，改成基底就是它當初被寫下來的目的。
 //
 // 這麼寫是 append-only 帶來的好處：初稿那版的核心性質（seq 連續無洞、同房序列化）是
 // Postgres 交易的性質，替身怎麼寫都會通過，等於在測自己寫的替身（chat-layer.md §9）。
 // 現在要驗的是 keyset 分頁與範圍刪除，兩者在任何儲存上都是同一個語意。
-public class ChatMessageStoreContractTests
+public abstract class ChatMessageStoreContract
 {
 	private static readonly DateTimeOffset _Now = DateTimeOffset.FromUnixTimeMilliseconds(1_700_000_000_000);
 
 	[Fact]
 	public async Task TryAppend_ReturnsFalse_OnADuplicateOrderKeyInTheSameRoom()
 	{
-		var store = NewStore();
+		var store = await NewStoreWithRoomsAsync("room-1");
 
 		Assert.True(await store.TryAppendAsync(Message("room-1", 100)));
 
-		// 對應 Postgres 的 23505。呼叫端重新發號再試，不需要處理回滾（6.4）。
+		// **這一條在 Postgres 派生上才真的有在驗東西**（§9 列的兩件「需要真資料庫」之一）：
+		// 替身是字典的 ContainsKey，Postgres 是 ON CONFLICT DO NOTHING 影響 0 列。
 		Assert.False(await store.TryAppendAsync(Message("room-1", 100)));
 	}
 
 	[Fact]
 	public async Task TryAppend_AllowsTheSameOrderKey_InDifferentRooms()
 	{
-		var store = NewStore();
+		var store = await NewStoreWithRoomsAsync("room-1", "room-2");
 
 		// 主鍵是 (room_id, order_key)，不是 order_key 單獨。跨程序碰撞只在同一間房才算衝突。
 		Assert.True(await store.TryAppendAsync(Message("room-1", 100)));
@@ -77,9 +80,26 @@ public class ChatMessageStoreContractTests
 	}
 
 	[Fact]
+	public async Task GetPage_PreservesTheMessage_FieldForField()
+	{
+		// **B1 補的一條。** 先前每條斷言都只看 OrderKey，所以「欄位對映錯了」——欄位順序寫反、
+		// timestamptz 掉了時區——在這一組裡完全隱形。房間層 B2 踩過同一個坑，而那次的症狀是
+		// `room.list.reply` 沒回來，離真正的原因非常遠（room-layer.md §9）。
+		var store = await NewStoreWithRoomsAsync("room-1");
+		var sent = new ChatMessage("room-1", 42, "alice", "Alice Liddell", "hi there", _Now);
+
+		Assert.True(await store.TryAppendAsync(sent));
+
+		var page = await store.GetPageAsync("room-1", 0, 10);
+
+		Assert.Equal(sent, Assert.Single(page.Messages));
+	}
+
+	[Fact]
 	public async Task GetPage_IsScopedToOneRoom()
 	{
-		var store = NewStore();
+		var store = await NewStoreWithRoomsAsync("room-1", "room-2");
+
 		await store.TryAppendAsync(Message("room-1", 10));
 		await store.TryAppendAsync(Message("room-2", 20));
 
@@ -91,7 +111,9 @@ public class ChatMessageStoreContractTests
 	[Fact]
 	public async Task GetPage_ReturnsEmpty_ForARoomWithNoMessages()
 	{
-		var page = await NewStore().GetPageAsync("nobody-spoke-here", 0, 10);
+		var store = await NewStoreWithRoomsAsync("nobody-spoke-here");
+
+		var page = await store.GetPageAsync("nobody-spoke-here", 0, 10);
 
 		Assert.Empty(page.Messages);
 		Assert.False(page.HasMore);
@@ -100,7 +122,8 @@ public class ChatMessageStoreContractTests
 	[Fact]
 	public async Task DeleteOlderThan_OnlyRemovesMessagesBeforeTheCutoff()
 	{
-		var store = NewStore();
+		var store = await NewStoreWithRoomsAsync("room-1");
+
 		await store.TryAppendAsync(Message("room-1", 10, _Now.AddDays(-100)));
 		await store.TryAppendAsync(Message("room-1", 20, _Now.AddDays(-10)));
 
@@ -114,7 +137,7 @@ public class ChatMessageStoreContractTests
 	[Fact]
 	public async Task DeleteOlderThan_HonoursTheBatchSize_AndReportsWhatItDeleted()
 	{
-		var store = NewStore();
+		var store = await NewStoreWithRoomsAsync("room-1");
 
 		foreach (var orderKey in Enumerable.Range(1, 10))
 			await store.TryAppendAsync(Message("room-1", orderKey, _Now.AddDays(-100)));
@@ -126,11 +149,27 @@ public class ChatMessageStoreContractTests
 		Assert.Equal(0, await store.DeleteOlderThanAsync(_Now, 4));
 	}
 
-	private static IChatMessageStore NewStore() => new InMemoryChatMessageStore();
+	// 實作提供一組**空的** store + 房間 store。兩個一起給的理由跟 RoomBanListContract 一模一樣：
+	// `messages.room_id` 有 FK 指向 `rooms`（ADR-10 的 CASCADE 機制），所以「房間必須存在」是這個
+	// 介面沒被寫下來的前置條件，而建房間只能經由 IRoomStore。
+	//
+	// **那條前置條件一直都成立**——ChatSendHandler 送訊息之前先查成員資格，而成員資格的前提是
+	// 房間存在。跟房間層 B2 那次一樣，是換儲存才被 FK 逼出來的。
+	protected abstract ValueTask<(IChatMessageStore Messages, IRoomStore Rooms)> NewAsync();
 
-	private static async Task<IChatMessageStore> NewStoreWithAsync(string roomId, params long[] orderKeys)
+	private async Task<IChatMessageStore> NewStoreWithRoomsAsync(params string[] roomIds)
 	{
-		var store = NewStore();
+		var (messages, rooms) = await NewAsync();
+
+		foreach (var roomId in roomIds)
+			Assert.True(await rooms.TryCreateAsync(new Room(roomId, "Lobby", null, "owner", _Now)));
+
+		return messages;
+	}
+
+	private async Task<IChatMessageStore> NewStoreWithAsync(string roomId, params long[] orderKeys)
+	{
+		var store = await NewStoreWithRoomsAsync(roomId);
 
 		foreach (var orderKey in orderKeys)
 			Assert.True(await store.TryAppendAsync(Message(roomId, orderKey)));

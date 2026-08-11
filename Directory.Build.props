@@ -1,0 +1,23 @@
+<Project>
+
+  <!--
+    EF Core 的版本在整個 solution 統一釘在這裡。
+
+    **為什麼需要這個檔案**：`Common` 引用了 EF Core（B1 的儲存層），而每一個 process 都引用
+    `Common`——包括完全不碰資料庫的 Gateway 與 Dispatcher。同時 Aspire 13.4.6 的幾個套件會
+    transitive 帶進較舊的 EF Core，於是 8 個專案同時出現 MSB3277「無法解決的版本衝突」，而
+    MSBuild 會選那個較舊的（它是 primary reference）——**編譯過得去，執行時才炸**。
+
+    Aspire.Npgsql.EntityFrameworkCore.PostgreSQL 13.4.6 要的是 10.0.8，所以統一往上對齊到它。
+
+    **這是治標。** 真正的問題是儲存層住在 `Common` 裡，讓不需要資料庫的 process 也得知道
+    EF Core 的版本。正解是把 Postgres 實作與 DbContext 抽成獨立專案，只讓 CommandRouter 引用
+    ——那樣這個檔案就可以整個刪掉。見 chat-layer.md 6.6。
+  -->
+  <ItemGroup Condition="'$(MSBuildProjectName)' != 'ChatSystem.AppHost'">
+    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="10.0.8" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" Version="10.0.8" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Abstractions" Version="10.0.8" />
+  </ItemGroup>
+
+</Project>

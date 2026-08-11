@@ -9,7 +9,7 @@
   <ItemGroup>
     <PackageReference Include="Adaptare.Nats" Version="2.2.1" />
     <PackageReference Include="Aspire.NATS.Net" Version="13.4.6" />
-    <PackageReference Include="Aspire.Npgsql" Version="13.4.6" />
+    <PackageReference Include="Aspire.Npgsql.EntityFrameworkCore.PostgreSQL" Version="13.4.6" />
     <PackageReference Include="Aspire.StackExchange.Redis" Version="13.4.6" />
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.10" />
   </ItemGroup>

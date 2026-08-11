@@ -2,6 +2,7 @@ using CommandRouter;
 using Common.Protocol;
 using Common.Rooms;
 using Common.Storage;
+using Microsoft.EntityFrameworkCore;
 using NATS.Client.Core;
 
 var builder = Host.CreateApplicationBuilder(args);
@@ -27,7 +28,18 @@ var builder = Host.CreateApplicationBuilder(args);
 	//
 	// room-store / identity-store 是**邏輯名稱**，AppHost 目前把它們指向同一顆實體 Redis
 	// ——所以這裡兩個 keyed client 連的是同一台，那是刻意的（見 AppHost.cs 的註解）。
-	builder.AddNpgsqlDataSource("chat-db");
+	// **註冊的是 DbContext factory 而不是 DbContext**：三個 store 與 ChatDbMigrator 都是 singleton
+	// （其中 ChatRetentionSweeper 還是 BackgroundService），而 DbContext 是 scoped 且非執行緒安全。
+	// Aspire 的 AddNpgsqlDbContext 負責連線字串、health check 與 telemetry；工廠讓 singleton 拿得到
+	// 短命的 context，形狀跟先前的 NpgsqlDataSource 一樣。
+	//
+	// **工廠必須自己帶 UseNpgsql。** `AddDbContextFactory` 不給 optionsAction 時會註冊一份
+	// **沒有 provider** 的 DbContextOptions，而它蓋掉 Aspire 剛註冊的那一份——建出來的 context
+	// 一用就丟「No database provider has been configured」，migrator 是第一個踩到的人。
+	builder.AddNpgsqlDbContext<ChatDbContext>("chat-db");
+	builder.Services.AddDbContextFactory<ChatDbContext>(
+		options => options.UseNpgsql(builder.Configuration.GetConnectionString("chat-db")),
+		ServiceLifetime.Singleton);
 	builder.AddKeyedRedisClient("room-store");
 	builder.AddKeyedRedisClient("identity-store");
 	builder.Services.AddChatDb();
@@ -40,7 +52,8 @@ var builder = Host.CreateApplicationBuilder(args);
 	// （chat-layer.md 6.8），以及身分層的 IUserProfileStore 讀顯示名稱快照（ADR-3），
 	// 所以必須排在上面那幾行之後。
 	//
-	// **階段 A：訊息存在記憶體裡、限流不跨複本**，見 AddChatStore() 的說明。
+	// 訊息跟房間資料同一個 chat-db（上面已經 AddNpgsqlDataSource 過）。**還差限流不跨複本**，
+	// 見 AddChatStore() 的說明。
 	builder.Services.AddChatStore();
 	builder.Services.AddChatPackets();
 	builder.Services.AddChatRetention();
@@ -63,6 +76,8 @@ var host = builder.Build();
 	// **schema 要在開始收訊息之前就位。** 不做成 hosted service 的理由見 AddChatDb()：
 	// 同一批 hosted service 裡有會立刻開始收訊息的東西，而 hosted service 的順序是註冊順序。
 	// 這裡明確 await，失敗就啟動失敗——比第一則命令進來才炸在 SQL 上好查。
+	//
+	// B1 之後跑的是 EF Core Migrations（`Common/Storage/Migrations/`），重跑會跳過已套用的。
 	await host.Services.GetRequiredService<ChatDbMigrator>().MigrateAsync();
 
 	// 在這裡解析 PacketRegistry 有兩個目的：把對應表印進 log 方便排查，以及讓重複註冊的

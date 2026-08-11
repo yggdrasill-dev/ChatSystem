@@ -1,4 +1,6 @@
+using Common.Chat;
 using Common.Rooms;
+using Common.Tests.Chat;
 using Common.Tests.Rooms;
 
 namespace E2E.Tests;
@@ -71,5 +73,56 @@ public sealed class PostgresRoomBanListContractTests(AppHostFixture fixture) : R
 
 		Assert.True(await store.TryDeleteAsync("room-1"));
 		Assert.False(await bans.IsBannedAsync("room-1", "banned-user"));
+	}
+}
+
+[Collection(AppHostCollection.Name)]
+public sealed class PostgresChatMessageStoreContractTests(AppHostFixture fixture)
+	: ChatMessageStoreContract, IAsyncLifetime
+{
+	private ChatDbProbe m_Probe = null!;
+
+	public async Task InitializeAsync() => m_Probe = await fixture.ConnectChatDbAsync();
+
+	public async Task DisposeAsync() => await m_Probe.DisposeAsync();
+
+	protected override async ValueTask<(IChatMessageStore Messages, IRoomStore Rooms)> NewAsync()
+	{
+		await m_Probe.ResetAsync();
+
+		return (m_Probe.Messages, m_Probe.Store);
+	}
+
+	// **ADR-10 在這一條閉合。** 關房＝刪房，訊息隨 FK 一起消失——在此之前訊息活在
+	// InMemoryChatMessageStore 裡，刪房會留下孤兒訊息（無害，因為它們本來就 process 重啟即消失，
+	// 但那是「不能上線」的第三條）。
+	//
+	// 跟上面那條封鎖名單的一樣，**進不了契約**：in-memory 的訊息 store 與房間 store 是兩個獨立
+	// 物件，湊不出 FK 的連動。這是「只有真資料庫給得起的性質」該待的地方。
+	[Fact]
+	public async Task Delete_TakesTheMessagesWithIt_ThroughTheForeignKey()
+	{
+		var (messages, rooms) = await NewAsync();
+
+		Assert.True(await rooms.TryCreateAsync(new Room(
+			"room-1",
+			"Lobby",
+			null,
+			"owner",
+			DateTimeOffset.FromUnixTimeMilliseconds(1_700_000_000_000))));
+
+		Assert.True(await messages.TryAppendAsync(new ChatMessage(
+			"room-1",
+			100,
+			"alice",
+			"Alice",
+			"hi",
+			DateTimeOffset.FromUnixTimeMilliseconds(1_700_000_000_000))));
+
+		Assert.True(await rooms.TryDeleteAsync("room-1"));
+
+		var page = await messages.GetPageAsync("room-1", 0, 10);
+
+		Assert.Empty(page.Messages);
 	}
 }

@@ -1,6 +1,6 @@
 ﻿# 聊天層架構設計（Chat Layer）
 
-狀態：**階段 A 已實作**（`Common/Chat/` + `Common/Protos/chat.proto`，行為完整、儲存與限流是程序內替身）；**階段 B（PostgreSQL 落地 + 房間層遷移）進行中**——房間層的契約測試已就位，Postgres 尚未落地，見 §11
+狀態：**階段 A 已實作**（`Common/Chat/` + `Common/Protos/chat.proto`，行為完整）；**階段 B 只剩限流**——房間、封鎖名單、訊息都已落在 PostgreSQL 上，`IChatRateLimiter` 還是程序內的替身，見 §11
 技術棧：延續 .NET 10 + NATS（Adaptare）+ protobuf；**新增 PostgreSQL 作為正式持久儲存**（見 ADR-4，階段 B）
 範圍：**訊息本身——收發、持久化、歷史查詢**，不含「誰該收到」（房間層）與「怎麼投遞」（連線層）
 依賴：命令的解析與分派由協定層負責（[protocol-layer.md](protocol-layer.md)）；成員名單與 fan-out 名單向房間層取得（[room-layer.md](room-layer.md)）；送出者的顯示名稱向身分層取得（[identity-layer.md](identity-layer.md)）
@@ -411,16 +411,34 @@ CREATE INDEX messages_sent_at_idx ON messages (sent_at);
 
 - **兩個 FK 都是 `ON DELETE CASCADE`，那不是防禦性寫法而是 ADR-10 的實作**：刪掉一列 `rooms` 就把該房的封鎖名單與全部訊息一起帶走，房間層不需要認識聊天層、聊天層也不需要訂閱任何事件。
 - **主鍵 `(room_id, order_key)` 直接服務唯一的讀取路徑**，不需要任何額外索引。**排序鍵稀疏對 B-tree 完全沒有影響**——`bigint` 不管值多大都是 8 bytes，索引不在乎密度，keyset 分頁在稀疏鍵上行為跟連續鍵完全一樣。稀疏唯一殺掉的是「對鍵做算術」，而那正是 ADR-2 明確放棄的東西。
-- 主鍵同時是**跨 process 碰撞的守門**（6.4）：撞到就是 `23505`，`TryAppendAsync` 回 `false`。
+- 主鍵同時是**跨 process 碰撞的守門**（6.4）：撞到時 `TryAppendAsync` 回 `false`。~~撞到就是 `23505`~~——**實作選了 `ON CONFLICT (room_id, order_key) DO NOTHING`，所以那個錯誤碼根本不會產生**，守門的表現形式是「影響 0 列」。對呼叫端完全一樣（回 `false`、重新發號再試），但例外在熱路徑上貴得多，也會把 SqlState 字串耦合進 store。跟 `PostgresRoomStore.TryCreateAsync` 同一個形狀。
 - **`room_bans` 用複合主鍵而不是 surrogate id**。房間層的 `IRoomBanList` 三個方法分別對應 `SELECT` / `INSERT ... ON CONFLICT DO NOTHING` / `DELETE`，全部靠主鍵，跟 Redis Set 版本的原子性語意一樣，所以 `room-layer.md` 6.1 那句「`IRoomBanList` 因此不需要 Try 語意」遷移後仍然成立。
 
 ### 6.6 遷移與 schema 管理
 
-用 **Npgsql + Dapper 手寫 SQL + 冪等的啟動時 migration**，不用 EF Core：
+**現在用 EF Core**（`ChatDbContext` + EF Migrations）。以下先保留原本的論證，因為它並沒有被證明是錯的——被換掉的是結論。
 
-- 本層的查詢只有四種形狀（append、keyset 分頁、批次刪除、房間層那幾個 CRUD），全部是手寫得出來的 SQL。EF Core 的價值在複雜查詢的組合與變更追蹤，這裡兩者都用不到，卻要付 DbContext 生命週期、追蹤器、以及「產生的 SQL 跟你想的不一樣」的成本。
-- 既有的每個 store 都是「介面 + 手寫指令」的形狀（`RedisRoomStore`、`RedisSessionStore`…），維持一致。
-- **代價**：schema 變更要自己管。啟動時跑一次 `CREATE TABLE IF NOT EXISTS` 對 demo 夠用，但**它不處理欄位變更**——真的要改欄位時得引入 migration 工具（DbUp／FluentMigrator）或手動處理。這個代價現在就寫下來，免得日後把它當成「疏漏」而不是「當時的取捨」。
+> ~~用 **Npgsql + Dapper 手寫 SQL + 冪等的啟動時 migration**，不用 EF Core：~~
+>
+> - ~~本層的查詢只有四種形狀（append、keyset 分頁、批次刪除、房間層那幾個 CRUD），全部是手寫得出來的 SQL。EF Core 的價值在複雜查詢的組合與變更追蹤，這裡兩者都用不到，卻要付 DbContext 生命週期、追蹤器、以及「產生的 SQL 跟你想的不一樣」的成本。~~
+> - ~~既有的每個 store 都是「介面 + 手寫指令」的形狀（`RedisRoomStore`、`RedisSessionStore`…），維持一致。~~
+> - ~~**代價**：schema 變更要自己管。啟動時跑一次 `CREATE TABLE IF NOT EXISTS` 對 demo 夠用，但**它不處理欄位變更**——真的要改欄位時得引入 migration 工具（DbUp／FluentMigrator）或手動處理。~~
+
+**換掉的直接理由就是原文最後那一條代價**：`CREATE TABLE IF NOT EXISTS` 不處理欄位變更。現在 `Common/Storage/Migrations/` 底下每一次 schema 變更都是一個有序、可 review、可回退的檔案，`__EFMigrationsHistory` 記錄套用狀態。
+
+**買到了什麼（實測）**：
+
+- **Migrations**，也就是換掉的那條代價。
+- **`DateTimeOffset` ↔ `timestamptz` 直接對映**。手寫 Dapper 時代為此存在的 `RoomRow` / `MessageRow` 兩個中間型別**整個刪掉了**——那是房間層 B2 花了一次「`room.list.reply` 沒回來」才找到的坑。
+- **`ExecuteUpdateAsync` / `ExecuteDeleteAsync`** 讓「只動兩個欄位的 UPDATE」「回傳影響列數的 DELETE」用 LINQ 表達得出來，而且仍然是單一語句、不經過變更追蹤。
+- **領域型別完全沒有被污染**：`Room` 與 `ChatMessage` 上沒有 attribute、沒有 navigation property、沒有為了 EF 加的無參數建構子。對映全在 `OnModelCreating`。
+
+**沒買到、或反而變貴的（也是實測）**：
+
+- **四個方法仍然是 raw SQL**，佔 11 個方法的三分之一：`TryCreateAsync` / `TryAppendAsync` / `BanAsync` 需要 `ON CONFLICT DO NOTHING`（EF Core 沒有原生 upsert，走 `Add` + `SaveChanges` 會把「撞主鍵」這個**正常**情況變成例外控制流），`DeleteOlderThanAsync` 需要 `DELETE ... LIMIT`（`ExecuteDeleteAsync` 不支援 `Take()`）。**這四處正是本層併發語意的全部所在**，所以 EF 沒有接手任何一條關鍵性質。
+- **`IDbContextFactory` 是必要的，不是選配**：三個 store 與 `ChatRetentionSweeper` 都是 singleton，而 `DbContext` 是 scoped 且非執行緒安全。而且 `AddDbContextFactory` 不給 `optionsAction` 時會註冊一份**沒有 provider** 的 options 蓋掉 Aspire 那份——症狀是 CommandRouter 啟動失敗，訊息在 Aspire 的 log 裡、測試看不到。
+- **EF Core 進了 `Common`，於是每個 process 都拖著它**，包括完全不碰資料庫的 Gateway 與 Dispatcher。Aspire 13.4.6 的幾個套件會 transitive 帶進較舊的 EF Core，**8 個專案同時出現 MSB3277 版本衝突，而 MSBuild 選的是舊的那個——編譯過得去，執行時才炸**。目前用根目錄的 `Directory.Build.props` 把三個 EF 組件釘在 10.0.8 壓下來，**那是治標**：真正的修法是把 `ChatDbContext` 與三個 Postgres 實作抽成獨立專案，只讓 CommandRouter 引用。Dapper 從來沒暴露這個問題，因為它輕到不會跟任何東西撞版本。
+- **從手寫 DDL 換到 EF Migrations 對「已經有資料的資料庫」不是無縫的**：EF 不認得別人建的表，第一次跑會先建 `__EFMigrationsHistory`、再套用第一個 migration 時撞 42P07。開發機上的 `chat-db` 掛了 data volume，所以這件事一定會發生一次。要嘛把既有 schema 當 baseline 手動寫進 `__EFMigrationsHistory`（但既有表的主鍵／FK 名字是 Postgres 預設的 `rooms_pkey`，跟 EF 產生的 `PK_rooms` 不同，之後 drop constraint 會對不上），要嘛把 volume 刪掉重建。**這裡選重建**，因為那是本機測試殘留的資料。
 
 ### 6.7 命令註冊
 
@@ -677,12 +695,12 @@ public interface IChatRateLimiter
 - **暫定值**（全部未經負載測試）：保留期 90 天、清理批次 5000 列 / 每天一輪、每人每秒 10 則、每則 4096 字元、歷史分頁預設 50 則、**歷史分頁上限 100 則**（最後這個是實作時補的：沒有上限的話 client 可以一次拉完整個房間的歷史，而 ADR-5 已經說明這條查詢會佔住那條連線的順序通道）。
 - **測試分層**（階段 A 的實際狀況）：
   - `Integration.Tests`（`Adaptare.Direct`）蓋掉本層**絕大部分**行為，**11 條、跟房間層一起 0.6 秒跑完**。這是 append-only 帶來的好處：初稿的「seq 連續無洞」與「同房序列化」是 Postgres 交易的性質，in-memory 替身怎麼寫都會通過，等於在測自己寫的替身。現在沒有這個問題。
-    - **而且階段 A 的聊天層在這條路徑上沒有任何替身**：`AddChatStore()` 註冊的本來就是 in-memory 的 store 與限流器，所以那是**完整的正式註冊**。這是巧合帶來的便利，階段 B 之後就會需要替身了。
+    - **而且階段 A 的聊天層在這條路徑上沒有任何替身**：`AddChatStore()` 註冊的本來就是 in-memory 的 store 與限流器，所以那是**完整的正式註冊**。這是巧合帶來的便利，階段 B 之後就會需要替身了。**B1 之後就是「之後」了**——訊息 store 現在跟房間層的兩個一樣要在 `CommandFlowHost` 裡覆寫掉。
   - **`MonotonicMicrosecondSequencer` 的 CAS 迴圈有併發測試**（`Next_NeverIssuesTheSameKeyTwice_UnderConcurrency`：16 執行緒 × 2000 次，斷言全部相異）。**已用手動變異驗證過它真的擋得住**：把 CAS 迴圈還原成 `m_Last = Math.Max(observed, m_Last + 1)`，只有這一條會紅，同檔案另外四條循序測試全部照過——那正是文件一開始就預期的失效模式。
-  - **`ChatMessageStoreContractTests` 是介面的契約，不是替身的規格**：階段 B 的 `PostgresChatMessageStore` 必須通過同一組斷言（keyset 游標嚴格小於、稀疏鍵行為相同、批次刪除回傳實際筆數），屆時只換 `NewStore()`。
-  - 仍然需要真 Postgres 的只剩兩件：**主鍵衝突時 `TryAppendAsync` 真的回 `false`**（6.4 的重試路徑，替身不會自然產生 `23505`——階段 A 用一個「先把號佔掉」的測試逼出同一條程式路徑，但那驗的是 handler 的重試，不是 Postgres 的錯誤碼），以及 **keyset 分頁在稀疏鍵上的實際查詢計畫**。放 `E2E.Tests` 或用 Testcontainers。
+  - **`ChatMessageStoreContract` 是介面的契約，不是替身的規格**：`PostgresChatMessageStore` 必須通過同一組斷言（keyset 游標嚴格小於、稀疏鍵行為相同、批次刪除回傳實際筆數）。**B1 已兌現**——那一份從具體類別改成抽象基底，in-memory 與 Postgres 各派生一個殼。工廠方法一併從 `NewStore()` 變成 `NewAsync()` 並多回一個 `IRoomStore`：`messages.room_id` 的 FK 讓「房間必須存在」成為這個介面沒被寫下來的前置條件，跟房間層 B2 被 `room_bans` 逼出來的那條一模一樣。
+  - ~~仍然需要真 Postgres 的只剩兩件~~ **剩一件。**「主鍵衝突時 `TryAppendAsync` 真的回 `false`」已經在 B1 拿到（契約基底的那一條在 `PostgresChatMessageStoreContractTests` 上跑，並用「`DO NOTHING` 改成 `DO UPDATE`」的變異驗證過只有它會紅）。**還沒做的是 keyset 分頁在稀疏鍵上的實際查詢計畫**——那需要 `EXPLAIN`，斷言的形狀跟其他測試都不一樣（要看 planner 選了 index scan 還是 seq scan），所以留在剩餘清單的 (3)。
   - `E2E.Tests` 加了 3 條，只驗 Direct 蓋不到的三件事（production 接線、wire format 上的 `int64`、跨節點 fan-out）。**其中跨節點那條特別值得**：聊天層自己沒有 fan-out 程式碼，它重用 `RoomBroadcaster`（6.8），所以那條驗的是「重用真的接對了」。
-  - **階段 A 的 E2E 依賴 `CommandRouter` 只有一個複本**（AppHost 沒有對它 `WithReplicas`），因為訊息在該 process 的記憶體裡。一旦開複本，歷史查詢會開始隨機失敗——那不是測試的問題，是階段 B 還沒做。
+  - ~~**階段 A 的 E2E 依賴 `CommandRouter` 只有一個複本**（AppHost 沒有對它 `WithReplicas`），因為訊息在該 process 的記憶體裡。一旦開複本，歷史查詢會開始隨機失敗——那不是測試的問題，是階段 B 還沒做。~~ **B1 之後這個限制解除了**：訊息在 Postgres，哪個複本處理歷史查詢都一樣。**但 AppHost 仍然沒有開複本**——開了才算驗過，而那要等限流也跨複本（(1)），否則等於用一個已知會壞的設定去跑 E2E。
 
 ## 10. 對既有文件的影響
 
@@ -691,7 +709,7 @@ public interface IChatRateLimiter
 - **ADR-7 的 provisional 狀態結束**：`IRoomStore` / `IRoomBanList` 遷入 PostgreSQL（本文件 ADR-4）。
 - **`Room` record 不需要新欄位**。本文件第二版曾要求加一個 `LastSeq`，那隨 ADR-2 的推翻一起取消——**訊息的寫入路徑完全不碰房間資料**。
 - **`Room` 要少一個欄位**：`IsClosed` 刪掉（本文件 ADR-10）。連帶 `IRoomStore.ListOpenAsync` → `ListAsync`、`TryCloseAsync` → `TryDeleteAsync`、`RoomOperationReply.ROOM_CLOSED` 併入 `ROOM_NOT_FOUND`、`Join_RepliesRoomClosed_ForAClosedRoom` 這類測試改寫。**跟遷移同一批做**，不單獨改 Redis 版本。
-- **6.1 那句「用 `IsClosed` 而不是真的刪除」的理由作廢**：它寫的是「房間紀錄如果直接消失，歷史訊息就會變成孤兒（要不要一併刪除是聊天層的決定）」——聊天層的決定就是**一併刪除**（ADR-10），所以那個理由連同它保護的東西一起沒了。
+- **6.1 那句「用 `IsClosed` 而不是真的刪除」的理由作廢**：它寫的是「房間紀錄如果直接消失，歷史訊息就會變成孤兒（要不要一併刪除是聊天層的決定）」——聊天層的決定就是**一併刪除**（ADR-10），所以那個理由連同它保護的東西一起沒了。**B1 之後這條是真的**：在那之前訊息還在記憶體裡、沒有 FK 接手，刪房確實會留下孤兒訊息（無害，因為它們本來就重啟即消失）。現在 `messages.room_id` 的 `ON DELETE CASCADE` 建起來了，`PostgresRoomStore.TryDeleteAsync` 那一行 `DELETE` 真的會帶走整間房的訊息。
 - **6.1「刻意接受的競爭」有兩條要改寫**：`TryUpdateSettingsAsync` 與關房併發、以及兩個關房併發廣播兩次 `RoomClosed`。真刪之後前者變成「影響 0 列、回 false」，後者**直接消失**。詳見 ADR-10 的 Consequences。
 - **6.1 的 Redis key 設計表作廢**，但論證要保留（見 §9）。
 - **§9 那條「關閉房間之後歷史訊息要保留多久、還能不能查」有答案了**：不保留、查不到，因為房間被刪掉時訊息一起刪（ADR-10）。該節寫「會回頭影響 `IsClosed` 而非真刪的設計是否足夠」——答案是**那個設計整個不需要了**。
@@ -717,18 +735,20 @@ public interface IChatRateLimiter
 
 ### `product-scope.md`
 
-- §5 表格：聊天層狀態從「待設計」→「設計中」→ **「階段 A 已實作」**。
+- §5 表格：聊天層狀態從「待設計」→「設計中」→「階段 A 已實作」→ **「階段 B 只剩限流」**。
 - §6「訊息記錄要保留多久」已回答：90 天（暫定值）。「要不要分頁查詢」已回答：keyset 分頁。「要不要搜尋」**仍然沒做**。
 - §6「房間本身與封鎖名單需要持久儲存，這跟訊息記錄是同一個儲存決定」已執行：PostgreSQL。**注意該節先前引用的理由（「`seq` 的連續性要求同交易遞增」）隨 ADR-2 一起被推翻，要改回原本那個較弱但正確的理由：同一套 migration／備份策略。**
 - §4「沒有具體規模數字」在本層被引用了三次（ADR-4 選 Postgres、ADR-6 不做分區、ADR-9 暫緩 actor）。
 
-## 11. 實作進度：階段 A 已完成，階段 B 未開始
+## 11. 實作進度：階段 A 已完成，階段 B 只剩限流
 
 刻意切成兩段，理由是**把行為釘死在不需要容器的測試層，之後換 store 只是換一個介面實作，不會回頭改語意**。這只有在 ADR-2 改成 append-only 之後才做得到——初稿那版的核心性質是 Postgres 交易的性質，沒有真資料庫根本驗不了。
 
 ### 階段 A（已完成）
 
 `Common/Protos/chat.proto`、`Common/Chat/`（領域模型、`IMessageSequencer` + `MonotonicMicrosecondSequencer`、`IChatMessageStore` + `InMemoryChatMessageStore`、`IChatRateLimiter` + `InMemoryChatRateLimiter`、`ChatRetention`、`ChatRetentionSweeper`、`Handlers/`）、`Common/ChatLayerServiceCollectionExtensions.cs`、`CommandRouter/Program.cs` 的三行註冊。`IUserProfileStore.GetDisplayNameAsync` 是這一段順帶補上的跨層變更。
+
+（`InMemoryChatMessageStore` 在 B1 之後搬到 `Common.Tests/Chat/`——它從正式實作降級成測試替身，留在產品程式碼裡只會讓人選錯。）
 
 **行為是完整的**：先存後廣播、keyset 分頁、排序鍵單調唯一且稀疏、名稱快照、限流、長度上限、保留期清理。測試 30 條單元 + 11 條整合 + 3 條端到端。
 
@@ -738,7 +758,7 @@ public interface IChatRateLimiter
 
 **已完成**：
 
-- 房間層兩個 store 的**契約測試**（`room-layer.md` §9）。房間層原本只有對著 mock `IDatabase` 的白箱測試，那些換掉實作就整份作廢——`ChatMessageStoreContractTests` 讓聊天層的訊息 store 有個接得住的目標，房間層的兩個 store 現在也有了。
+- 房間層兩個 store 的**契約測試**（`room-layer.md` §9）。房間層原本只有對著 mock `IDatabase` 的白箱測試，那些換掉實作就整份作廢——`ChatMessageStoreContract` 讓聊天層的訊息 store 有個接得住的目標，房間層的兩個 store 現在也有了。
 - **ADR-10 的語意變更**（`room-layer.md` §9）。原本規劃跟換儲存同一批，改成先單獨做完——理由與代價見 ADR-10 最後一條。**儲存還是 Redis**，所以下面 (2) 只剩換實作這件事。
 
 - **AppHost 的 `chat-db`**（`postgres` 資源 + 同名資料庫）與 `CommandRouter` 的 `WithReference`。
@@ -746,11 +766,28 @@ public interface IChatRateLimiter
   - **Dapper 不能直接對映 `Room`**（`timestamptz` → `DateTime` vs `DateTimeOffset`），症狀出現在 `room.list.reply` 沒回來而不是單元測試裡。
   - **`IRoomBanList` 有一條沒寫下來的前置條件：房間必須存在**，被 `room_bans` 的 FK 逼出來。那條 FK 就是 ADR-10 的 CASCADE 機制，所以這不是可以繞的。
 
+- **訊息已遷（B1）**：`PostgresChatMessageStore`、`ChatDbMigrator` 的 `messages` DDL、`AddChatStore()` 換掉那一行。**`messages` 的 FK 在這裡建起來，ADR-10 的 `ON DELETE CASCADE` 因此閉合**——刪房真的會帶走訊息，而那條性質有測試（`Delete_TakesTheMessagesWithIt_ThroughTheForeignKey`，拿掉 CASCADE 只有它會紅）。**`CommandRouter` 從此可以開複本。**
+  - **預告的三個坑全部踩到，而且都是預告的那個樣子**：`SentAt` 的 `DateTimeOffset` 要 row 型別（`MessageRow`）、FK 要求房間存在所以契約測試要先建房、測試 schema 是 `DROP` 重建所以 DDL 變異驗得出來。
+  - **兩個實作才浮現的決定**：
+    1. **`beforeOrderKey = 0` 的「從最新的開始」在 C# 這一側翻譯成 `long.MaxValue` 上界**，而不是寫成 SQL 的 `(@before = 0 OR order_key < @before)`。後者是個 OR，planner 會放棄主鍵的 index scan——**那正好會讓 (3) 那條待驗的性質變成假的**，而且是靜默的。
+    2. **保留期清理用 `WHERE ctid IN (SELECT ctid ... LIMIT n)`**：Postgres 的 `DELETE` 沒有 `LIMIT`。`ctid` 是物理位址但在這裡安全——子查詢與 DELETE 在同一個語句、同一個 snapshot，而這張表 append-only、沒有任何 `UPDATE` 會讓列搬家。多個複本的 sweeper 重疊時是互相等鎖然後刪 0 列，仍然正確，所以不加 `SKIP LOCKED`。
+  - **契約測試多了一條「欄位對映」**（`GetPage_PreservesTheMessage_FieldForField`）。原本那 9 條**全部只斷言 `OrderKey`**，所以「欄位錯位」在這一組裡完全隱形——把兩個 sender 欄位的 alias 對調，9 條照過。加了之後只有它會紅。房間層 B2 踩的是同一類坑，而那次的症狀是 `room.list.reply` 沒回來，離真正的原因非常遠。
+  - **`InMemoryChatMessageStore` 搬到 `Common.Tests/Chat/`**，`Integration.Tests` 從此要自己覆寫掉正式註冊——**階段 A 那個「聊天層在 Direct 路徑上完全沒有替身」的巧合到此結束**（§9 早就預告過會結束）。
+  - **E2E 的 fixture 補上一個就緒檢查，那是這一步唯一的意外**：`AppHostFixture` 只等 Gateway 與 WebBff 的 HTTP endpoint，而 **CommandRouter 是 worker、沒有 endpoint 可打**，它在開始訂閱 `command.inbound` 之前要先 `await` 一次 migration。那段期間 client 連得上、命令發得出去、什麼都不會回來。**這個洞一直都在，B1 只是把它推過了臨界點**——migration 多建一張表與一個索引，第一條房間測試就開始隨機紅在「等不到 `room.reply`」上。修法是走一次真正的往返（送 `room.list`、等 `room.list.reply`，每輪重連因為 ack 沒回來 Gateway 會關掉連線），跟 `WaitUntilReachableAsync` 同一個哲學：直接問傳輸層，不猜內部狀態。**跟 `Broadcast_ReachesAMemberOnADifferentGatewayNode` 那次是同一類問題——就緒假設，不是產品。**
+  - **已用手動變異驗證過**：三個變異（`DO NOTHING` 改成 `DO UPDATE`、拿掉 `messages` 的 `ON DELETE CASCADE`、把兩個 sender 欄位的 alias 對調）各自只打紅預期的那一條，其餘 45 條照過。
+  - 測試數：Common.Tests 165、Integration.Tests 31、E2E 46（含 32 條 Postgres 契約）。
+
+- **儲存層換成 EF Core**（6.6 那個決定被推翻，論證與代價都記在那裡）。三個 store 從 Npgsql + Dapper 手寫 SQL 改寫成 `ChatDbContext` + LINQ，`ChatDbMigrator` 改成跑 EF Migrations。
+  - **契約測試一行都沒改**，Common.Tests 165 與 Integration.Tests 31 直接全綠。這是這次換底層唯一的安全網，而它撐住了——`IChatMessageStore` / `IRoomStore` / `IRoomBanList` 三個介面沒有任何一處洩漏儲存技術，所以「換掉的成本是一次資料遷移」（ADR-4）這句話第二次被證明是真的。
+  - **E2E 的就緒檢查在這裡付了它自己的錢**：CommandRouter 因為 DI 設定錯誤啟動失敗時，訊息是「CommandRouter 在 60 秒內沒有開始處理命令」加上 chat-db 的實際狀態，而不是某一條測試隨機紅在「等不到 `room.reply`」。B1 剛加它的時候只是為了修 flaky。
+  - **診斷本身也繞了一圈值得記**：先加的版本是在失敗**之後**才去訂閱 Aspire 的 resource log，而那時 CommandRouter 早就死了、log stream 也關了，於是印出「讀 log 逾時」——**比沒有診斷更糟，因為它看起來像診斷有跑**。改成從 AppHost 一啟動就在背景收。（即便如此 `ResourceLoggerService` 在 testing 模式下仍然拿不到 project 的輸出，所以真正解決問題的是「查 `__EFMigrationsHistory` 有沒有東西」那一句 SQL。）
+  - **一度被自己的診斷誤導**：查到 `__EFMigrationsHistory` 存在就放棄了「撞既有的表」這個假設，實際上 EF 是**先建 history 表、再套用第一個 migration**，所以「表在、history 是空的」正是套用失敗的樣子。加上「已套用哪些 migration」之後答案才明確。
+  - **同三個變異重跑過，落點一條都沒變**（`DO NOTHING` 改成 `DO UPDATE`、拿掉 `messages` 的 CASCADE、把兩個 sender 欄位對調），各自只打紅預期的那一條、其餘 45 條照過。**其中兩個變異的施力點換了地方**：CASCADE 現在要改 migration 檔案（改 `OnModelCreating` 不會動到已產生的 DDL——這件事本身值得知道），欄位對映則改 `HasColumnName`。第三個仍然在 raw SQL 裡，因為那一段沒被 EF 接手。
+  - 測試數不變：Common.Tests 165、Integration.Tests 31、E2E 46。
+
 剩下的：
 
-1. **`PostgresChatMessageStore`**（Npgsql + Dapper 手寫 SQL，6.6），schema 見 6.5 的 `messages`，DDL 加進 `ChatDbMigrator`。**要通過 `ChatMessageStoreContractTests` 同一組斷言**——那一份還是舊形狀（具體類別 + `NewStore()`），可以照房間層的做法改成抽象基底，讓 in-memory 與 Postgres 各跑一次。`messages` 的 FK 到這一步才建得起來，ADR-10 的 `ON DELETE CASCADE` 也在這裡閉合。**做完之後 `CommandRouter` 才可以開複本。**
-   - 房間層那三個坑會原封不動地再遇到一次：`ChatMessage.SentAt` 也是 `DateTimeOffset`（要 row 型別）、`messages.room_id` 的 FK 要求房間存在（`ChatSendHandler` 先查授權所以成立，但契約測試要建房）、以及改了 DDL 要記得測試 schema 是 `DROP` 重建的。
-2. **`RedisChatRateLimiter`**（`INCR` + `EXPIRE 2`）。聊天層拿自己的邏輯名稱（`chat-ratelimit`），AppHost 把它指到同一顆實體 Redis，**不需要新容器**。要做的只有 `AddChatStore()` 換一行實作、`CommandRouter/Program.cs` 加一個 `AddKeyedRedisClient`、AppHost 加一個 `WithReference`。記得對一遍 AppHost 那份 key 前綴清單。不碰 schema，順序上完全獨立。
-3. 真 Postgres 才驗得到的兩件事補測試（§9 測試分層最後兩條）：主鍵衝突時 `TryAppendAsync` 真的回 `false`（23505），以及 keyset 分頁在稀疏鍵上的實際查詢計畫。**基礎設施已經就位**——`E2E.Tests` 的 `ChatDbProbe` 就是為這種測試開的。
+1. **`RedisChatRateLimiter`**（`INCR` + `EXPIRE 2`）。聊天層拿自己的邏輯名稱（`chat-ratelimit`），AppHost 把它指到同一顆實體 Redis，**不需要新容器**。要做的只有 `AddChatStore()` 換一行實作、`CommandRouter/Program.cs` 加一個 `AddKeyedRedisClient`、AppHost 加一個 `WithReference`。記得對一遍 AppHost 那份 key 前綴清單。不碰 schema，順序上完全獨立。
+2. **keyset 分頁在稀疏鍵上的實際查詢計畫**（§9 測試分層的最後一條；同一節列的另一件已經在 B1 拿到）。要用 `EXPLAIN` 斷言 planner 走的是主鍵的 index scan 而不是 seq scan——**這條的價值在 B1 之後變高了**：`GetPageAsync` 的游標翻譯（上面的決定 1）正是為了不讓 planner 掉進 seq scan，而那個決定目前沒有任何測試守著，改回 `OR` 寫法所有測試都會照過。基礎設施已經就位，`ChatDbProbe` 就是為這種測試開的。
 
-**目前的中間態**：房間已經在 Postgres、關房是真刪，但訊息還在 `InMemoryChatMessageStore` 裡、沒有 CASCADE 接手，所以刪房會留下孤兒訊息。階段 A 的訊息本來就 process 重啟即消失，所以無害——但這是「不能上線」的第三條，跟訊息不持久化、限流不跨複本放在一起記。**(1) 做完，前兩條一起消失。**
+**目前的中間態**：~~刪房會留下孤兒訊息~~ 已消失（CASCADE 在 B1 閉合），~~訊息不持久化~~ 也消失。**「不能上線」現在只剩一條：限流不跨複本**，也就是上面的 (1)。

@@ -1,15 +1,17 @@
-namespace Common.Chat;
+using Common.Chat;
 
-// 階段 A 的實作。**訊息不持久化**——process 重啟就全部消失，所以這不是可以上線的東西；
-// PostgreSQL 版本是階段 B（chat-layer.md ADR-4）。
+namespace Common.Tests.Chat;
+
+// IChatMessageStore 的 in-memory 實作。**階段 A 它是真的註冊進 DI 的正式實作**（住在
+// Common/Chat/），B1 換成 PostgresChatMessageStore 之後降級成測試替身，所以跟房間層 B2 一樣搬進
+// 測試專案——正式路徑上不該留著一個「重啟就消失」的儲存讓人選錯。
 //
-// 存在的理由是把「行為」跟「儲存」分開驗：這一層的語意（先存後廣播、keyset 分頁、
-// 排序鍵稀疏）在替身上就能釘死，換 store 實作時不必回頭改語意。這正是 append-only 帶來的
-// 好處——初稿那版的「seq 連續無洞」是 Postgres 交易的性質，替身怎麼寫都會通過，等於在測
-// 自己寫的替身（§9）。
+// 它同時服務兩個地方：ChatMessageStoreContract 拿它當契約的 in-memory 跑道（另一個跑道是
+// E2E.Tests 的 Postgres 派生），Integration.Tests 拿它讓層與層的組合不需要容器。**只留一份**是
+// 刻意的，理由跟 InMemoryRoomStores.cs 那句一樣。
 //
 // 用單一鎖而不是 per-room 鎖：這是替身，簡單比快重要。
-internal sealed class InMemoryChatMessageStore : IChatMessageStore
+public sealed class InMemoryChatMessageStore : IChatMessageStore
 {
 	private readonly Lock m_Gate = new();
 
@@ -24,7 +26,8 @@ internal sealed class InMemoryChatMessageStore : IChatMessageStore
 			if (!m_Rooms.TryGetValue(message.RoomId, out var byOrderKey))
 				m_Rooms[message.RoomId] = byOrderKey = [];
 
-			// 撞到就回 false，對應 Postgres 的 23505。呼叫端重新發號再試。
+			// 撞到就回 false。Postgres 版是 ON CONFLICT DO NOTHING 的 0 列，兩邊對呼叫端一樣：
+			// 重新發號再試。
 			if (byOrderKey.ContainsKey(message.OrderKey))
 				return ValueTask.FromResult(false);
 
@@ -52,7 +55,8 @@ internal sealed class InMemoryChatMessageStore : IChatMessageStore
 				.OrderByDescending(message => message.OrderKey)
 				.ToList();
 
-			// 多取一筆來判斷 has_more，而不是另外數一次總數——真的 SQL 也該這樣做。
+			// 多取一筆來判斷 has_more，而不是另外數一次總數——真的 SQL 也該這樣做，而它現在
+			// 真的是那樣做的（PostgresChatMessageStore.GetPageAsync 的 probe）。
 			var page = older.Take(limit).ToList();
 
 			return ValueTask.FromResult(new ChatMessagePage(page, older.Count > page.Count));

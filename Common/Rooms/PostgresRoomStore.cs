@@ -1,85 +1,57 @@
-using Dapper;
-using Npgsql;
+using Common.Storage;
+using Microsoft.EntityFrameworkCore;
 
 namespace Common.Rooms;
 
 // chat-layer.md ADR-4 的正式儲存。**每個方法都是單一語句**，沒有 read-modify-write、不需要交易
 // ——那是 IRoomStore「一次到位、回傳有沒有生效」那條介面約定換來的。
 //
-// 欄位在 SQL 裡直接 alias 成 C# 的名字，而不是打開 Dapper 的 `MatchNamesWithUnderscores`：
-// 那是個全域 static，會影響整個 process 裡所有 Dapper 對映。
-internal sealed class PostgresRoomStore(NpgsqlDataSource dataSource) : IRoomStore
+// **拿的是 IDbContextFactory 而不是 ChatDbContext**：這個 store 是 singleton（`ChatRetentionSweeper`
+// 那類 BackgroundService 也要用同一組介面），而 DbContext 是 scoped 且**不是執行緒安全的**。注入
+// scoped 進 singleton 是 captive dependency，DI 會擋下來；就算擋不下來，兩個併發命令共用一個
+// DbContext 也會炸。工廠讓每個操作有自己的短命 context，形狀跟先前的 NpgsqlDataSource 一樣。
+internal sealed class PostgresRoomStore(IDbContextFactory<ChatDbContext> dbFactory) : IRoomStore
 {
-	// **不能直接把 Room 交給 Dapper 對映。** Npgsql 把 `timestamptz` 讀成 `DateTime`（Kind=Utc），
-	// 而 `Room.CreatedAt` 是 `DateTimeOffset`；Dapper 的建構子對映要求型別對得上，對不上就丟
-	// 「A parameterless default constructor or one matching signature ... is required」。
-	//
-	// 中間放一個 row 型別明確轉換，而不是註冊 Dapper 的 TypeHandler——後者是全域 static，會影響
-	// 整個 process 裡所有的 Dapper 對映。寫入方向不需要這一層：Npgsql 收 DateTimeOffset 沒問題。
-	private sealed record RoomRow(
-		string RoomId,
-		string Name,
-		string? PasswordHash,
-		string OwnerUserId,
-		DateTime CreatedAt)
-	{
-		public Room ToRoom() =>
-			new(
-				RoomId,
-				Name,
-				PasswordHash,
-				OwnerUserId,
-				new DateTimeOffset(DateTime.SpecifyKind(CreatedAt, DateTimeKind.Utc), TimeSpan.Zero));
-	}
-
-	private const string Columns =
-		"room_id AS RoomId, name AS Name, password_hash AS PasswordHash, " +
-		"owner_user_id AS OwnerUserId, created_at AS CreatedAt";
-
 	public async ValueTask<Room?> GetAsync(string roomId, CancellationToken cancellationToken = default)
 	{
-		await using var connection = await dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+		await using var db = await dbFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
 
-		var row = await connection
-			.QuerySingleOrDefaultAsync<RoomRow>(new CommandDefinition(
-				$"SELECT {Columns} FROM rooms WHERE room_id = @roomId",
-				new { roomId },
-				cancellationToken: cancellationToken))
+		// **一律 AsNoTracking**：這一層讀出來的東西從來不會被改了再存回去（介面上根本沒有那條
+		// 路徑），追蹤只是白付快照的成本。
+		return await db.Rooms
+			.AsNoTracking()
+			.FirstOrDefaultAsync(room => room.RoomId == roomId, cancellationToken)
 			.ConfigureAwait(false);
-
-		return row?.ToRoom();
 	}
 
 	public async ValueTask<IReadOnlyCollection<Room>> ListAsync(CancellationToken cancellationToken = default)
 	{
-		await using var connection = await dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+		await using var db = await dbFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
 
-		// 沒有 ORDER BY：順序不在 IRoomStore 的契約裡（RoomStoreContractTests 明確不斷言它）。
+		// 沒有 OrderBy：順序不在 IRoomStore 的契約裡（RoomStoreContract 明確不斷言它）。
 		// 房間數量的成長由 room-layer.md §8 那條「分頁先不做」承接，不在這裡處理。
-		var rows = await connection
-			.QueryAsync<RoomRow>(new CommandDefinition(
-				$"SELECT {Columns} FROM rooms",
-				cancellationToken: cancellationToken))
-			.ConfigureAwait(false);
-
-		return [.. rows.Select(row => row.ToRoom())];
+		return await db.Rooms.AsNoTracking().ToListAsync(cancellationToken).ConfigureAwait(false);
 	}
 
 	public async ValueTask<bool> TryCreateAsync(Room room, CancellationToken cancellationToken = default)
 	{
-		await using var connection = await dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+		await using var db = await dbFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
 
-		// **`DO NOTHING` 而不是 `DO UPDATE`**：撞到既有 id 時不能覆寫，那是本介面唯一不能有競爭
-		// 的操作。回 false 跟「原本那間房沒被動到」是兩件事，契約測試兩件都斷言。
-		var inserted = await connection
-			.ExecuteAsync(new CommandDefinition(
-				"""
+		// **這裡刻意不是 `db.Rooms.Add()` + `SaveChangesAsync()`。** EF Core 沒有原生的 upsert，
+		// 而「已存在就不覆寫」是本介面唯一不能有競爭的操作：走 EF 的路要嘛先 SELECT 再 INSERT
+		// （中間那個窗口正是要防的東西），要嘛靠 SaveChanges 撞主鍵丟 DbUpdateException 再接住
+		// ——後者能work，但把控制流建在例外上，而且要拆開 inner exception 判 SqlState 才分得出
+		// 「撞主鍵」和「連線斷了」。
+		//
+		// `ExecuteSqlAsync` 收的是 FormattableString，每個內插值都會變成參數而不是字串拼接。
+		var inserted = await db.Database
+			.ExecuteSqlAsync(
+				$"""
 				INSERT INTO rooms (room_id, name, password_hash, owner_user_id, created_at)
-				VALUES (@RoomId, @Name, @PasswordHash, @OwnerUserId, @CreatedAt)
+				VALUES ({room.RoomId}, {room.Name}, {room.PasswordHash}, {room.OwnerUserId}, {room.CreatedAt})
 				ON CONFLICT (room_id) DO NOTHING
 				""",
-				room,
-				cancellationToken: cancellationToken))
+				cancellationToken)
 			.ConfigureAwait(false);
 
 		return inserted == 1;
@@ -91,18 +63,20 @@ internal sealed class PostgresRoomStore(NpgsqlDataSource dataSource) : IRoomStor
 		string? passwordHash,
 		CancellationToken cancellationToken = default)
 	{
-		await using var connection = await dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+		await using var db = await dbFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
 
-		// **只動 name 與 password_hash**：房主與建立時間不可變更（Room 的註解說明後台三個流程
-		// 都靠「房主永遠不會變」才對 TOCTOU 安全）。整列 UPDATE 會靜默拆掉那個前提。
+		// **`ExecuteUpdateAsync` 而不是讀出來改再存**：後者是 read-modify-write，會 lost update，
+		// 而且會整列 UPDATE ——房主與建立時間不可變更（Room 的註解說明後台三個流程都靠「房主永遠
+		// 不會變」才對 TOCTOU 安全），整列寫回去會靜默拆掉那個前提。這裡產生的 SQL 只動兩個欄位。
 		//
-		// 房間不存在就是影響 0 列、回 false——**Redis 版需要一段 EXISTS 守門的 Lua 才做得到
-		// 同一件事**（HSET 會建立不存在的 key），這裡是 UPDATE 的天然語意。
-		var updated = await connection
-			.ExecuteAsync(new CommandDefinition(
-				"UPDATE rooms SET name = @name, password_hash = @passwordHash WHERE room_id = @roomId",
-				new { roomId, name, passwordHash },
-				cancellationToken: cancellationToken))
+		// 房間不存在就是影響 0 列、回 false。
+		var updated = await db.Rooms
+			.Where(room => room.RoomId == roomId)
+			.ExecuteUpdateAsync(
+				setters => setters
+					.SetProperty(room => room.Name, name)
+					.SetProperty(room => room.PasswordHash, passwordHash),
+				cancellationToken)
 			.ConfigureAwait(false);
 
 		return updated == 1;
@@ -110,17 +84,16 @@ internal sealed class PostgresRoomStore(NpgsqlDataSource dataSource) : IRoomStor
 
 	public async ValueTask<bool> TryDeleteAsync(string roomId, CancellationToken cancellationToken = default)
 	{
-		await using var connection = await dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+		await using var db = await dbFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
 
-		// 封鎖名單（以及階段 B 下一步的 messages）靠 `ON DELETE CASCADE` 跟著走，這裡不必自己刪
-		// ——**Redis 版那行手動刪 key 的程式碼到這裡就消失了**（ADR-10）。
+		// 封鎖名單與訊息靠**資料庫的** `ON DELETE CASCADE` 跟著走（ADR-10）。`ExecuteDeleteAsync`
+		// 直接下 DELETE、不經過 change tracker，所以 EF 那套 client-side cascade 完全不介入——
+		// 這正是要的：連動由 schema 保證，不是由「記得先把子資料載進記憶體」保證。
 		//
 		// 影響列數就是守門：兩個併發的 close 只有一個刪得到，所以 RoomClosed 不會廣播兩次。
-		var deleted = await connection
-			.ExecuteAsync(new CommandDefinition(
-				"DELETE FROM rooms WHERE room_id = @roomId",
-				new { roomId },
-				cancellationToken: cancellationToken))
+		var deleted = await db.Rooms
+			.Where(room => room.RoomId == roomId)
+			.ExecuteDeleteAsync(cancellationToken)
 			.ConfigureAwait(false);
 
 		return deleted == 1;

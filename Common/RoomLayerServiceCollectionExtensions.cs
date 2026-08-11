@@ -11,7 +11,7 @@ public static class RoomLayerServiceCollectionExtensions
 	// **房間層橫跨兩個儲存**（chat-layer.md ADR-4）：房間與封鎖名單是持久資料，住 Postgres；
 	// 成員名單是暫時狀態（成員 hash、寬限期的 Sorted Set、userId → roomId 指向），留 Redis。
 	//
-	// 需要先呼叫 builder.AddNpgsqlDataSource("chat-db") 與 builder.AddKeyedRedisClient(redisServiceKey)。
+	// 需要先呼叫 builder.AddNpgsqlDbContext<ChatDbContext>("chat-db") 與 builder.AddKeyedRedisClient(redisServiceKey)。
 	// Redis 那邊用 keyed service 是因為同一個 process 會有多個邏輯名稱（AppHost 目前把它們都
 	// 指向同一顆實體 Redis，見那裡的註解）。
 	public static IServiceCollection AddRoomStore(this IServiceCollection services, object redisServiceKey)

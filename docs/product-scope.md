@@ -47,7 +47,7 @@
 | 連線層（Gateway/Dispatcher） | 一條 WebSocket 連線怎麼被持有、定址、投遞 | 已完成核心設計與實作，收尾中 |
 | 身分/使用者管理層 | Google OAuth 登入、Session、ConnectionId 對應使用者身分、重複登入 Supersede 規則 | **已實作**（含登入/登出 endpoint），只剩 Google client id 這個外部前置作業，見 [identity-layer.md](architecture/identity-layer.md) |
 | 房間層 | 建立/加入房間、密碼房、房間成員管理、房間後台 | **已實作**，房間與封鎖名單已在 PostgreSQL、成員名單留 Redis，見 [room-layer.md](architecture/room-layer.md) |
-| 聊天層 | 訊息收發、訊息歷史記錄 | **階段 A 已實作**（行為完整，但訊息存在記憶體裡、限流不跨複本），見 [chat-layer.md](architecture/chat-layer.md) §11。階段 B 進行中：房間層已遷 PostgreSQL，剩訊息本身與限流 |
+| 聊天層 | 訊息收發、訊息歷史記錄 | **階段 A 已實作**（行為完整），見 [chat-layer.md](architecture/chat-layer.md) §11。階段 B 只剩限流：房間、封鎖名單、訊息都已在 PostgreSQL 上，`IChatRateLimiter` 還不跨複本 |
 | WebBff | 前端的 BFF：出前端靜態檔 + 登入/登出 endpoint（見 [identity-layer.md](architecture/identity-layer.md) ADR-10） | 已實作 |
 | webClient | Angular 前端，重做（沿用 `main` 的資料夾名） | 待實作 |
 

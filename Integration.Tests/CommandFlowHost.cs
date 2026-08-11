@@ -7,6 +7,7 @@ using Common.Connections;
 using Common.Identity;
 using Common.Protocol;
 using Common.Rooms;
+using Common.Tests.Chat;
 using Common.Tests.Rooms;
 using Dispatcher;
 using Google.Protobuf;
@@ -154,9 +155,13 @@ internal sealed class CommandFlowHost : IAsyncDisposable
 		builder.Services.AddPacketRegistry();
 		builder.Services.AddRoomPackets();
 
-		// 聊天層。AddChatStore() 在階段 A 註冊的本來就是 in-memory 的 store 與限流器，
-		// 所以這裡不需要覆寫任何東西——**這條路徑上的聊天層是完整的正式註冊**。
+		// 聊天層。**B1 之前這裡不需要覆寫任何東西**：AddChatStore() 在階段 A 註冊的本來就是
+		// in-memory 的 store 與限流器，所以那時這條路徑上的聊天層是完整的正式註冊。訊息搬進
+		// Postgres 之後那個巧合結束，訊息 store 跟房間層的兩個一樣要換成替身——這個專案的前提是
+		// 不開任何容器、0.6 秒跑完。
+		// 後註冊的 wins（TryAdd 才是「已經有就不動」），所以這一行蓋掉 AddChatStore() 裡的 Postgres。
 		builder.Services.AddChatStore();
+		builder.Services.AddSingleton<IChatMessageStore, InMemoryChatMessageStore>();
 		builder.Services.AddChatPackets();
 
 		builder.Services

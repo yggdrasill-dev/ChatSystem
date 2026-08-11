@@ -10,9 +10,10 @@ namespace Integration.Tests;
 // 這裡的重點是**層與層的接縫**：聊天層自己不做 fan-out，它向房間層要成員名單、重用
 // RoomBroadcaster、再走協定層的出口（chat-layer.md 6.8）。單元測試把那整條都 mock 掉了。
 //
-// 階段 A 特有的一件好事：`AddChatStore()` 註冊的本來就是 in-memory 的 store，所以這條路徑上
-// **聊天層是完整的正式註冊**，沒有任何替身——初稿那版的核心性質是 Postgres 交易的性質，
-// 在這裡怎麼寫都會通過，等於在測自己寫的替身（§9）。append-only 讓那個問題消失。
+// **B1 之前這條路徑上的聊天層沒有任何替身**（`AddChatStore()` 註冊的本來就是 in-memory 的
+// store），訊息搬進 Postgres 之後訊息 store 跟房間層的兩個一樣要覆寫掉，見 CommandFlowHost。
+// 那不影響這一組要驗的東西：初稿那版的核心性質是 Postgres 交易的性質、在替身上怎麼寫都會通過，
+// 而 append-only 讓那個問題整個消失（§9）——**這裡驗的是接縫，不是儲存語意**，後者歸契約測試。
 public class ChatCommandFlowTests
 {
 	[Fact]
