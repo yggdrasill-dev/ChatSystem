@@ -17,6 +17,7 @@
   <ItemGroup>
     <ProjectReference Include="..\ChatSystem.ServiceDefaults\ChatSystem.ServiceDefaults.csproj" />
     <ProjectReference Include="..\Common\Common.csproj" />
+    <ProjectReference Include="..\Common.Storage\Common.Storage.csproj" />
   </ItemGroup>
 
 </Project>

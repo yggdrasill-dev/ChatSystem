@@ -42,8 +42,10 @@ var builder = Host.CreateApplicationBuilder(args);
 		ServiceLifetime.Singleton);
 	builder.AddKeyedRedisClient("room-store");
 	builder.AddKeyedRedisClient("identity-store");
+	// 房間層的兩半分成兩行，因為它們真的是兩個儲存：AddChatDb() 給 Postgres 上的房間、封鎖名單
+	// 與訊息（三張表由兩層共用），AddRoomMembership() 給 Redis 上的成員名單。
 	builder.Services.AddChatDb();
-	builder.Services.AddRoomStore("room-store");
+	builder.Services.AddRoomMembership("room-store");
 	builder.Services.AddIdentityStores("identity-store");
 	builder.Services.AddRoomPackets();
 	builder.Services.AddRoomMembershipMaintenance();
@@ -52,9 +54,9 @@ var builder = Host.CreateApplicationBuilder(args);
 	// （chat-layer.md 6.8），以及身分層的 IUserProfileStore 讀顯示名稱快照（ADR-3），
 	// 所以必須排在上面那幾行之後。
 	//
-	// 訊息跟房間資料同一個 chat-db（上面已經 AddNpgsqlDataSource 過）。**還差限流不跨複本**，
-	// 見 AddChatStore() 的說明。
-	builder.Services.AddChatStore();
+	// 訊息的儲存已經由上面的 AddChatDb() 註冊（跟房間資料同一個 chat-db），這裡只剩程序內的
+	// 發號與限流。**還差限流不跨複本**，見 AddChatCore() 的說明。
+	builder.Services.AddChatCore();
 	builder.Services.AddChatPackets();
 	builder.Services.AddChatRetention();
 

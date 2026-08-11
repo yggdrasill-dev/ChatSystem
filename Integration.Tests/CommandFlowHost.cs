@@ -142,11 +142,17 @@ internal sealed class CommandFlowHost : IAsyncDisposable
 		builder.Services.AddSingleton(Capture);
 		builder.Services.AddSingleton<TimeProvider>(Clock);
 
-		// store 全部換成替身；其餘都是真的註冊路徑
+		// store 全部換成替身；其餘都是真的註冊路徑。
+		//
+		// **這些是「取代」不是「覆寫」**：正式路徑上這三個 store 由 Common.Storage 的 AddChatDb()
+		// 註冊，而這個 host 從來不呼叫它——所以沒有「後註冊蓋掉前註冊」這種需要讀兩處才看得懂的
+		// 依賴。（EF Core 的組件仍然會透過 CommandRouter 的專案參考進到輸出目錄，這個專案要
+		// InboundProcessor。但它一行都不會執行。）
 		builder.Services.AddSingleton<IConnectionDirectory>(connections);
 		builder.Services.AddSingleton<IPresenceDirectory>(Presence);
 		builder.Services.AddSingleton<IRoomStore, InMemoryRoomStore>();
 		builder.Services.AddSingleton<IRoomBanList, InMemoryRoomBanList>();
+		builder.Services.AddSingleton<IChatMessageStore, InMemoryChatMessageStore>();
 		builder.Services.AddSingleton<IRoomMembership, InMemoryRoomMembership>();
 		builder.Services.AddSingleton<IUserProfileStore, InMemoryUserProfileStore>();
 
@@ -155,13 +161,10 @@ internal sealed class CommandFlowHost : IAsyncDisposable
 		builder.Services.AddPacketRegistry();
 		builder.Services.AddRoomPackets();
 
-		// 聊天層。**B1 之前這裡不需要覆寫任何東西**：AddChatStore() 在階段 A 註冊的本來就是
-		// in-memory 的 store 與限流器，所以那時這條路徑上的聊天層是完整的正式註冊。訊息搬進
-		// Postgres 之後那個巧合結束，訊息 store 跟房間層的兩個一樣要換成替身——這個專案的前提是
-		// 不開任何容器、0.6 秒跑完。
-		// 後註冊的 wins（TryAdd 才是「已經有就不動」），所以這一行蓋掉 AddChatStore() 裡的 Postgres。
-		builder.Services.AddChatStore();
-		builder.Services.AddSingleton<IChatMessageStore, InMemoryChatMessageStore>();
+		// 聊天層程序內的部分（發號與限流）是真的註冊路徑；訊息 store 的替身跟房間層的兩個一起
+		// 註冊在上面。**B1 之前這裡連替身都不需要**——AddChatStore() 那時註冊的本來就是 in-memory
+		// 的實作，所以整個聊天層是完整的正式註冊，那是個巧合，訊息搬進 Postgres 就結束了。
+		builder.Services.AddChatCore();
 		builder.Services.AddChatPackets();
 
 		builder.Services

@@ -3,6 +3,7 @@
   <Project Path="ChatSystem.ServiceDefaults/ChatSystem.ServiceDefaults.csproj" />
   <Project Path="CommandRouter.Tests/CommandRouter.Tests.csproj" />
   <Project Path="CommandRouter/CommandRouter.csproj" />
+  <Project Path="Common.Storage/Common.Storage.csproj" />
   <Project Path="Common.Tests/Common.Tests.csproj" />
   <Project Path="Common/Common.csproj" />
   <Project Path="Dispatcher.Tests/Dispatcher.Tests.csproj" />

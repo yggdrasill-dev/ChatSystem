@@ -437,7 +437,11 @@ CREATE INDEX messages_sent_at_idx ON messages (sent_at);
 
 - **四個方法仍然是 raw SQL**，佔 11 個方法的三分之一：`TryCreateAsync` / `TryAppendAsync` / `BanAsync` 需要 `ON CONFLICT DO NOTHING`（EF Core 沒有原生 upsert，走 `Add` + `SaveChanges` 會把「撞主鍵」這個**正常**情況變成例外控制流），`DeleteOlderThanAsync` 需要 `DELETE ... LIMIT`（`ExecuteDeleteAsync` 不支援 `Take()`）。**這四處正是本層併發語意的全部所在**，所以 EF 沒有接手任何一條關鍵性質。
 - **`IDbContextFactory` 是必要的，不是選配**：三個 store 與 `ChatRetentionSweeper` 都是 singleton，而 `DbContext` 是 scoped 且非執行緒安全。而且 `AddDbContextFactory` 不給 `optionsAction` 時會註冊一份**沒有 provider** 的 options 蓋掉 Aspire 那份——症狀是 CommandRouter 啟動失敗，訊息在 Aspire 的 log 裡、測試看不到。
-- **EF Core 進了 `Common`，於是每個 process 都拖著它**，包括完全不碰資料庫的 Gateway 與 Dispatcher。Aspire 13.4.6 的幾個套件會 transitive 帶進較舊的 EF Core，**8 個專案同時出現 MSB3277 版本衝突，而 MSBuild 選的是舊的那個——編譯過得去，執行時才炸**。目前用根目錄的 `Directory.Build.props` 把三個 EF 組件釘在 10.0.8 壓下來，**那是治標**：真正的修法是把 `ChatDbContext` 與三個 Postgres 實作抽成獨立專案，只讓 CommandRouter 引用。Dapper 從來沒暴露這個問題，因為它輕到不會跟任何東西撞版本。
+- ~~**EF Core 進了 `Common`，於是每個 process 都拖著它**~~ **已修，方式是把儲存層抽成獨立專案。** 原本的狀況值得留著，因為它是這類函式庫「重」在哪裡的具體樣子：EF Core 住在 `Common` 裡的時候，每個 process 都拖著它（包括完全不碰資料庫的 Gateway 與 Dispatcher），而 Aspire 13.4.6 會 transitive 帶進較舊的 EF Core，於是**8 個專案同時出現 MSB3277，而 MSBuild 選的是舊的那個——編譯過得去，執行時才炸**。當時用根目錄的 `Directory.Build.props` 釘版本壓下來，那是治標。
+  - **現在**：`Common.Storage` 專案持有 `ChatDbContext`、三個 Postgres 實作、migrations 與 `AddChatDb()`；介面與領域型別留在 `Common`，依賴方向是單向的（`Common` 不知道它存在）。Gateway / Dispatcher / WebBff 的輸出目錄**沒有任何 EF Core 組件**，`Directory.Build.props` 已刪除。
+  - **只剩 `E2E.Tests` 需要釘版本**，而那個衝突是本質的：它同時扮演「啟動 AppHost」（Aspire hosting 帶舊 EF Core）與「直接使用 Postgres 實作」兩個角色。兩行 `PackageReference` 寫在那個 csproj 裡，理由也寫在那裡。
+  - **`Integration.Tests` 仍然會拿到 EF Core 的組件**，因為它引用 `CommandRouter`（要 `InboundProcessor`）。但它不呼叫 `AddChatDb()`，所以那些組件一行都不會執行——0.6 秒的前提沒有受影響。
+  - Dapper 從來沒暴露這個問題，因為它輕到不會跟任何東西撞版本。**這是這次換 ORM 真正的重量所在，而它不在查詢那一層。**
 - **從手寫 DDL 換到 EF Migrations 對「已經有資料的資料庫」不是無縫的**：EF 不認得別人建的表，第一次跑會先建 `__EFMigrationsHistory`、再套用第一個 migration 時撞 42P07。開發機上的 `chat-db` 掛了 data volume，所以這件事一定會發生一次。要嘛把既有 schema 當 baseline 手動寫進 `__EFMigrationsHistory`（但既有表的主鍵／FK 名字是 Postgres 預設的 `rooms_pkey`，跟 EF 產生的 `PK_rooms` 不同，之後 drop constraint 會對不上），要嘛把 volume 刪掉重建。**這裡選重建**，因為那是本機測試殘留的資料。
 
 ### 6.7 命令註冊
@@ -782,12 +786,13 @@ public interface IChatRateLimiter
   - **E2E 的就緒檢查在這裡付了它自己的錢**：CommandRouter 因為 DI 設定錯誤啟動失敗時，訊息是「CommandRouter 在 60 秒內沒有開始處理命令」加上 chat-db 的實際狀態，而不是某一條測試隨機紅在「等不到 `room.reply`」。B1 剛加它的時候只是為了修 flaky。
   - **診斷本身也繞了一圈值得記**：先加的版本是在失敗**之後**才去訂閱 Aspire 的 resource log，而那時 CommandRouter 早就死了、log stream 也關了，於是印出「讀 log 逾時」——**比沒有診斷更糟，因為它看起來像診斷有跑**。改成從 AppHost 一啟動就在背景收。（即便如此 `ResourceLoggerService` 在 testing 模式下仍然拿不到 project 的輸出，所以真正解決問題的是「查 `__EFMigrationsHistory` 有沒有東西」那一句 SQL。）
   - **一度被自己的診斷誤導**：查到 `__EFMigrationsHistory` 存在就放棄了「撞既有的表」這個假設，實際上 EF 是**先建 history 表、再套用第一個 migration**，所以「表在、history 是空的」正是套用失敗的樣子。加上「已套用哪些 migration」之後答案才明確。
+  - **儲存層獨立成 `Common.Storage` 專案**（上面 6.6 那條代價的正解，跟 EF Core 同一批做完）。連帶把兩個名不副實的 DI 擴充方法改掉：`AddChatStore()` 抽走 `IChatMessageStore` 之後不含任何 store，改名 `AddChatCore()`（設定、發號、限流）；`AddRoomStore()` 抽走 Postgres 之後只剩成員名單，改名 `AddRoomMembership()`。**房間層橫跨兩個儲存這件事因此在 `CommandRouter/Program.cs` 上是兩行、直接看得見的**，先前它藏在一個擴充方法裡面。
   - **同三個變異重跑過，落點一條都沒變**（`DO NOTHING` 改成 `DO UPDATE`、拿掉 `messages` 的 CASCADE、把兩個 sender 欄位對調），各自只打紅預期的那一條、其餘 45 條照過。**其中兩個變異的施力點換了地方**：CASCADE 現在要改 migration 檔案（改 `OnModelCreating` 不會動到已產生的 DDL——這件事本身值得知道），欄位對映則改 `HasColumnName`。第三個仍然在 raw SQL 裡，因為那一段沒被 EF 接手。
   - 測試數不變：Common.Tests 165、Integration.Tests 31、E2E 46。
 
 剩下的：
 
-1. **`RedisChatRateLimiter`**（`INCR` + `EXPIRE 2`）。聊天層拿自己的邏輯名稱（`chat-ratelimit`），AppHost 把它指到同一顆實體 Redis，**不需要新容器**。要做的只有 `AddChatStore()` 換一行實作、`CommandRouter/Program.cs` 加一個 `AddKeyedRedisClient`、AppHost 加一個 `WithReference`。記得對一遍 AppHost 那份 key 前綴清單。不碰 schema，順序上完全獨立。
+1. **`RedisChatRateLimiter`**（`INCR` + `EXPIRE 2`）。聊天層拿自己的邏輯名稱（`chat-ratelimit`），AppHost 把它指到同一顆實體 Redis，**不需要新容器**。要做的只有 `AddChatCore()` 換一行實作、`CommandRouter/Program.cs` 加一個 `AddKeyedRedisClient`、AppHost 加一個 `WithReference`。記得對一遍 AppHost 那份 key 前綴清單。不碰 schema，順序上完全獨立。
 2. **keyset 分頁在稀疏鍵上的實際查詢計畫**（§9 測試分層的最後一條；同一節列的另一件已經在 B1 拿到）。要用 `EXPLAIN` 斷言 planner 走的是主鍵的 index scan 而不是 seq scan——**這條的價值在 B1 之後變高了**：`GetPageAsync` 的游標翻譯（上面的決定 1）正是為了不讓 planner 掉進 seq scan，而那個決定目前沒有任何測試守著，改回 `OR` 寫法所有測試都會照過。基礎設施已經就位，`ChatDbProbe` 就是為這種測試開的。
 
 **目前的中間態**：~~刪房會留下孤兒訊息~~ 已消失（CASCADE 在 B1 閉合），~~訊息不持久化~~ 也消失。**「不能上線」現在只剩一條：限流不跨複本**，也就是上面的 (1)。

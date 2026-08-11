@@ -9,7 +9,8 @@ namespace Common.Rooms;
 // 一個節點、無法靠 Cluster 分散，換來的是同一個操作可以跨 key 保持一致——`RedisRoomMembership`
 // 的兩段 Lua（標記斷線、釋放 userId → roomId 指向）就是靠它。
 //
-// **先前這裡與 AddRoomStore 都寫成「成員名單要跟房間資料跨 key 一起操作」，那句話是錯的**：那兩段
+// **先前這裡與 AddRoomMembership（當時叫 AddRoomStore）都寫成「成員名單要跟房間資料跨 key 一起
+// 操作」，那句話是錯的**：那兩段
 // Lua 動的是 Members / Grace / UserRoom，一個都不碰房間資料。hash tag 仍然需要，但要的是下面這
 // 三個 key 之間的一致，跟房間住在哪裡無關——所以 B2 把房間搬走並沒有動到這個取捨。
 //

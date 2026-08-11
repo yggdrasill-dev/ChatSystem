@@ -2,7 +2,7 @@ var builder = DistributedApplication.CreateBuilder(args);
 
 // **一顆實體 Redis，多個邏輯名稱指向它。**
 //
-// 各層拿到的是「邏輯名稱」而不是實體資源：`AddRoomStore(redisServiceKey)` 這類擴充方法收的是
+// 各層拿到的是「邏輯名稱」而不是實體資源：`AddRoomMembership(redisServiceKey)` 這類擴充方法收的是
 // service key，每個 Program.cs 才把它綁到一個連線字串名稱。所以「開幾顆 Redis」從來不是程式碼
 // 結構問題——是這個檔案的部署參數。要拆回多顆就是把下面 WithReference 的第一個引數換成不同資源，
 // 層與層的程式碼一行都不用動。

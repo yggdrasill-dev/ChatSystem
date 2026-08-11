@@ -9,9 +9,7 @@
 
   <ItemGroup>
     <PackageReference Include="Aspire.Hosting.Testing" Version="13.4.6" />
-    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="10.0.8" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
-    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.3" />
     <PackageReference Include="StackExchange.Redis" Version="3.0.17" />
     <PackageReference Include="xunit" Version="2.9.3" />
     <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
@@ -19,6 +17,17 @@
 
   <ItemGroup>
     <Using Include="Xunit" />
+  </ItemGroup>
+
+  <!-- **這個專案是唯一需要釘 EF Core 版本的地方**，而理由是本質的：它同時扮演兩個角色——啟動
+       AppHost（Aspire.Hosting.* 會 transitive 帶進較舊的 EF Core）以及直接使用 Common.Storage
+       的 Postgres 實作（EF Core 10.0.8）。兩邊撞版本時 MSBuild 會選較舊的那個，因為它是
+       primary reference——**編譯過得去，執行時才炸**。
+       先前這兩行是根目錄的 Directory.Build.props、對所有專案生效，因為 EF Core 住在 Common 裡、
+       8 個專案一起中彈。儲存層抽成獨立專案之後只剩這裡。 -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="10.0.8" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" Version="10.0.8" />
   </ItemGroup>
 
   <!-- Postgres 的契約測試繼承自 Common.Tests 的基底類別，那裡面是普通的 [Fact]（in-memory 版
@@ -36,6 +45,7 @@
     <!-- RoomStoreContract / RoomBanListContract 住在那裡。Postgres 實作要跑同一組斷言，而它需要
          真的資料庫，所以那兩個殼只能放在這個專案（B0 時只有 in-memory 版本可以跑）。 -->
     <ProjectReference Include="..\Common.Tests\Common.Tests.csproj" />
+    <ProjectReference Include="..\Common.Storage\Common.Storage.csproj" />
   </ItemGroup>
 
 </Project>

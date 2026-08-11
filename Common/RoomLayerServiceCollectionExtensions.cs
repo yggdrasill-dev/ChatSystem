@@ -11,14 +11,14 @@ public static class RoomLayerServiceCollectionExtensions
 	// **房間層橫跨兩個儲存**（chat-layer.md ADR-4）：房間與封鎖名單是持久資料，住 Postgres；
 	// 成員名單是暫時狀態（成員 hash、寬限期的 Sorted Set、userId → roomId 指向），留 Redis。
 	//
-	// 需要先呼叫 builder.AddNpgsqlDbContext<ChatDbContext>("chat-db") 與 builder.AddKeyedRedisClient(redisServiceKey)。
-	// Redis 那邊用 keyed service 是因為同一個 process 會有多個邏輯名稱（AppHost 目前把它們都
-	// 指向同一顆實體 Redis，見那裡的註解）。
-	public static IServiceCollection AddRoomStore(this IServiceCollection services, object redisServiceKey)
+	// **這個方法只負責 Redis 那一半**——`IRoomStore` / `IRoomBanList` 由 `Common.Storage` 的
+	// `AddChatDb()` 註冊。先前它叫 `AddRoomStore()` 並同時註冊兩邊，抽走 Postgres 之後那個名字
+	// 就只剩誤導了；分成兩個方法也讓「橫跨兩個儲存」這件事在宿主的 Program.cs 上直接看得見。
+	//
+	// 需要先呼叫 builder.AddKeyedRedisClient(redisServiceKey)。用 keyed service 是因為同一個
+	// process 會有多個邏輯名稱（AppHost 目前把它們都指向同一顆實體 Redis，見那裡的註解）。
+	public static IServiceCollection AddRoomMembership(this IServiceCollection services, object redisServiceKey)
 	{
-		services.AddSingleton<IRoomStore, PostgresRoomStore>();
-		services.AddSingleton<IRoomBanList, PostgresRoomBanList>();
-
 		// 成員名單為什麼留 Redis：TTL 與寬限期的 Sorted Set 語意放進關聯式資料庫會變難看也變慢
 		// （ADR-4）。**先前這裡寫的理由是「要跟房間資料跨 key 一起操作」，那句話是錯的**——
 		// RedisRoomMembership 那兩段 Lua 動的是 Members / Grace / UserRoom，一個都不碰
@@ -33,8 +33,9 @@ public static class RoomLayerServiceCollectionExtensions
 	}
 
 	// 房間層向協定層註冊自己的命令與下行訊息型別。每個 subject 字面值在整個 codebase 只出現
-	// 這一次。需要先呼叫 AddRoomStore(...)、AddPacketRegistry()，以及身分層的
-	// AddIdentityStores(...)——fan-out 要靠 IPresenceDirectory 把 userId 換成 connectionId。
+	// 這一次。需要先呼叫 AddRoomMembership(...) 與 AddChatDb()（房間層的兩半儲存）、
+	// AddPacketRegistry()，以及身分層的 AddIdentityStores(...)——fan-out 要靠 IPresenceDirectory
+	// 把 userId 換成 connectionId。
 	public static IServiceCollection AddRoomPackets(this IServiceCollection services)
 	{
 		// 沒有 per-command 狀態（context 是參數傳進去的），而且 sweeper 這個 singleton

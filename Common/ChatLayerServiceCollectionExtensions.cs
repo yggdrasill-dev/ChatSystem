@@ -8,14 +8,14 @@ namespace Microsoft.Extensions.DependencyInjection;
 
 public static class ChatLayerServiceCollectionExtensions
 {
-	// 聊天層的儲存與發號。
+	// 聊天層**程序內**的元件：設定、發號、限流。
 	//
-	// **B1：訊息已經在 PostgreSQL 上**（chat-layer.md ADR-4）。需要先呼叫
-	// builder.AddNpgsqlDbContext<ChatDbContext>("chat-db")，跟房間層共用同一個 DbContext 與同一套 migration。
+	// **這裡沒有 `IChatMessageStore`**——它的 PostgreSQL 實作住在 `Common.Storage`，由那邊的
+	// `AddChatDb()` 註冊。先前這個方法叫 `AddChatStore()`，抽走儲存之後那個名字就只剩誤導了。
 	//
 	// **限流還是程序內的替身**（下面那行），所以這個 process 仍然不能算完整上線——限流不跨複本。
-	// 那是階段 B 的 (2)，換掉的是一行實作（ADR-7）。
-	public static IServiceCollection AddChatStore(this IServiceCollection services)
+	// 那是階段 B 的 (1)，換掉的是一行實作（ADR-7）。
+	public static IServiceCollection AddChatCore(this IServiceCollection services)
 	{
 		services.TryAddSingleton(TimeProvider.System);
 		services.TryAddSingleton(ChatRetention.Default);
@@ -25,16 +25,12 @@ public static class ChatLayerServiceCollectionExtensions
 		// 讓每則命令拿到一個新的守衛，那個 CAS 迴圈就白寫了（chat-layer.md 6.7）。
 		services.AddSingleton<IMessageSequencer, MonotonicMicrosecondSequencer>();
 
-		// 階段 B 的 (2)：跨複本不成立，且字典沒有淘汰。換 Redis INCR + EXPIRE。
-		services.AddSingleton<IChatRateLimiter, InMemoryChatRateLimiter>();
-
-		// **不需要容器的測試因此要自己覆寫這一行**（Integration.Tests/CommandFlowHost.cs）——
-		// 階段 A 那個「聊天層在 Direct 路徑上完全不需要替身」的巧合到這裡結束了。
-		return services.AddSingleton<IChatMessageStore, PostgresChatMessageStore>();
+		// 階段 B 的 (1)：跨複本不成立，且字典沒有淘汰。換 Redis INCR + EXPIRE。
+		return services.AddSingleton<IChatRateLimiter, InMemoryChatRateLimiter>();
 	}
 
 	// 聊天層向協定層註冊自己的命令與下行訊息型別。每個 subject 字面值在整個 codebase 只出現
-	// 這一次。需要先呼叫 AddChatStore()、AddPacketRegistry()、房間層的 AddRoomPackets()
+	// 這一次。需要先呼叫 AddChatCore() 與 AddChatDb()、AddPacketRegistry()、房間層的 AddRoomPackets()
 	// （共用 RoomBroadcaster 與 IRoomMembership），以及身分層的 AddIdentityStores(...)。
 	public static IServiceCollection AddChatPackets(this IServiceCollection services)
 	{
