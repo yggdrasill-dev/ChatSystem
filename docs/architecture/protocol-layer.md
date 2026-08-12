@@ -351,8 +351,9 @@ var builder = Host.CreateApplicationBuilder(args);
 ### ADR-2：Gateway → CommandRouter 用 request/reply，不用 fire-and-forget publish
 
 - **Context**：拆成獨立服務 + queue group 之後，同一條連線的兩則訊息會被分到不同複本並行處理，訊息順序不再保證。對聊天系統這是實質錯誤（聊天記錄順序錯亂）。初稿還舉了另一個例子——`identity.bind` 還沒處理完，後面的業務訊息就先被處理了——那個例子隨 `identity-layer.md` ADR-8 消失了（handshake 驗證沒有這種先後關係），但**本 ADR 不依賴它**：房間層一樣有「`room.join` 還沒完成就收到 `room.leave`」這類必須維持順序的命令對。
-- **Decision**：`InboundBridge` 用 `IMessageSender.RequestAsync` 送出並等待 `InboundAck` 才返回。因為連線層的 receive loop 是「`await` 完 `HandleAsync` 才讀下一個 frame」（`GatewayWebSocketEndpoint.cs:84`），單一連線同時最多一則訊息 in-flight，端到端順序因此被保證；不同連線之間仍完全並行（各自有獨立的 receive loop）。
+- **Decision**：`InboundBridge` 用 `IMessageSender.RequestAsync` 送出並等待 `InboundAck` 才返回。因為連線層的 receive loop 是「`await` 完 `HandleAsync` 才讀下一個 frame」（`GatewayWebSocketEndpoint.cs:148`，本文件原本寫 `:84`，行號已漂），單一連線同時最多一則訊息 in-flight，端到端順序因此被保證；不同連線之間仍完全並行（各自有獨立的 receive loop）。
 - **Consequences**：不需要引入 `connectionId` 分片，`connection-layer.md` ADR-5 維持暫緩。代價：每則 inbound 多一次 NATS round-trip；單一連線的 inbound 吞吐上限變成 1/RTT（叢集內亞毫秒級，聊天場景遠遠夠用，但不適用高頻串流類的 subject）；`CommandRouter` 變慢或掛掉會直接反壓到 receive loop——這其實是想要的行為，避免 Gateway 無上限累積待處理訊息。
+- **這條 ADR 的 Context 在 2026-08-12 才第一次成真**：AppHost 對 `command-router` 開了 `WithReplicas(2)`（`chat-layer.md` §11 的 B5）。在那之前只有一個複本，「同一條連線的兩則訊息被分到不同複本」根本不可能發生——也就是說**這個機制存在了很久，但它防的那個情境從來沒出現過**。開複本之前重新檢查了一遍它是否成立（receive loop 確實還是等 ack 才讀下一個 frame），結論是它從第一天就是為這一刻寫的，不需要任何變更。
 
 ### ADR-3：固定使用單一 NATS subject `command.inbound`，不把 client 的 subject 拼進 NATS subject
 

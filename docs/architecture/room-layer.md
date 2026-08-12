@@ -349,6 +349,8 @@ internal sealed class RoomGraceSweeper(
 
 掃描間隔暫定 10 秒（沿用 `ConnectionHeartbeatService` 的量級）。**必須是 idempotent 的**：`CommandRouter` 是多複本，每個複本都會跑自己的 sweeper，同一個過期成員可能被多個複本同時處理。`RemoveAsync` 要能安全地重複呼叫，廣播重複則由 client 端容忍（收到不存在成員的 `RoomMemberLeft` 就忽略）。
 
+**「多複本」在 2026-08-12 之前是假設，現在是事實**（AppHost 對 `command-router` 開了 `WithReplicas(2)`，`chat-layer.md` §11 的 B5）。而**重複廣播至今沒有被觀察到**，理由值得知道：先到的那個複本會把過期成員移除，另一個的 `ListExpiredAsync` 就回空——重複只在兩者幾乎同時進入同一輪時才出現。所以 E2E 那條寬限期測試**兩個方向都不能斷言**（「一定重複」與「一定不重複」都會 flaky），它維持「至少收到一則 `RoomMemberLeft`」的語意。**client 端那條容忍要求因此仍然有效，而且仍然沒有測試守著**——它是 webClient 的驗收項目，不是後端的。
+
 ## 7. 架構決策記錄（ADR）
 
 ### ADR-1：成員名單以 `userId` 為鍵，不是 `connectionId`

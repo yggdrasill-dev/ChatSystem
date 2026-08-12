@@ -43,6 +43,15 @@ builder.AddProject<Projects.Dispatcher>("dispatcher")
 	.WaitFor(messageBus);
 
 // 協定層：訂閱 command.inbound，解析 client 命令後分派給各層註冊的 handler
+//
+// **多開複本，因為整份設計從第一天就假設它是多複本的**：`command.inbound` 有 queue group、兩個
+// sweeper 都要求 idempotent、限流的計數在 Redis、訊息在 Postgres、發號撞號有重試、migration 有
+// advisory lock。在此之前那些全部是「照設計應該成立」——AppHost 從來沒真的跑過一個以上，所以
+// 一條也沒被實際跑過。開複本不是為了效能，是**讓那批保證第一次接觸真實世界**。
+//
+// 單一連線的命令順序不受影響：Gateway 的 receive loop 等 `InboundAck` 才讀下一個 frame，所以
+// 同時最多一則 in-flight（`protocol-layer.md` ADR-2，那條 ADR 的 Context 寫的正是這個情境）。
+// 跨連線本來就沒有順序保證。
 builder.AddProject<Projects.CommandRouter>("command-router")
 	.WithReference(redis, "connection-directory")
 	// room-store：只剩成員名單。房間與封鎖名單已經搬去 Postgres（階段 B），而**那次搬遷沒有動到
@@ -58,7 +67,8 @@ builder.AddProject<Projects.CommandRouter>("command-router")
 	.WithReference(messageBus)
 	.WaitFor(redis)
 	.WaitFor(chatDb)
-	.WaitFor(messageBus);
+	.WaitFor(messageBus)
+	.WithReplicas(2);
 
 // 前端的 BFF：出靜態檔（未來 Angular 的 build 產物）並簽發 session cookie。
 // 跟 Gateway 同 site 所以 cookie 帶得過去；需要 identity-store（Session/nonce/profile）

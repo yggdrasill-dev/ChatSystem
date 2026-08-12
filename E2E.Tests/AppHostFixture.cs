@@ -104,6 +104,16 @@ public sealed class AppHostFixture : IAsyncLifetime
 		// 這跟 Broadcast_ReachesAMemberOnADifferentGatewayNode 那次是同一類問題——**就緒假設**，
 		// 不是產品。
 		await WaitUntilCommandsAreServedAsync().ConfigureAwait(false);
+
+		// **上面那個檢查對「有幾個複本活著」是瞎的。** `command.inbound` 有 queue group，所以命令
+		// 會被送給任何一個健康的複本——兩個複本裡死掉一個，它照樣綠。而啟動失敗正是開複本最可能
+		// 出的事（併發 migration；`ChatDbMigrator` 為此加了 advisory lock，那個保證需要有人驗）。
+		//
+		// 這裡問的是 Aspire 的資源圖而不是傳輸層，那跟 Gateway 那邊「不要猜 replica 名字」的原則
+		// 並不衝突：**要問的東西不同**。Gateway 那次要的是「這條連線落在哪個節點」，那是執行期
+		// 事實、只有傳輸層答得出來；這裡要的是「拓樸有沒有照 AppHost 說的長出來」，那本來就是
+		// orchestrator 的知識。
+		await WaitUntilEveryCommandRouterReplicaIsRunningAsync().ConfigureAwait(false);
 	}
 
 	public async Task DisposeAsync()
@@ -287,6 +297,49 @@ public sealed class AppHostFixture : IAsyncLifetime
 			{TailCommandRouterLog()}
 			""",
 			last);
+	}
+
+	// 複本數**不寫死在這裡**：從資源自己的 annotation 讀出來，所以改 AppHost 那個數字不需要同時
+	// 改測試，而「開了幾個就要有幾個在跑」這句話不會因為兩邊漂移而變成空的。
+	private async Task WaitUntilEveryCommandRouterReplicaIsRunningAsync()
+	{
+		var resource = App.Services.GetRequiredService<DistributedApplicationModel>()
+			.Resources.OfType<ProjectResource>()
+			.Single(candidate => candidate.Name == "command-router");
+		var expected = resource.TryGetLastAnnotation<ReplicaAnnotation>(out var replicas) ? replicas.Replicas : 1;
+
+		using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+		var running = new HashSet<string>();
+
+		try
+		{
+			// WatchAsync 會先把每個資源目前的狀態補送給新訂閱者，所以這裡不會因為「事件已經發生過」
+			// 而錯過——但它是無限的串流，要靠自己的條件跳出去。
+			await foreach (var change in App.ResourceNotifications.WatchAsync(timeout.Token).ConfigureAwait(false))
+			{
+				if (change.Resource != resource || change.Snapshot.State?.Text != KnownResourceStates.Running)
+					continue;
+
+				// ResourceId 是複本的實例名稱（command-router-0 / -1）。**用它去數，而不是數事件**：
+				// 同一個複本會回報很多次狀態。
+				running.Add(change.ResourceId);
+
+				if (running.Count >= expected)
+					return;
+			}
+		}
+		catch (OperationCanceledException)
+		{
+			// 逾時，下面給出實際看到的狀況。
+		}
+
+		throw new TimeoutException(
+			$"""
+			command-router 開了 {expected} 個複本，但 60 秒內只有 {running.Count} 個進到 Running：
+			{(running.Count == 0 ? "(一個都沒有)" : string.Join(", ", running.Order()))}
+			最後幾行 log：
+			{TailCommandRouterLog()}
+			""");
 	}
 
 	// **Aspire 的 resource log 不會流進測試輸出**，所以一個 process 啟動失敗時，測試看到的只有

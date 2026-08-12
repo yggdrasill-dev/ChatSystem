@@ -4,15 +4,19 @@ using MessagePacket = Chat.Protos.ChatMessage;
 namespace E2E.Tests;
 
 // 聊天層在真的 AppHost 上跑一遍。**這裡不重跑 Integration.Tests 已經釘住的每一條行為**
-// （那邊 0.6 秒跑完 11 條），只驗那三件 Adaptare.Direct 結構上蓋不到的事：
+// （那邊 0.6 秒跑完 11 條），只驗那幾件 Adaptare.Direct 結構上蓋不到的事：
 //   1. production 的 messaging 接線——AddChatPackets() 真的被 CommandRouter/Program.cs 呼叫了，
 //      subject 字面值沒打錯，registry 在啟動時解析得出來
 //   2. wire format——訊息真的走完 protobuf 序列化 → NATS → WebSocket frame 回到 client
 //   3. 跨節點 fan-out——兩個成員落在不同 Gateway 複本時，訊息仍然到得了
+//   4. **限流真的接上了**——Integration.Tests 那條路徑上的限流是 in-memory 替身
+//      （`CommandFlowHost` 自己註冊的），所以 `AddChatRateLimiting()` 有沒有被 production 呼叫、
+//      Redis 的 keyed client 有沒有接對，只有這裡看得見
 //
-// 階段 A 的前提：CommandRouter 只有一個複本（AppHost 沒有對它 WithReplicas），所以
-// InMemoryChatMessageStore 對整個叢集是一致的。**它一旦開複本，這裡的歷史查詢就會開始隨機
-// 失敗**——那不是測試的問題，是階段 A 的儲存還沒換成 PostgreSQL（chat-layer.md ADR-4）。
+// ~~階段 A 的前提：CommandRouter 只有一個複本，所以 InMemoryChatMessageStore 對整個叢集是一致
+// 的。它一旦開複本，這裡的歷史查詢就會開始隨機失敗。~~ **訊息在 Postgres（B1）、限流在 Redis
+// （B3）之後那個前提消失了，AppHost 現在真的開了兩個複本**——所以下面每一條歷史查詢都可能由
+// 另一個複本回答，而那是刻意的：這些測試因此順便驗了「哪個複本回答都一樣」。
 [Collection(AppHostCollection.Name)]
 public class ChatFlowE2ETests(AppHostFixture fixture)
 {
@@ -64,6 +68,47 @@ public class ChatFlowE2ETests(AppHostFixture fixture)
 		var reply = await alice.ExpectAsync("chat.reply", ChatOperationReply.Parser);
 
 		Assert.Equal(ChatOperationReply.Types.Status.NotInRoom, reply.Status);
+	}
+
+	// 限流（ADR-7）在**正式註冊**上真的生效。Integration.Tests 蓋不到這件事——那條路徑上的限流器
+	// 是 `CommandFlowHost` 自己註冊的 in-memory 替身，所以「`AddChatRateLimiting("chat-ratelimit")`
+	// 有沒有被呼叫、那個 keyed Redis client 有沒有接對」在那邊是隱形的。
+	//
+	// **它證明的不是「計數跨複本共用」。** 那一半由契約測試守（兩個實例、同一顆 Redis，
+	// `TwoInstances_ShareTheCount_LikeTwoReplicasDo`）；這裡送出去的命令會落在哪個複本無法指定，
+	// 所以這條測試在單一複本上也會綠。兩者合起來才是完整的：接線在這裡、語意在那裡。
+	[E2EFact]
+	public async Task Send_IsRateLimited_WhenOneUserFloodsTheRoom()
+	{
+		await using var alice = await ConnectAsync("chat-flood");
+
+		await JoinNewRoomAsync(alice);
+
+		// 上限是每秒 10 則（`ChatRateLimit.Default`）。一次送 40 則**不等回覆**——Gateway 的
+		// receive loop 逐則處理，所以只要吞吐量高於 10 則/秒就一定會撞到上限，而實測是毫秒級。
+		// 刻意不精算「前 10 則過、第 11 則被擋」：這個 burst 可能跨過秒的邊界（固定視窗），
+		// 那會讓確切的通過數不穩定，而**確切的數字不是這條測試的斷言對象**。
+		for (var i = 0; i < 40; i++)
+			await alice.SendAsync("chat.send", new SendChatMessageRequest { Body = $"flood {i}" });
+
+		// 成功的送出不回 chat.reply（廣播本身就是確認），所以這條路徑上收到 chat.reply 就是被擋了。
+		var reply = await alice.ExpectAsync("chat.reply", ChatOperationReply.Parser);
+
+		Assert.Equal(ChatOperationReply.Types.Status.RateLimited, reply.Status);
+
+		// 而且被擋掉的是「多的那些」，不是全部——前面確實有訊息進得去。
+		await alice.ExpectAsync("chat.message", MessagePacket.Parser);
+
+		// 視窗滾過去之後額度回來（key 帶著 unixSecond + EXPIRE 2）。等 1.5 秒而不是 1 秒：
+		// burst 的最後一則落在哪一秒不確定，多給半秒就不必猜。
+		await Task.Delay(TimeSpan.FromSeconds(1.5));
+		alice.Clear();
+
+		await alice.SendAsync("chat.send", new SendChatMessageRequest { Body = "after the window" });
+
+		var accepted = await alice.ExpectAsync("chat.message", MessagePacket.Parser);
+
+		Assert.Equal("after the window", accepted.Body);
 	}
 
 	[E2EFact]

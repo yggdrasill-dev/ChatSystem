@@ -36,7 +36,7 @@
 
 目標方向是「可以有效擴展到大量使用者」，但目前沒有具體數字（例如目標同時在線連線數、房間數量級、單房間訊息吞吐量）。
 
-連線層（Gateway/Dispatcher）已經照可水平擴展的方向設計——多 Gateway 節點、`ConnectionDirectory`（Redis）做跨節點連線定址、Dispatcher 無狀態可任意增減複本。但再往上（訊息記錄要用什麼儲存、房間人數上限、房間後台查詢效能）這類決策，沒有具體規模數字就只能先抓保守預設值，之後再依實測調整——跟 [connection-layer.md](architecture/connection-layer.md) 第 9 節那兩個「未經驗證的暫定值」是同一種做法。
+連線層（Gateway/Dispatcher）已經照可水平擴展的方向設計——多 Gateway 節點、`ConnectionDirectory`（Redis）做跨節點連線定址、Dispatcher 無狀態可任意增減複本。**`CommandRouter` 也已經在 AppHost 開了兩個複本**（2026-08-12），所以「Gateway 與 CommandRouter 都多複本」這個拓樸現在是每次跑 E2E 都會經過的路徑，不是紙上的設計。但再往上（訊息記錄要用什麼儲存、房間人數上限、房間後台查詢效能）這類決策，沒有具體規模數字就只能先抓保守預設值，之後再依實測調整——跟 [connection-layer.md](architecture/connection-layer.md) 第 9 節那兩個「未經驗證的暫定值」是同一種做法。
 
 **Redis 的實體數量刻意不當成架構決定。** 各層只認邏輯名稱（DI 的 service key），AppHost 才把名稱綁到實體資源，現在四個名稱都指向同一顆：`connection-directory`、`room-store`、`identity-store`、`chat-ratelimit`。沒有規模數字的情況下拆成多顆是在猜，而這個做法讓「什麼時候拆、怎麼拆」可以等到有實測需求時再回答——判準是 instance 級的設定需不需要分歧（`maxmemory-policy`、persistence、慢指令的故障範圍），不是分層。詳見 `ChatSystem.AppHost/AppHost.cs` 的註解與 [chat-layer.md](architecture/chat-layer.md) 第 9 節。
 

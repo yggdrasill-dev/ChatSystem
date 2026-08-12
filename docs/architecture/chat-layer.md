@@ -715,7 +715,12 @@ public interface IChatRateLimiter
     - **EXPLAIN 的對象是 store 真的送出去的那條 command**，用 EF 的 `DbCommandInterceptor` 攔下來，不是測試自己重寫一次同樣的 LINQ。後者會通過，但它證明的是「我寫的這條查詢走索引」——跟 store 那條可以無聲無息地分岔，而那正是 MR review 清單上「自洽 ≠ 正確」那一類。
     - **它守的是「翻一頁的成本不隨房間的訊息量成長」**，不是計畫的形狀本身：5000 列的房間裡只有 51 列被實際讀出來。把 `Take(limit + 1)` 從 SQL 搬到 C# 這一側，11 條契約測試全部照過、只有這一條紅——那就是契約看不到的那個縫。
   - `E2E.Tests` 加了 3 條，只驗 Direct 蓋不到的三件事（production 接線、wire format 上的 `int64`、跨節點 fan-out）。**其中跨節點那條特別值得**：聊天層自己沒有 fan-out 程式碼，它重用 `RoomBroadcaster`（6.8），所以那條驗的是「重用真的接對了」。
-  - ~~**階段 A 的 E2E 依賴 `CommandRouter` 只有一個複本**（AppHost 沒有對它 `WithReplicas`），因為訊息在該 process 的記憶體裡。一旦開複本，歷史查詢會開始隨機失敗——那不是測試的問題，是階段 B 還沒做。~~ **B1 之後這個限制解除了**：訊息在 Postgres，哪個複本處理歷史查詢都一樣。**B3 之後限流也跨複本了，最後一個「已知會壞」的理由消失。** 剩下的每一個多複本相關的性質都已經有答案：訊息與限流共用外部儲存、`RoomGraceSweeper` 與 `ChatRetentionSweeper` 都是 idempotent、`MonotonicMicrosecondSequencer` 撞號有重試（`MaxAppendAttempts`）。**但 AppHost 仍然沒有開複本**，而現在那只是一件還沒做的事，不是被什麼擋著——開複本本身要自己的一次驗證（最需要盯的是 `RoomGraceSweeper` 在多複本下會重複廣播 `room.member.left`，那件事它的註解已經寫明並宣告由 client 容忍，但 E2E 沒有測過那個情況真的無害）。
+  - ~~**階段 A 的 E2E 依賴 `CommandRouter` 只有一個複本**（AppHost 沒有對它 `WithReplicas`），因為訊息在該 process 的記憶體裡。一旦開複本，歷史查詢會開始隨機失敗——那不是測試的問題，是階段 B 還沒做。~~ **B1 之後這個限制解除了**：訊息在 Postgres，哪個複本處理歷史查詢都一樣。**B3 之後限流也跨複本了，最後一個「已知會壞」的理由消失。** ~~但 AppHost 仍然沒有開複本~~ **B5 開了（`WithReplicas(2)`）**，所以這一節整條限制結束：從此每一條 E2E 的歷史查詢都可能由另一個複本回答，而那是免費拿到的覆蓋率——「哪個複本回答都一樣」不再需要專門的測試去說。
+
+- **開複本前先確認的是命令順序，而它早就有答案**：Gateway 的 receive loop 等 `InboundAck` 才讀下一個 frame，所以單一連線同時最多一則命令 in-flight（`protocol-layer.md` ADR-2）。那條 ADR 的 Context 寫的正是「拆成獨立服務 + queue group 之後同一條連線的兩則訊息會被分到不同複本」——**這個保證從第一天就是為開複本而設計的，B5 只是第一次真的用到它**。跨連線本來就沒有順序保證（§9 已有一條專門的提醒）。
+- **fixture 多一個檢查：每個複本都要進到 Running。** `WaitUntilCommandsAreServedAsync` 對這件事是瞎的——queue group 會把命令交給任何一個健康的複本，所以兩個裡死掉一個它照樣綠，而**啟動失敗正是開複本最可能出的事**（併發 migration；`ChatDbMigrator` 的 advisory lock 就是為此存在，而那個保證在此之前沒有人驗）。複本數從資源的 `ReplicaAnnotation` 讀出來而不是寫死，並且用「期望值 +1」的變異確認過它真的會紅（訊息會說出實際有幾個進到 Running）。
+- 這個檢查問的是 Aspire 的資源圖而不是傳輸層，跟 Gateway 那邊「不要猜 replica 名字」的原則不衝突：**要問的東西不同**。那次要的是「這條連線落在哪個節點」——執行期事實，只有傳輸層答得出來；這次要的是「拓樸有沒有照 AppHost 說的長出來」，那本來就是 orchestrator 的知識。
+- **`RoomGraceSweeper` 的重複廣播沒有被觀察到，而那不代表它不會發生。** 兩個複本各跑自己的 10 秒計時器，但先到的那個會把過期成員移除，另一個的 `ListExpiredAsync` 就回空——重複只在兩者幾乎同時進入那一輪時才出現。**所以它既不能斷言「一定重複」也不能斷言「一定不重複」**，兩種寫法都會 flaky。維持現狀（`ExpectAsync` 是「至少一則」的語意）並把理由寫在這裡，是這個情況唯一誠實的做法。
   - **限流的契約測試跟 store 同一個形狀**（`ChatRateLimiterContract`，5 條）：in-memory 在 `Common.Tests`、Redis 在 `E2E.Tests`。兩個實作的視窗都由**呼叫端的時鐘**算，所以「視窗換了」推一個假時鐘就能驗，不必真的等一秒。**刻意沒有寫對著 mock `IDatabase` 的白箱測試**——房間層 B2 刪掉的那 14 條就是那種，它們換掉實作就整份作廢；而這個實作真正會錯的地方在 Lua 的行為與 key 的組成，兩者都只有真 Redis 答得出來。
     - Redis 派生獨有的兩條對應 6.9 那兩個缺陷：`TwoInstances_ShareTheCount_LikeTwoReplicasDo`（跨複本，in-memory 上必定紅，所以進不了契約）與 `TheCounter_Expires_SoTheKeyspaceDoesNotGrow`（TTL）。
     - **隔離的機制跟 Postgres 那三個殼不同**：Redis 沒有 schema 可以隔離，而 `FLUSHDB` 會把正在跑的 app 的 session 與連線目錄一起清掉。改成讓每條測試的假時鐘落在不同的秒——key 帶著 `unixSecond`，所以不同的秒天生就是不同的 key。
@@ -822,6 +827,10 @@ public interface IChatRateLimiter
   - 真正會紅的變異是另一個：把 `Take(limit + 1)` 從 SQL 搬到 C# 這一側——回傳的頁面一模一樣，11 條契約測試全部照過，只有這條計畫測試紅。
   - 測試數：E2E 54（+1）。Common.Tests 170、Integration.Tests 31 不變。
 
-**階段 B 到此完成，「不能上線」的三條全部消失**：~~刪房會留下孤兒訊息~~（CASCADE 在 B1 閉合）、~~訊息不持久化~~（B1）、~~限流不跨複本~~（B3）。
+- **`CommandRouter` 開複本（B5）**：AppHost 加 `.WithReplicas(2)`。不是為了效能——是**讓「這個 process 是多複本」這個從第一天就存在的假設第一次接觸真實世界**。那個假設散在六個地方：`command.inbound` 的 queue group、兩個 sweeper 的 idempotent、限流的 Redis 計數、訊息的 Postgres、發號撞號的重試、migration 的 advisory lock。做法、fixture 新增的複本檢查、以及 `RoomGraceSweeper` 重複廣播為什麼兩個方向都不能斷言，都記在 §9 測試分層那一條。
+  - **順帶補上聊天層 E2E 的第四項**（`Send_IsRateLimited_WhenOneUserFloodsTheRoom`）：限流在**正式註冊**上真的生效。Integration.Tests 對這件事是隱形的——那條路徑上的限流器是 `CommandFlowHost` 自己註冊的替身，所以「`AddChatRateLimiting()` 有沒有被呼叫、keyed Redis client 有沒有接對」只有 E2E 看得見。**它不證明計數跨複本共用**（送出去的命令落在哪個複本無法指定，所以它在單一複本上也會綠）；那一半是契約測試的工作。接線在 E2E、語意在契約。
+  - 測試數：E2E 55（+1）。Common.Tests 170、Integration.Tests 31 不變。連跑兩次確認沒有引入 flaky。
 
-**還沒做但已經沒有東西擋著的是 `CommandRouter` 開複本**，見 §9 測試分層的最後一條——那是聊天層之外的下一件事。
+**階段 B 到此完成，「不能上線」的三條全部消失**：~~刪房會留下孤兒訊息~~（CASCADE 在 B1 閉合）、~~訊息不持久化~~（B1）、~~限流不跨複本~~（B3）。**而 B4、B5 把兩件「已經沒有東西擋著但還沒做」的事也做掉了**，所以這一節目前沒有剩下的項目。
+
+聊天層之外最大的缺口仍然是 **webClient**（`product-scope.md` §5）。
