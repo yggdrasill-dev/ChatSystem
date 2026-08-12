@@ -7,6 +7,7 @@ using Common.Chat;
 using Common.Rooms;
 using Common.Storage;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
@@ -152,7 +153,9 @@ public sealed class AppHostFixture : IAsyncLifetime
 	// TRUNCATE public.rooms 會把同一組 E2E 其他測試建的房間一起清掉。用 search_path 隔離：
 	// migration 產生的 DDL 刻意不寫 schema 名稱，所以同一份 DDL 建到哪裡由連線決定。
 	// `__EFMigrationsHistory` 也跟著落在那個 schema 裡，所以兩邊的 migration 狀態互不干擾。
-	public async Task<ChatDbProbe> ConnectChatDbAsync()
+	// interceptors 給查詢計畫的測試用（`ChatMessageQueryPlanTests`）：它要 EXPLAIN 的是 store 真的
+	// 送出去的那條 SQL，而不是測試自己手寫一條——手寫的那條可以完美自洽卻跟 EF 產生的不一樣。
+	public async Task<ChatDbProbe> ConnectChatDbAsync(params IInterceptor[] interceptors)
 	{
 		var connectionString =
 			new NpgsqlConnectionStringBuilder(ChatDbConnectionString) { SearchPath = ChatDbProbe.Schema }
@@ -177,7 +180,10 @@ public sealed class AppHostFixture : IAsyncLifetime
 		// `PooledDbContextFactory` 是 EF 現成的 IDbContextFactory 實作，形狀跟 CommandRouter 那邊
 		// 由 DI 給的一樣——契約測試因此跑在跟正式路徑相同的 context 生命週期上。
 		var factory = new PooledDbContextFactory<ChatDbContext>(
-			new DbContextOptionsBuilder<ChatDbContext>().UseNpgsql(connectionString).Options);
+			new DbContextOptionsBuilder<ChatDbContext>()
+				.UseNpgsql(connectionString)
+				.AddInterceptors(interceptors)
+				.Options);
 
 		await new ChatDbMigrator(factory).MigrateAsync().ConfigureAwait(false);
 
@@ -360,6 +366,10 @@ public sealed class AppHostFixture : IAsyncLifetime
 public sealed class ChatDbProbe(IDbContextFactory<ChatDbContext> dbFactory) : IAsyncDisposable
 {
 	public const string Schema = "contract_probe";
+
+	// 契約測試只需要那三個 store，但查詢計畫的測試要自己下 `EXPLAIN` 與大量 seed 的 SQL。
+	// 那些機器只有一個測試類別用得到，所以留在它自己的檔案裡，這裡只把工廠讓出去。
+	public IDbContextFactory<ChatDbContext> Db => dbFactory;
 
 	public IRoomStore Store { get; } = new PostgresRoomStore(dbFactory);
 

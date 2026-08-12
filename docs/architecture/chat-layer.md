@@ -711,7 +711,9 @@ public interface IChatRateLimiter
     - **兩個替身都是「取代」而不是「覆寫」**：正式的註冊分別由 `AddChatDb()` 與 `AddChatRateLimiting(...)` 提供，而 `CommandFlowHost` 兩個都不呼叫。這是 `AddChatRateLimiting()` 沒有併進 `AddChatCore()` 的實際理由——併進去的話測試只能靠後註冊蓋掉前註冊，變成要讀兩個地方才知道真正生效的是哪一個。
   - **`MonotonicMicrosecondSequencer` 的 CAS 迴圈有併發測試**（`Next_NeverIssuesTheSameKeyTwice_UnderConcurrency`：16 執行緒 × 2000 次，斷言全部相異）。**已用手動變異驗證過它真的擋得住**：把 CAS 迴圈還原成 `m_Last = Math.Max(observed, m_Last + 1)`，只有這一條會紅，同檔案另外四條循序測試全部照過——那正是文件一開始就預期的失效模式。
   - **`ChatMessageStoreContract` 是介面的契約，不是替身的規格**：`PostgresChatMessageStore` 必須通過同一組斷言（keyset 游標嚴格小於、稀疏鍵行為相同、批次刪除回傳實際筆數）。**B1 已兌現**——那一份從具體類別改成抽象基底，in-memory 與 Postgres 各派生一個殼。工廠方法一併從 `NewStore()` 變成 `NewAsync()` 並多回一個 `IRoomStore`：`messages.room_id` 的 FK 讓「房間必須存在」成為這個介面沒被寫下來的前置條件，跟房間層 B2 被 `room_bans` 逼出來的那條一模一樣。
-  - ~~仍然需要真 Postgres 的只剩兩件~~ **剩一件。**「主鍵衝突時 `TryAppendAsync` 真的回 `false`」已經在 B1 拿到（契約基底的那一條在 `PostgresChatMessageStoreContractTests` 上跑，並用「`DO NOTHING` 改成 `DO UPDATE`」的變異驗證過只有它會紅）。**還沒做的是 keyset 分頁在稀疏鍵上的實際查詢計畫**——那需要 `EXPLAIN`，斷言的形狀跟其他測試都不一樣（要看 planner 選了 index scan 還是 seq scan），所以留在剩餘清單的 (3)。
+  - ~~仍然需要真 Postgres 的只剩兩件~~ ~~**剩一件。**~~ **兩件都拿到了。**「主鍵衝突時 `TryAppendAsync` 真的回 `false`」在 B1（`DO NOTHING` 改成 `DO UPDATE` 的變異驗證過只有它會紅）；「keyset 分頁的實際查詢計畫」在 B4（`ChatMessageQueryPlanTests`）。後者的斷言形狀跟其他測試都不一樣（`EXPLAIN (ANALYZE, FORMAT JSON)` 之後看 planner 選了什麼），所以它進不了契約——in-memory 的替身沒有 planner。
+    - **EXPLAIN 的對象是 store 真的送出去的那條 command**，用 EF 的 `DbCommandInterceptor` 攔下來，不是測試自己重寫一次同樣的 LINQ。後者會通過，但它證明的是「我寫的這條查詢走索引」——跟 store 那條可以無聲無息地分岔，而那正是 MR review 清單上「自洽 ≠ 正確」那一類。
+    - **它守的是「翻一頁的成本不隨房間的訊息量成長」**，不是計畫的形狀本身：5000 列的房間裡只有 51 列被實際讀出來。把 `Take(limit + 1)` 從 SQL 搬到 C# 這一側，11 條契約測試全部照過、只有這一條紅——那就是契約看不到的那個縫。
   - `E2E.Tests` 加了 3 條，只驗 Direct 蓋不到的三件事（production 接線、wire format 上的 `int64`、跨節點 fan-out）。**其中跨節點那條特別值得**：聊天層自己沒有 fan-out 程式碼，它重用 `RoomBroadcaster`（6.8），所以那條驗的是「重用真的接對了」。
   - ~~**階段 A 的 E2E 依賴 `CommandRouter` 只有一個複本**（AppHost 沒有對它 `WithReplicas`），因為訊息在該 process 的記憶體裡。一旦開複本，歷史查詢會開始隨機失敗——那不是測試的問題，是階段 B 還沒做。~~ **B1 之後這個限制解除了**：訊息在 Postgres，哪個複本處理歷史查詢都一樣。**B3 之後限流也跨複本了，最後一個「已知會壞」的理由消失。** 剩下的每一個多複本相關的性質都已經有答案：訊息與限流共用外部儲存、`RoomGraceSweeper` 與 `ChatRetentionSweeper` 都是 idempotent、`MonotonicMicrosecondSequencer` 撞號有重試（`MaxAppendAttempts`）。**但 AppHost 仍然沒有開複本**，而現在那只是一件還沒做的事，不是被什麼擋著——開複本本身要自己的一次驗證（最需要盯的是 `RoomGraceSweeper` 在多複本下會重複廣播 `room.member.left`，那件事它的註解已經寫明並宣告由 client 容忍，但 E2E 沒有測過那個情況真的無害）。
   - **限流的契約測試跟 store 同一個形狀**（`ChatRateLimiterContract`，5 條）：in-memory 在 `Common.Tests`、Redis 在 `E2E.Tests`。兩個實作的視窗都由**呼叫端的時鐘**算，所以「視窗換了」推一個假時鐘就能驗，不必真的等一秒。**刻意沒有寫對著 mock `IDatabase` 的白箱測試**——房間層 B2 刪掉的那 14 條就是那種，它們換掉實作就整份作廢；而這個實作真正會錯的地方在 Lua 的行為與 key 的組成，兩者都只有真 Redis 答得出來。
@@ -814,8 +816,12 @@ public interface IChatRateLimiter
     4. 所以第四個變異下在 in-memory 那一側：拿掉 `window.Count = 0` → 只有 `Resets_WhenTheWindowRolls` 紅（170 條裡的 1 條）。**同一條斷言在兩個實作上由兩個完全不同的機制滿足**，其中一個驗得起來就夠。
   - 測試數：Common.Tests 170（+5）、Integration.Tests 31（不變）、E2E 53（+7：5 條契約 + 2 條 Redis 獨有）。
 
-剩下的（**跟能不能上線無關**，是一條測試強度的欠帳）：
+- **keyset 分頁的查詢計畫（B4，原清單的最後一項）**：`ChatMessageQueryPlanTests`，`EXPLAIN (ANALYZE, FORMAT JSON)` 之後斷言「走主鍵索引、只讀了 `limit + 1` 列」。做法與它守住的性質記在 §9 測試分層那一條。
+  - **這一步最重要的產出是一個更正，不是那條測試。** B1 的決定 1（游標翻譯放 C# 而不是寫成 `(@before = 0 OR order_key < @before)`）當時記的理由是「OR 會讓 planner 放棄 index scan 改成 seq scan，而且靜默」。**加測試時第一件事就是驗那個變異，結果它照樣綠**——EF 在翻譯階段就知道參數的值，`beforeOrderKey == 0` 為真時整條 OR 被折疊掉（送出去的 SQL 連 `order_key` 的條件都沒有），為假時折成單純的 `order_key < @before`，**兩種輸入各產生一份 SQL，計畫都是 PK 的 index scan**。那個警告是手寫 SQL 時代的產物，Dapper 會把 OR 原樣送出去；EF 不會。
+  - 所以那一行留著的理由降級成兩個平淡的：讀的人不必知道 EF 的優化器做了什麼、以及不必產生兩份 SQL。**它不再是在防一個已知的效能陷阱**，`PostgresChatMessageStore` 的註解已經改掉。**這是「文件把自己的決定轉述成更強的規則」的第三次**（前兩次是 §9 那條 Redis 懸案引錯 ADR-2、以及 ADR-2 被推翻前的交易性質），處理方式一樣：留著原文並標記為錯，不要刪。
+  - 真正會紅的變異是另一個：把 `Take(limit + 1)` 從 SQL 搬到 C# 這一側——回傳的頁面一模一樣，11 條契約測試全部照過，只有這條計畫測試紅。
+  - 測試數：E2E 54（+1）。Common.Tests 170、Integration.Tests 31 不變。
 
-1. **keyset 分頁在稀疏鍵上的實際查詢計畫**（§9 測試分層的最後一條；同一節列的另一件已經在 B1 拿到）。要用 `EXPLAIN` 斷言 planner 走的是主鍵的 index scan 而不是 seq scan——**這條的價值在 B1 之後變高了**：`GetPageAsync` 的游標翻譯（B1 的決定 1）正是為了不讓 planner 掉進 seq scan，而那個決定目前沒有任何測試守著，改回 `OR` 寫法所有測試都會照過。基礎設施已經就位，`ChatDbProbe` 就是為這種測試開的。
+**階段 B 到此完成，「不能上線」的三條全部消失**：~~刪房會留下孤兒訊息~~（CASCADE 在 B1 閉合）、~~訊息不持久化~~（B1）、~~限流不跨複本~~（B3）。
 
-**「不能上線」的三條全部消失**：~~刪房會留下孤兒訊息~~（CASCADE 在 B1 閉合）、~~訊息不持久化~~（B1）、~~限流不跨複本~~（B3）。**還沒做但已經沒有東西擋著的是 `CommandRouter` 開複本**，見 §9 測試分層的最後一條。
+**還沒做但已經沒有東西擋著的是 `CommandRouter` 開複本**，見 §9 測試分層的最後一條——那是聊天層之外的下一件事。

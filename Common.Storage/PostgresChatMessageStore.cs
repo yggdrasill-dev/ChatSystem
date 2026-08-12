@@ -50,9 +50,17 @@ internal sealed class PostgresChatMessageStore(IDbContextFactory<ChatDbContext> 
 		await using var db = await dbFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
 
 		// **「從最新的開始」在 C# 這一側翻譯成一個上界**，而不是把 `beforeOrderKey == 0` 寫進
-		// Where 裡變成一個 OR：後者 planner 會放棄主鍵的 index scan 而改成 seq scan——**那正好
-		// 會讓「keyset 分頁在稀疏鍵上的查詢計畫」那條待驗的性質變成假的**（§9）。order_key 是
-		// 微秒時間戳，long.MaxValue 是它到不了的上界。
+		// Where 裡變成一個 OR。order_key 是微秒時間戳，long.MaxValue 是它到不了的上界。
+		//
+		// **這裡原本寫著「OR 會讓 planner 放棄 index scan 改成 seq scan」，那句話在 EF Core 之下
+		// 是錯的，實測過**（`ChatMessageQueryPlanTests` 加進來時順手驗的）：EF 在翻譯階段就知道
+		// 參數的值，`beforeOrderKey == 0` 為真時整條 OR 被折疊掉，送到 Postgres 的 SQL 連
+		// `order_key` 的條件都沒有；為假時折成單純的 `order_key < @before`。**兩種值各產生一份
+		// SQL，計畫都是 PK 的 index scan。** 那句警告是手寫 SQL（Dapper）時代的，那時 OR 會原樣
+		// 送出去。
+		//
+		// 所以這一行留著的理由變成比較平淡的兩個：讀的人不必知道 EF 的優化器做了什麼，以及
+		// 「兩種輸入產生兩份 SQL」這件事不必發生。**它不再是在防一個已知的效能陷阱。**
 		var cursor = beforeOrderKey == 0 ? long.MaxValue : beforeOrderKey;
 
 		// 多取一筆來判斷 has_more，而不是另外 COUNT 一次：後者要再掃一次同一段範圍。
