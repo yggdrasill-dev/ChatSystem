@@ -12,7 +12,7 @@ var builder = DistributedApplication.CreateBuilder(args);
 //      持久化，連線目錄那些純快取資料也跟著被寫進磁碟。無害，但那是合併的實際成本。
 //   2. **key 前綴從「剛好不撞」變成「必須不撞」。** 目前用掉的（新增前綴前先對一遍這份清單）：
 //      `Conn:`（連線層）、`{rooms}:`（房間層的房間／封鎖／成員／寬限期）、
-//      `Session:`／`Presence:`／`LoginNonce:`／`Profile:`（身分層）。
+//      `Session:`／`Presence:`／`LoginNonce:`／`Profile:`（身分層）、`Chat:rate:`（聊天層限流）。
 //   3. 每個邏輯名稱各自建一個 ConnectionMultiplexer，所以是 N 組連線池連到同一台。量小無所謂。
 //
 // 拆開的判準（也是唯一該拆的理由）：這些**instance 級**的設定各層需不需要不一樣——
@@ -45,12 +45,15 @@ builder.AddProject<Projects.Dispatcher>("dispatcher")
 // 協定層：訂閱 command.inbound，解析 client 命令後分派給各層註冊的 handler
 builder.AddProject<Projects.CommandRouter>("command-router")
 	.WithReference(redis, "connection-directory")
-	// room-store：房間、封鎖名單、成員名單。前兩者在階段 B 會搬去 Postgres，這個名稱屆時只剩
-	// 成員名單——但那不需要動這裡，因為名稱本來就跟實體無關。
+	// room-store：只剩成員名單。房間與封鎖名單已經搬去 Postgres（階段 B），而**那次搬遷沒有動到
+	// 這一行**——邏輯名稱本來就跟實體無關，這是上面那段論證的實際驗證。
 	.WithReference(redis, "room-store")
 	// identity-store：Session（7 天 TTL）、登入 nonce、profile、Presence
 	.WithReference(redis, "identity-store")
-	// chat-db：房間、封鎖名單（階段 B）與訊息（階段 B 的下一步）
+	// chat-ratelimit：聊天層每人每秒的訊息計數（chat-layer.md ADR-7）。計數必須跨這個專案的複本，
+	// 所以它不能是程序內的字典——但它**不需要自己的容器**，一個邏輯名稱就夠了。
+	.WithReference(redis, "chat-ratelimit")
+	// chat-db：房間、封鎖名單與訊息
 	.WithReference(chatDb)
 	.WithReference(messageBus)
 	.WaitFor(redis)

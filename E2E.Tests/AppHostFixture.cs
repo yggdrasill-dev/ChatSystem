@@ -184,6 +184,14 @@ public sealed class AppHostFixture : IAsyncLifetime
 		return new ChatDbProbe(factory);
 	}
 
+	// 直接連上那顆真 Redis。給限流的契約測試用（RedisContractTests）。
+	//
+	// **跟 ConnectChatDbAsync 是同一個角色，但沒有隔離機制**：Redis 沒有 schema，而 FLUSHDB 會把
+	// 正在跑的 app 的 session、連線目錄、成員名單一起清掉。隔離因此只能由 key 本身負責——限流的
+	// key 帶著 unixSecond，所以「每條測試落在不同的秒」就夠了，見 ChatRateLimiterContract。
+	public async Task<IConnectionMultiplexer> ConnectRedisAsync() =>
+		await ConnectionMultiplexer.ConnectAsync(RedisConnectionString).ConfigureAwait(false);
+
 	private static void Configure(
 		IDistributedApplicationBuilder builder,
 		string resourceName,

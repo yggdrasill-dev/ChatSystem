@@ -1,6 +1,6 @@
 ﻿# 聊天層架構設計（Chat Layer）
 
-狀態：**階段 A 已實作**（`Common/Chat/` + `Common/Protos/chat.proto`，行為完整）；**階段 B 只剩限流**——房間、封鎖名單、訊息都已落在 PostgreSQL 上，`IChatRateLimiter` 還是程序內的替身，見 §11
+狀態：**階段 A 與階段 B 都已實作**——房間、封鎖名單、訊息在 PostgreSQL（EF Core），限流在 Redis，「不能上線」原本列的三條全部消失，見 §11
 技術棧：延續 .NET 10 + NATS（Adaptare）+ protobuf；**新增 PostgreSQL 作為正式持久儲存**（見 ADR-4，階段 B）
 範圍：**訊息本身——收發、持久化、歷史查詢**，不含「誰該收到」（房間層）與「怎麼投遞」（連線層）
 依賴：命令的解析與分派由協定層負責（[protocol-layer.md](protocol-layer.md)）；成員名單與 fan-out 名單向房間層取得（[room-layer.md](room-layer.md)）；送出者的顯示名稱向身分層取得（[identity-layer.md](identity-layer.md)）
@@ -43,7 +43,7 @@
 | `IMessageSequencer`（新） | 發號的接縫。目前是無狀態的微秒時鐘實作；房間 actor 若落地，換掉的是註冊那一行（見 ADR-9） |
 | `IChatMessageStore`（新） | **append-only**：一次 `INSERT`、一個 keyset 分頁查詢、一個批次刪除。沒有 read-modify-write，不要求交易 |
 | `ChatRetention`（新） | 保留期限的政策值，`ChatRetentionSweeper` 用它 |
-| `IChatRateLimiter`（新，**實作時才出現**） | 每人每秒幾則。設計稿把限流寫成 handler 裡直接打 Redis，實作時抽成介面——理由見 6.9 |
+| `IChatRateLimiter`（新，**實作時才出現**） | 每人每秒幾則。設計稿把限流寫成 handler 裡直接打 Redis，實作時抽成介面——理由見 6.9。正式實作是 `RedisChatRateLimiter`（固定視窗 + Lua） |
 | `chat.send` / `chat.history` | 本層向 `CommandRouter` 註冊的兩個命令。**兩個都不帶 `room_id`**（見 ADR-5） |
 
 ## 4. 元件關係圖
@@ -510,12 +510,20 @@ public interface IChatRateLimiter
 }
 ```
 
-階段 A 的 `InMemoryChatRateLimiter` **有兩個已知缺陷，都只有換 Redis 才能解**，寫在這裡以免日後被當成疏漏：
+階段 A 的 `InMemoryChatRateLimiter` **有兩個已知缺陷，都只有換 Redis 才能解**，當初寫在這裡以免日後被當成疏漏；**兩條都在階段 B 的 (1) 消失了**，`RedisChatRateLimiter` 各對應一個機制，各對應一條測試：
 
-- **跨複本不成立**。`CommandRouter` 是多複本，記憶體計數器只擋得住打到同一個複本的請求，實際上限是「複本數 × 每秒 10 則」。這正是 ADR-7 一開始就說要用 Redis 的理由。
-- **字典沒有淘汰**，鍵隨「曾經發過訊息的使用者」單調成長。Redis 版本靠 `EXPIRE 2` 自然解決。
+- ~~**跨複本不成立**。`CommandRouter` 是多複本，記憶體計數器只擋得住打到同一個複本的請求，實際上限是「複本數 × 每秒 10 則」。~~ 計數在 Redis 上，兩個實例（＝兩個複本）共用同一個 key。守它的是 `TwoInstances_ShareTheCount_LikeTwoReplicasDo`。
+- ~~**字典沒有淘汰**，鍵隨「曾經發過訊息的使用者」單調成長。~~ key 帶著 `unixSecond` 且 `EXPIRE 2`，過完那一秒就沒有人會再碰它。守它的是 `TheCounter_Expires_SoTheKeyspaceDoesNotGrow`。
 
-實作上刻意用鎖而不是 `ConcurrentDictionary.AddOrUpdate`：後者的 update factory 可能被呼叫多次，計數會在競爭下遺失——而「同一個使用者同時猛送」正是這個限流器要擋的情況，在那個情況下少算等於沒擋。
+（`InMemoryChatRateLimiter` 本身沒有消失，**降級成 `Common.Tests.Chat` 的測試替身**，跟 `InMemoryChatMessageStore` 在 B1 走的是同一條路。兩個缺陷刻意留著不補——它們正是它只能當替身的理由。實作上刻意用鎖而不是 `ConcurrentDictionary.AddOrUpdate`：後者的 update factory 可能被呼叫多次，計數會在競爭下遺失，而「同一個使用者同時猛送」正是這個限流器要擋的情況，在那個情況下少算等於沒擋。）
+
+`RedisChatRateLimiter` 有三個實作才需要決定的細節：
+
+- **固定視窗，不是滑動視窗。** 邊界上最壞情況是 2 倍上限（前一秒的最後一刻與這一秒的第一刻各送滿）。對「防止有人灌爆持久儲存」這個目的來說足夠——ADR-7 要的是量級上的閘門，不是精確節流。滑動視窗要 ZSET + `ZREMRANGEBYSCORE`，每則訊息從一個 `INCR` 變成一組區間操作，換到的精度在這個目的下買不到東西。
+- **`INCR` 與 `EXPIRE` 包在一個 Lua script 裡**，不是兩個 `await`。一次往返是 ADR-7 給的預算；更重要的是拆開之後 `INCR` 成功、`EXPIRE` 沒送出會留下一個**永遠不過期**的 key，那正好是上面第二個缺陷復活。只在 `count == 1` 時 `EXPIRE`（key 的壽命跟它代表的那一秒綁定，續期沒有意義）。script 只碰單一 key，所以 Redis Cluster 上沒有跨 slot 問題。
+- **`unixSecond` 由呼叫端的時鐘算，不是 Redis 的 `TIME`。** 用 `redis.call('TIME')` 可以讓所有複本對齊同一個時鐘，但 key 就得在 script 裡拼出來，而 Cluster 靠 `KEYS` 決定 slot。代價是複本之間的時鐘偏差會讓邊界更模糊一點（毫秒級的偏差對「每秒 10 則」無所謂），**而 `EXPIRE 2` 的第二秒就是買這個保險的**：TTL 只給一秒時，一個稍微落後的複本可能寫到一個剛被回收的 key，計數從 1 重新開始——靜默放寬。
+
+**Redis 連不上時例外往上丟**（fail-closed），跟這個 codebase 裡每一個 Redis 儲存一致。這不是新增的故障點：同一條路徑在到限流之前已經打過 Redis 一次（`GetCurrentRoomAsync` 讀成員名單），Redis 掛掉時根本走不到限流。
 
 ### 6.10 領域型別與 wire 型別同名
 
@@ -618,7 +626,7 @@ public interface IChatRateLimiter
 - **Consequences**：
   - 失去「在 payload 解析之前擋掉」的好處。但那個好處很小：payload 解析是一次小訊息的 protobuf parse，真正的成本是 Postgres 寫入，而那在限流檢查之後。
   - **`IInboundFilter` 因此仍然沒有使用者**，而它預告的最後一個候選已經用掉了。照 `protocol-layer.md` ADR-6 自己設的條件，**現在應該把它移除**——但那是協定層的變更，不由本文件決定，記在 §10。**（已執行：整組移除，`CommandRouter` 連帶失去終止連線的能力。）**
-  - 限流用 Redis 計數（`CommandRouter` 多複本，記憶體計數器不跨節點）：`INCR Chat:rate:{userId}:{unixSecond}` + `EXPIRE 2`。每則訊息多一次 Redis 往返，加上 ADR-3 那次 `HGET`，熱路徑上總共兩次。
+  - 限流用 Redis 計數（`CommandRouter` 多複本，記憶體計數器不跨節點）：`INCR Chat:rate:{userId}:{unixSecond}` + `EXPIRE 2`。每則訊息多一次 Redis 往返，加上 ADR-3 那次 `HGET`，熱路徑上總共兩次。**已實作，而且真的是一次往返**：兩個命令包在一個 Lua script 裡，理由見 6.9。
   - **長度上限在領域模型裡**（`ChatMessageDraft.MaxBodyLength`，6.1），不是靠連線層的 256 KB——那個上限防的是記憶體與 NATS `max_payload`，不是「一則聊天訊息該多長」。
 
 ### ADR-8：業務規則留在 handler，刻意接受毫秒級的 TOCTOU
@@ -699,12 +707,16 @@ public interface IChatRateLimiter
 - **暫定值**（全部未經負載測試）：保留期 90 天、清理批次 5000 列 / 每天一輪、每人每秒 10 則、每則 4096 字元、歷史分頁預設 50 則、**歷史分頁上限 100 則**（最後這個是實作時補的：沒有上限的話 client 可以一次拉完整個房間的歷史，而 ADR-5 已經說明這條查詢會佔住那條連線的順序通道）。
 - **測試分層**（階段 A 的實際狀況）：
   - `Integration.Tests`（`Adaptare.Direct`）蓋掉本層**絕大部分**行為，**11 條、跟房間層一起 0.6 秒跑完**。這是 append-only 帶來的好處：初稿的「seq 連續無洞」與「同房序列化」是 Postgres 交易的性質，in-memory 替身怎麼寫都會通過，等於在測自己寫的替身。現在沒有這個問題。
-    - **而且階段 A 的聊天層在這條路徑上沒有任何替身**：`AddChatStore()` 註冊的本來就是 in-memory 的 store 與限流器，所以那是**完整的正式註冊**。這是巧合帶來的便利，階段 B 之後就會需要替身了。**B1 之後就是「之後」了**——訊息 store 現在跟房間層的兩個一樣要在 `CommandFlowHost` 裡覆寫掉。
+    - **而且階段 A 的聊天層在這條路徑上沒有任何替身**：`AddChatStore()` 註冊的本來就是 in-memory 的 store 與限流器，所以那是**完整的正式註冊**。這是巧合帶來的便利，階段 B 之後就會需要替身了。**B1 之後就是「之後」了**——訊息 store 現在跟房間層的兩個一樣要在 `CommandFlowHost` 裡覆寫掉。**B3 補上第二個替身**（限流），那個巧合到此完全結束。
+    - **兩個替身都是「取代」而不是「覆寫」**：正式的註冊分別由 `AddChatDb()` 與 `AddChatRateLimiting(...)` 提供，而 `CommandFlowHost` 兩個都不呼叫。這是 `AddChatRateLimiting()` 沒有併進 `AddChatCore()` 的實際理由——併進去的話測試只能靠後註冊蓋掉前註冊，變成要讀兩個地方才知道真正生效的是哪一個。
   - **`MonotonicMicrosecondSequencer` 的 CAS 迴圈有併發測試**（`Next_NeverIssuesTheSameKeyTwice_UnderConcurrency`：16 執行緒 × 2000 次，斷言全部相異）。**已用手動變異驗證過它真的擋得住**：把 CAS 迴圈還原成 `m_Last = Math.Max(observed, m_Last + 1)`，只有這一條會紅，同檔案另外四條循序測試全部照過——那正是文件一開始就預期的失效模式。
   - **`ChatMessageStoreContract` 是介面的契約，不是替身的規格**：`PostgresChatMessageStore` 必須通過同一組斷言（keyset 游標嚴格小於、稀疏鍵行為相同、批次刪除回傳實際筆數）。**B1 已兌現**——那一份從具體類別改成抽象基底，in-memory 與 Postgres 各派生一個殼。工廠方法一併從 `NewStore()` 變成 `NewAsync()` 並多回一個 `IRoomStore`：`messages.room_id` 的 FK 讓「房間必須存在」成為這個介面沒被寫下來的前置條件，跟房間層 B2 被 `room_bans` 逼出來的那條一模一樣。
   - ~~仍然需要真 Postgres 的只剩兩件~~ **剩一件。**「主鍵衝突時 `TryAppendAsync` 真的回 `false`」已經在 B1 拿到（契約基底的那一條在 `PostgresChatMessageStoreContractTests` 上跑，並用「`DO NOTHING` 改成 `DO UPDATE`」的變異驗證過只有它會紅）。**還沒做的是 keyset 分頁在稀疏鍵上的實際查詢計畫**——那需要 `EXPLAIN`，斷言的形狀跟其他測試都不一樣（要看 planner 選了 index scan 還是 seq scan），所以留在剩餘清單的 (3)。
   - `E2E.Tests` 加了 3 條，只驗 Direct 蓋不到的三件事（production 接線、wire format 上的 `int64`、跨節點 fan-out）。**其中跨節點那條特別值得**：聊天層自己沒有 fan-out 程式碼，它重用 `RoomBroadcaster`（6.8），所以那條驗的是「重用真的接對了」。
-  - ~~**階段 A 的 E2E 依賴 `CommandRouter` 只有一個複本**（AppHost 沒有對它 `WithReplicas`），因為訊息在該 process 的記憶體裡。一旦開複本，歷史查詢會開始隨機失敗——那不是測試的問題，是階段 B 還沒做。~~ **B1 之後這個限制解除了**：訊息在 Postgres，哪個複本處理歷史查詢都一樣。**但 AppHost 仍然沒有開複本**——開了才算驗過，而那要等限流也跨複本（(1)），否則等於用一個已知會壞的設定去跑 E2E。
+  - ~~**階段 A 的 E2E 依賴 `CommandRouter` 只有一個複本**（AppHost 沒有對它 `WithReplicas`），因為訊息在該 process 的記憶體裡。一旦開複本，歷史查詢會開始隨機失敗——那不是測試的問題，是階段 B 還沒做。~~ **B1 之後這個限制解除了**：訊息在 Postgres，哪個複本處理歷史查詢都一樣。**B3 之後限流也跨複本了，最後一個「已知會壞」的理由消失。** 剩下的每一個多複本相關的性質都已經有答案：訊息與限流共用外部儲存、`RoomGraceSweeper` 與 `ChatRetentionSweeper` 都是 idempotent、`MonotonicMicrosecondSequencer` 撞號有重試（`MaxAppendAttempts`）。**但 AppHost 仍然沒有開複本**，而現在那只是一件還沒做的事，不是被什麼擋著——開複本本身要自己的一次驗證（最需要盯的是 `RoomGraceSweeper` 在多複本下會重複廣播 `room.member.left`，那件事它的註解已經寫明並宣告由 client 容忍，但 E2E 沒有測過那個情況真的無害）。
+  - **限流的契約測試跟 store 同一個形狀**（`ChatRateLimiterContract`，5 條）：in-memory 在 `Common.Tests`、Redis 在 `E2E.Tests`。兩個實作的視窗都由**呼叫端的時鐘**算，所以「視窗換了」推一個假時鐘就能驗，不必真的等一秒。**刻意沒有寫對著 mock `IDatabase` 的白箱測試**——房間層 B2 刪掉的那 14 條就是那種，它們換掉實作就整份作廢；而這個實作真正會錯的地方在 Lua 的行為與 key 的組成，兩者都只有真 Redis 答得出來。
+    - Redis 派生獨有的兩條對應 6.9 那兩個缺陷：`TwoInstances_ShareTheCount_LikeTwoReplicasDo`（跨複本，in-memory 上必定紅，所以進不了契約）與 `TheCounter_Expires_SoTheKeyspaceDoesNotGrow`（TTL）。
+    - **隔離的機制跟 Postgres 那三個殼不同**：Redis 沒有 schema 可以隔離，而 `FLUSHDB` 會把正在跑的 app 的 session 與連線目錄一起清掉。改成讓每條測試的假時鐘落在不同的秒——key 帶著 `unixSecond`，所以不同的秒天生就是不同的 key。
 
 ## 10. 對既有文件的影響
 
@@ -739,12 +751,13 @@ public interface IChatRateLimiter
 
 ### `product-scope.md`
 
-- §5 表格：聊天層狀態從「待設計」→「設計中」→「階段 A 已實作」→ **「階段 B 只剩限流」**。
+- §5 表格：聊天層狀態從「待設計」→「設計中」→「階段 A 已實作」→「階段 B 只剩限流」→ **「階段 A、B 都已實作」**。
+- §4「Redis 的實體數量刻意不當成架構決定」那段的邏輯名稱清單多一個：`chat-ratelimit`（限流）。它跟 `room-store` / `identity-store` 一樣指向同一顆實體 Redis——**這是那個做法第一次被用在「新增一個名稱」而不是「搬走一個名稱」上**，而代價仍然只是 AppHost 那份 key 前綴清單要對一遍（`Chat:rate:`）。
 - §6「訊息記錄要保留多久」已回答：90 天（暫定值）。「要不要分頁查詢」已回答：keyset 分頁。「要不要搜尋」**仍然沒做**。
 - §6「房間本身與封鎖名單需要持久儲存，這跟訊息記錄是同一個儲存決定」已執行：PostgreSQL。**注意該節先前引用的理由（「`seq` 的連續性要求同交易遞增」）隨 ADR-2 一起被推翻，要改回原本那個較弱但正確的理由：同一套 migration／備份策略。**
 - §4「沒有具體規模數字」在本層被引用了三次（ADR-4 選 Postgres、ADR-6 不做分區、ADR-9 暫緩 actor）。
 
-## 11. 實作進度：階段 A 已完成，階段 B 只剩限流
+## 11. 實作進度：階段 A、B 都已完成
 
 刻意切成兩段，理由是**把行為釘死在不需要容器的測試層，之後換 store 只是換一個介面實作，不會回頭改語意**。這只有在 ADR-2 改成 append-only 之後才做得到——初稿那版的核心性質是 Postgres 交易的性質，沒有真資料庫根本驗不了。
 
@@ -758,9 +771,9 @@ public interface IChatRateLimiter
 
 **但它不能上線**，兩個原因都在 §6.9 與 6.7 標記過：訊息不持久化（process 重啟就消失）、限流不跨複本。
 
-### 階段 B（進行中）
+### 階段 B（已完成）
 
-**已完成**：
+依序做完的：
 
 - 房間層兩個 store 的**契約測試**（`room-layer.md` §9）。房間層原本只有對著 mock `IDatabase` 的白箱測試，那些換掉實作就整份作廢——`ChatMessageStoreContract` 讓聊天層的訊息 store 有個接得住的目標，房間層的兩個 store 現在也有了。
 - **ADR-10 的語意變更**（`room-layer.md` §9）。原本規劃跟換儲存同一批，改成先單獨做完——理由與代價見 ADR-10 最後一條。**儲存還是 Redis**，所以下面 (2) 只剩換實作這件事。
@@ -790,9 +803,19 @@ public interface IChatRateLimiter
   - **同三個變異重跑過，落點一條都沒變**（`DO NOTHING` 改成 `DO UPDATE`、拿掉 `messages` 的 CASCADE、把兩個 sender 欄位對調），各自只打紅預期的那一條、其餘 45 條照過。**其中兩個變異的施力點換了地方**：CASCADE 現在要改 migration 檔案（改 `OnModelCreating` 不會動到已產生的 DDL——這件事本身值得知道），欄位對映則改 `HasColumnName`。第三個仍然在 raw SQL 裡，因為那一段沒被 EF 接手。
   - 測試數不變：Common.Tests 165、Integration.Tests 31、E2E 46。
 
-剩下的：
+- **限流遷到 Redis（B3，原清單的 (1)）**：`RedisChatRateLimiter`（Lua 包住 `INCR` + `EXPIRE 2`），聊天層拿自己的邏輯名稱 `chat-ratelimit` 指向同一顆實體 Redis，**沒有新容器**。三個實作決定與它們的理由記在 6.9。
+  - **預估說「`AddChatCore()` 換一行」，實際上是多一個方法**：`AddChatRateLimiting(redisServiceKey)`。合在 `AddChatCore()` 裡會逼 `Integration.Tests` 用「後註冊蓋掉前註冊」來換替身，而那個 host 的其他五個替身全部是**取代**（正式註冊的方法它根本不呼叫）。多一行換到的是「聊天層要一顆 Redis」在 `Program.cs` 上直接看得見，跟房間層橫跨兩個儲存被拆成兩行是同一個決定。
+  - **契約測試先寫，實作後補**（跟房間層 B0 一樣）：`ChatRateLimiterContract` 5 條，in-memory 與 Redis 各派生一個殼。`InMemoryChatRateLimiter` 因此降級成 `Common.Tests.Chat` 的測試替身，跟 B1 的 `InMemoryChatMessageStore` 同一條路。
+  - **Redis 沒有 schema 可以隔離**，這是這一步唯一需要新機制的地方：Postgres 的契約測試每條前 `TRUNCATE`，Redis 不能 `FLUSHDB`（會清掉同一組 E2E 正在用的 session 與連線目錄）。改成讓每條測試的假時鐘落在不同的秒——key 帶著 `unixSecond`，不同的秒天生就是不同的 key。**測試的隔離機制與被測的性質是同一個機制**，這件事在下面的變異驗證裡付了代價。
+  - **變異驗證四個，其中兩個不乾淨，而不乾淨的方式值得記**：
+    1. 拿掉 Lua 裡的 `EXPIRE` → 只有 `TheCounter_Expires_SoTheKeyspaceDoesNotGrow` 紅。乾淨。
+    2. key 加上每個實例自己的前綴（模擬「計數不共用」）→ 紅**兩條**：預期的 `TwoInstances_ShareTheCount_LikeTwoReplicasDo`，以及 TTL 那條——因為它自己拼了 key 字串去問 TTL。那個耦合是刻意的（跟 `SnapshotConnectionsAsync` 對 `Conn:` 前綴的處境相同，註解裡有寫），代價就是任何改 key 的變異都會多打紅它一條。
+    3. key 拿掉 `unixSecond` → 紅**五條**。這個變異**沒有診斷價值**：它同時拆掉了測試之間的隔離（所有測試共用 `Chat:rate:alice`，而它們在同一秒內循序跑完），所以紅掉的大多是汙染而不是被驗的性質。**「固定視窗真的會換」這條性質在 Redis 派生上沒辦法單獨用變異驗證**，因為視窗就是隔離。
+    4. 所以第四個變異下在 in-memory 那一側：拿掉 `window.Count = 0` → 只有 `Resets_WhenTheWindowRolls` 紅（170 條裡的 1 條）。**同一條斷言在兩個實作上由兩個完全不同的機制滿足**，其中一個驗得起來就夠。
+  - 測試數：Common.Tests 170（+5）、Integration.Tests 31（不變）、E2E 53（+7：5 條契約 + 2 條 Redis 獨有）。
 
-1. **`RedisChatRateLimiter`**（`INCR` + `EXPIRE 2`）。聊天層拿自己的邏輯名稱（`chat-ratelimit`），AppHost 把它指到同一顆實體 Redis，**不需要新容器**。要做的只有 `AddChatCore()` 換一行實作、`CommandRouter/Program.cs` 加一個 `AddKeyedRedisClient`、AppHost 加一個 `WithReference`。記得對一遍 AppHost 那份 key 前綴清單。不碰 schema，順序上完全獨立。
-2. **keyset 分頁在稀疏鍵上的實際查詢計畫**（§9 測試分層的最後一條；同一節列的另一件已經在 B1 拿到）。要用 `EXPLAIN` 斷言 planner 走的是主鍵的 index scan 而不是 seq scan——**這條的價值在 B1 之後變高了**：`GetPageAsync` 的游標翻譯（上面的決定 1）正是為了不讓 planner 掉進 seq scan，而那個決定目前沒有任何測試守著，改回 `OR` 寫法所有測試都會照過。基礎設施已經就位，`ChatDbProbe` 就是為這種測試開的。
+剩下的（**跟能不能上線無關**，是一條測試強度的欠帳）：
 
-**目前的中間態**：~~刪房會留下孤兒訊息~~ 已消失（CASCADE 在 B1 閉合），~~訊息不持久化~~ 也消失。**「不能上線」現在只剩一條：限流不跨複本**，也就是上面的 (1)。
+1. **keyset 分頁在稀疏鍵上的實際查詢計畫**（§9 測試分層的最後一條；同一節列的另一件已經在 B1 拿到）。要用 `EXPLAIN` 斷言 planner 走的是主鍵的 index scan 而不是 seq scan——**這條的價值在 B1 之後變高了**：`GetPageAsync` 的游標翻譯（B1 的決定 1）正是為了不讓 planner 掉進 seq scan，而那個決定目前沒有任何測試守著，改回 `OR` 寫法所有測試都會照過。基礎設施已經就位，`ChatDbProbe` 就是為這種測試開的。
+
+**「不能上線」的三條全部消失**：~~刪房會留下孤兒訊息~~（CASCADE 在 B1 閉合）、~~訊息不持久化~~（B1）、~~限流不跨複本~~（B3）。**還沒做但已經沒有東西擋著的是 `CommandRouter` 開複本**，見 §9 測試分層的最後一條。

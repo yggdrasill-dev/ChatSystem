@@ -30,12 +30,13 @@
     <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" Version="10.0.8" />
   </ItemGroup>
 
-  <!-- Postgres 的契約測試繼承自 Common.Tests 的基底類別，那裡面是普通的 [Fact]（in-memory 版
-       必須永遠跑），派生類別改不了它們的屬性；而 xunit v2 沒有動態 skip（Assert.Skip 是 v3 的
-       功能）。所以這一份的閘門只能是編譯期的——關著的時候整份不編進去，而不是編進去卻假裝綠。
+  <!-- 契約測試繼承自 Common.Tests 的基底類別，那裡面是普通的 [Fact]（in-memory 版必須永遠跑），
+       派生類別改不了它們的屬性；而 xunit v2 沒有動態 skip（Assert.Skip 是 v3 的功能）。所以這
+       兩份的閘門只能是編譯期的——關著的時候整份不編進去，而不是編進去卻假裝綠。
        同一個環境變數，兩種機制，理由寫在 PostgresContractTests.cs。 -->
   <ItemGroup Condition="'$(CHATSYSTEM_E2E)' != '1'">
     <Compile Remove="PostgresContractTests.cs" />
+    <Compile Remove="RedisContractTests.cs" />
   </ItemGroup>
 
   <ItemGroup>

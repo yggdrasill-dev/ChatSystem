@@ -42,6 +42,8 @@ var builder = Host.CreateApplicationBuilder(args);
 		ServiceLifetime.Singleton);
 	builder.AddKeyedRedisClient("room-store");
 	builder.AddKeyedRedisClient("identity-store");
+	// chat-ratelimit：每人每秒的訊息計數（ADR-7）。又一個邏輯名稱指向同一顆實體 Redis。
+	builder.AddKeyedRedisClient("chat-ratelimit");
 	// 房間層的兩半分成兩行，因為它們真的是兩個儲存：AddChatDb() 給 Postgres 上的房間、封鎖名單
 	// 與訊息（三張表由兩層共用），AddRoomMembership() 給 Redis 上的成員名單。
 	builder.Services.AddChatDb();
@@ -54,9 +56,11 @@ var builder = Host.CreateApplicationBuilder(args);
 	// （chat-layer.md 6.8），以及身分層的 IUserProfileStore 讀顯示名稱快照（ADR-3），
 	// 所以必須排在上面那幾行之後。
 	//
-	// 訊息的儲存已經由上面的 AddChatDb() 註冊（跟房間資料同一個 chat-db），這裡只剩程序內的
-	// 發號與限流。**還差限流不跨複本**，見 AddChatCore() 的說明。
+	// 訊息的儲存已經由上面的 AddChatDb() 註冊（跟房間資料同一個 chat-db），所以這裡是兩行：
+	// AddChatCore() 是程序內的設定與發號，AddChatRateLimiting() 是 Redis 上的計數。**分兩行是
+	// 刻意的**——聊天層要一顆 Redis 這件事就跟房間層橫跨兩個儲存一樣，值得在這裡直接看得見。
 	builder.Services.AddChatCore();
+	builder.Services.AddChatRateLimiting("chat-ratelimit");
 	builder.Services.AddChatPackets();
 	builder.Services.AddChatRetention();
 

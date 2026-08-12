@@ -38,7 +38,7 @@
 
 連線層（Gateway/Dispatcher）已經照可水平擴展的方向設計——多 Gateway 節點、`ConnectionDirectory`（Redis）做跨節點連線定址、Dispatcher 無狀態可任意增減複本。但再往上（訊息記錄要用什麼儲存、房間人數上限、房間後台查詢效能）這類決策，沒有具體規模數字就只能先抓保守預設值，之後再依實測調整——跟 [connection-layer.md](architecture/connection-layer.md) 第 9 節那兩個「未經驗證的暫定值」是同一種做法。
 
-**Redis 的實體數量刻意不當成架構決定。** 各層只認邏輯名稱（DI 的 service key），AppHost 才把名稱綁到實體資源，現在四個名稱都指向同一顆。沒有規模數字的情況下拆成多顆是在猜，而這個做法讓「什麼時候拆、怎麼拆」可以等到有實測需求時再回答——判準是 instance 級的設定需不需要分歧（`maxmemory-policy`、persistence、慢指令的故障範圍），不是分層。詳見 `ChatSystem.AppHost/AppHost.cs` 的註解與 [chat-layer.md](architecture/chat-layer.md) 第 9 節。
+**Redis 的實體數量刻意不當成架構決定。** 各層只認邏輯名稱（DI 的 service key），AppHost 才把名稱綁到實體資源，現在四個名稱都指向同一顆：`connection-directory`、`room-store`、`identity-store`、`chat-ratelimit`。沒有規模數字的情況下拆成多顆是在猜，而這個做法讓「什麼時候拆、怎麼拆」可以等到有實測需求時再回答——判準是 instance 級的設定需不需要分歧（`maxmemory-policy`、persistence、慢指令的故障範圍），不是分層。詳見 `ChatSystem.AppHost/AppHost.cs` 的註解與 [chat-layer.md](architecture/chat-layer.md) 第 9 節。
 
 ## 5. 分層對照
 
@@ -47,7 +47,7 @@
 | 連線層（Gateway/Dispatcher） | 一條 WebSocket 連線怎麼被持有、定址、投遞 | 已完成核心設計與實作，收尾中 |
 | 身分/使用者管理層 | Google OAuth 登入、Session、ConnectionId 對應使用者身分、重複登入 Supersede 規則 | **已實作**（含登入/登出 endpoint），只剩 Google client id 這個外部前置作業，見 [identity-layer.md](architecture/identity-layer.md) |
 | 房間層 | 建立/加入房間、密碼房、房間成員管理、房間後台 | **已實作**，房間與封鎖名單已在 PostgreSQL、成員名單留 Redis，見 [room-layer.md](architecture/room-layer.md) |
-| 聊天層 | 訊息收發、訊息歷史記錄 | **階段 A 已實作**（行為完整），見 [chat-layer.md](architecture/chat-layer.md) §11。階段 B 只剩限流：房間、封鎖名單、訊息都已在 PostgreSQL 上，`IChatRateLimiter` 還不跨複本 |
+| 聊天層 | 訊息收發、訊息歷史記錄 | **已實作**（階段 A、B 都完成），見 [chat-layer.md](architecture/chat-layer.md) §11。訊息在 PostgreSQL（EF Core）、限流在 Redis 且跨複本 |
 | WebBff | 前端的 BFF：出前端靜態檔 + 登入/登出 endpoint（見 [identity-layer.md](architecture/identity-layer.md) ADR-10） | 已實作 |
 | webClient | Angular 前端，重做（沿用 `main` 的資料夾名） | 待實作 |
 

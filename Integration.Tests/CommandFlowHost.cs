@@ -155,15 +155,20 @@ internal sealed class CommandFlowHost : IAsyncDisposable
 		builder.Services.AddSingleton<IChatMessageStore, InMemoryChatMessageStore>();
 		builder.Services.AddSingleton<IRoomMembership, InMemoryRoomMembership>();
 		builder.Services.AddSingleton<IUserProfileStore, InMemoryUserProfileStore>();
+		// 限流也是替身了：正式路徑上它由 AddChatRateLimiting("chat-ratelimit") 註冊 Redis 版，
+		// 而這個 host 跟其他 store 一樣**不呼叫那個方法**——所以這裡仍然是取代、不是覆寫。
+		builder.Services.AddSingleton<IChatRateLimiter>(
+			sp => new InMemoryChatRateLimiter(sp.GetRequiredService<TimeProvider>(), ChatRateLimit.Default));
 
 		builder.Services.AddOutboundGateway();
 		builder.Services.AddInboundBridge();
 		builder.Services.AddPacketRegistry();
 		builder.Services.AddRoomPackets();
 
-		// 聊天層程序內的部分（發號與限流）是真的註冊路徑；訊息 store 的替身跟房間層的兩個一起
-		// 註冊在上面。**B1 之前這裡連替身都不需要**——AddChatStore() 那時註冊的本來就是 in-memory
-		// 的實作，所以整個聊天層是完整的正式註冊，那是個巧合，訊息搬進 Postgres 就結束了。
+		// 聊天層剩下的部分（設定與發號）是真的註冊路徑；訊息 store 與限流的替身跟房間層的兩個
+		// 一起註冊在上面。**B1 之前這裡連替身都不需要**——AddChatStore() 那時註冊的本來就是
+		// in-memory 的實作，所以整個聊天層是完整的正式註冊，那是個巧合，訊息搬進 Postgres
+		// 就結束了一半，限流換 Redis 之後另一半也結束了。
 		builder.Services.AddChatCore();
 		builder.Services.AddChatPackets();
 

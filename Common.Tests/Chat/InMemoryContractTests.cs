@@ -15,3 +15,19 @@ public sealed class InMemoryChatMessageStoreContractTests : ChatMessageStoreCont
 		ValueTask.FromResult<(IChatMessageStore, IRoomStore)>(
 			(new InMemoryChatMessageStore(), new InMemoryRoomStore()));
 }
+
+// 同一組限流的斷言在 E2E.Tests 對著真 Redis 再跑一次（RedisChatRateLimiterContractTests）。
+//
+// **「計數跨複本」那一條不在契約裡**：兩個 InMemoryChatRateLimiter 是兩個字典，那條斷言在這邊
+// 必定紅——而它正是換 Redis 的全部理由，所以它是 Redis 派生那邊獨有的一條。跟「刪房把訊息一起
+// 帶走」進不了 ChatMessageStoreContract 是同一個道理。
+public sealed class InMemoryChatRateLimiterContractTests : ChatRateLimiterContract
+{
+	protected override ValueTask<(IChatRateLimiter Limiter, AdvanceableClock Clock)> NewAsync(ChatRateLimit limit)
+	{
+		var clock = NewClock();
+
+		return ValueTask.FromResult<(IChatRateLimiter, AdvanceableClock)>(
+			(new InMemoryChatRateLimiter(clock, limit), clock));
+	}
+}
